@@ -84,7 +84,7 @@ export function SettingsView({ status, onBack, onRefresh }: SettingsViewProps) {
     setIsCustom(false);
     if (isProd) {
       setDevMode(false);
-      await saveSchedulerSetting({ devMode: false, devIntervalSeconds: 45 * 60, resetCooldown: true });
+      await saveSchedulerSetting({ devMode: false, devIntervalSeconds: 50 * 60, resetCooldown: true });
     } else {
       setDevMode(true);
       setDevIntervalSeconds(sec);
@@ -185,7 +185,7 @@ export function SettingsView({ status, onBack, onRefresh }: SettingsViewProps) {
               { label: "30s", sec: 30 },
               { label: "60s", sec: 60 },
               { label: "2m", sec: 120 },
-              { label: "Prod (45m)", sec: 45 * 60, isProd: true },
+              { label: "Prod (50m)", sec: 50 * 60, isProd: true },
             ].map((preset) => {
               const isSelected = !isCustom && (preset.isProd ? !devMode : devMode && devIntervalSeconds === preset.sec);
               return (
@@ -321,7 +321,7 @@ export function SettingsView({ status, onBack, onRefresh }: SettingsViewProps) {
                 </span>
               </div>
               <span style={{ fontSize: 9.5, color: "#a59cb6" }}>
-                Cadence: {devMode ? `${devIntervalSeconds}s` : "45m"}
+                Cadence: {devMode ? `${devIntervalSeconds}s` : "50m"}
               </span>
             </div>
             <p style={{ margin: "5px 0 0", fontSize: 9.5, color: "#9ca3af", lineHeight: 1.35 }}>

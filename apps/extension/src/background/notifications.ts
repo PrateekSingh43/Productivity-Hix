@@ -35,7 +35,7 @@ export async function showNativeCheckInNotification(options: {
       iconUrl,
       title,
       message,
-      buttons: [{ title: options.isAwayReview ? "Provide reason" : "Reflect" }, { title: "Later" }],
+      buttons: [{ title: "Later" }],
       priority: 2,
       requireInteraction: true,
     };
@@ -145,8 +145,6 @@ if (typeof chrome !== "undefined" && chrome.notifications?.onButtonClicked) {
   chrome.notifications.onButtonClicked.addListener((notificationId, buttonIndex) => {
     if (notificationId.startsWith(CHECKIN_NOTIFICATION_PREFIX) || notificationId === LEGACY_NOTIFICATION_ID) {
       if (buttonIndex === 0) {
-        handleReflectAction(notificationId);
-      } else {
         handleLaterAction(notificationId);
       }
     }

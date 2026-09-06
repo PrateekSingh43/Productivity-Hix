@@ -98,7 +98,7 @@ export class CheckInScheduler {
   }
 
   getRemainingSeconds(): number {
-    const requiredActiveSeconds = this.state.devMode ? Math.max(5, this.state.devIntervalSeconds) : 45 * 60;
+    const requiredActiveSeconds = this.state.devMode ? Math.max(5, this.state.devIntervalSeconds) : 50 * 60;
     return Math.max(0, requiredActiveSeconds - this.state.activeSecondsInWindow);
   }
 
@@ -195,7 +195,7 @@ export class CheckInScheduler {
     // Meaningful Activity threshold
     const requiredActiveSeconds = this.state.devMode
       ? Math.max(5, this.state.devIntervalSeconds)
-      : 45 * 60; // 45 minutes of meaningful activity in production
+      : 50 * 60; // 50 minutes of meaningful activity in production
 
     if (this.state.activeSecondsInWindow >= requiredActiveSeconds) {
       return { eligible: true, reason: "Active activity threshold reached" };
@@ -264,7 +264,7 @@ export class CheckInScheduler {
       });
 
       const now = Date.now();
-      const intervalSec = this.state.devMode ? this.state.devIntervalSeconds || 10 : 45 * 60;
+      const intervalSec = this.state.devMode ? this.state.devIntervalSeconds || 10 : 50 * 60;
       const cooldownMs = this.state.devMode ? 2 * 1000 : Math.min(15 * 60 * 1000, intervalSec * 1000);
       
       this.state.checkInCooldownUntil = new Date(now + cooldownMs).toISOString();
@@ -304,7 +304,7 @@ export class CheckInScheduler {
 
     const cooldownMs = this.state.devMode ? 5 * 1000 : 30 * 60 * 1000;
     this.state.checkInCooldownUntil = new Date(now + cooldownMs).toISOString();
-    const intervalSec = this.state.devMode ? this.state.devIntervalSeconds || 10 : 45 * 60;
+    const intervalSec = this.state.devMode ? this.state.devIntervalSeconds || 10 : 50 * 60;
     this.state.nextTriggerAt = now + intervalSec * 1000;
 
     await this.saveState();

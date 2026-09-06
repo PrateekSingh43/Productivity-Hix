@@ -32,10 +32,11 @@ function startSchedulerTicker() {
     try {
       const state = checkInScheduler.getState();
       if (state.checkInsPaused) return;
-      const now = Date.now();
-      if (state.nextTriggerAt && now >= state.nextTriggerAt) {
-        await checkInScheduler.triggerNotificationIfEligible();
-      }
+      
+      // We purposefully DO NOT trigger the notification here anymore.
+      // We only evaluate eligibility passively. The actual notification
+      // will be triggered by `notifyUserStoppedWorking()` when the user 
+      // naturally stops working (e.g. idle or focus loss).
     } catch (err) {
       console.warn("[SCHEDULER TICKER] Error checking eligibility:", err);
     }
@@ -109,6 +110,12 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 // Window focus changed
 chrome.windows.onFocusChanged.addListener(async (windowId) => {
   await recordTabEvent(tracker.handleWindowFocusChanged(windowId));
+  
+  if (windowId === chrome.windows.WINDOW_ID_NONE) {
+    // User clicked away from the browser (transition to STOPPED)
+    console.log("[MAIN] User switched away from browser, checking eligibility...");
+    await checkInScheduler.notifyUserStoppedWorking();
+  }
 });
 
 // Idle state changed
@@ -118,6 +125,12 @@ chrome.idle.onStateChanged.addListener(async (state) => {
   const idleEvent = normalizeBrowserIdleEvent(settings.installationId, state === "active" ? "active" : "idle");
   await queue.enqueue([idleEvent]);
   triggerDebouncedFlush();
+
+  if (state !== "active") {
+    // User went idle or locked screen (transition to STOPPED)
+    console.log("[MAIN] User went idle, checking eligibility...");
+    await checkInScheduler.notifyUserStoppedWorking();
+  }
 });
 
 // MV3 Alarms for queue flushing, long-session heartbeat, and hourly reflection evaluation
@@ -132,7 +145,9 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   } else if (alarm.name === "productivehix-heartbeat") {
     void recordTabEvent(tracker.handlePeriodicHeartbeat());
   } else if (alarm.name === "productivehix-checkin-eval" || alarm.name === "productivehix-checkin-timer") {
-    void checkInScheduler.triggerNotificationIfEligible();
+    // Passively evaluate eligibility. If eligible, it arms the system
+    // to pop the notification at the next natural stopping point.
+    checkInScheduler.evaluateEligibility();
   }
 });
 

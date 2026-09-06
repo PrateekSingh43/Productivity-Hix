@@ -6,6 +6,7 @@ export default defineConfig((options: Options) => ({
   entry: {
     background: "src/background/main.ts",
     popup: "src/popup/main.tsx",
+    content: "src/content/activity-monitor.ts",
   },
   clean: true,
   format: ["esm"],
