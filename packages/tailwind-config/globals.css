@@ -1,0 +1,66 @@
+@import "tailwindcss";
+
+:root {
+  --background-default: #09090b;
+  --background-inset: #0d0d10;
+  --background-secondary: #131318;
+  --background-tertiary: #1a1a22;
+  --border-subtle: #23232d;
+  --border-default: #30303d;
+  --border-strong: #424250;
+  --text-primary: #f7f7fb;
+  --text-secondary: #c0bfca;
+  --text-tertiary: #858493;
+  --accent-default: #8b7cf6;
+  --accent-hover: #a69afc;
+  --accent-subtle: #8b7cf61f;
+  --success: #52d397;
+  --success-bg-subtle: #52d39719;
+  --warning: #f6c76c;
+  --warning-bg-subtle: #f6c76c19;
+  --error: #fb7185;
+  --error-bg-subtle: #fb718519;
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+}
+
+@theme inline {
+  --color-bg-default: var(--background-default);
+  --color-bg-inset: var(--background-inset);
+  --color-bg-secondary: var(--background-secondary);
+  --color-bg-tertiary: var(--background-tertiary);
+  --color-border-subtle: var(--border-subtle);
+  --color-border-default: var(--border-default);
+  --color-border-strong: var(--border-strong);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-tertiary: var(--text-tertiary);
+  --color-accent-default: var(--accent-default);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-subtle: var(--accent-subtle);
+  --color-success: var(--success);
+  --color-success-bg-subtle: var(--success-bg-subtle);
+  --color-warning: var(--warning);
+  --color-warning-bg-subtle: var(--warning-bg-subtle);
+  --color-error: var(--error);
+  --color-error-bg-subtle: var(--error-bg-subtle);
+}
+
+@layer base {
+  html { background: var(--background-default); }
+  body {
+    min-height: 100vh;
+    background: var(--background-default);
+    color: var(--text-primary);
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  button, a, input, textarea, select { -webkit-tap-highlight-color: transparent; }
+  button:not(:disabled), a { transition: color 150ms ease, background-color 150ms ease, border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease; }
+  button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible {
+    outline: 2px solid var(--accent-default);
+    outline-offset: 2px;
+  }
+}

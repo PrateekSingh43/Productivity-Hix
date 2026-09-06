@@ -1,0 +1,43 @@
+{
+  "name": "@repo/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "pnpm db:generate && tsup",
+    "dev": "tsc --watch",
+    "db:generate": "dotenv -e .env -- prisma generate",
+    "db:validate": "dotenv -e .env -- prisma validate",
+    "db:push": "dotenv -e .env -- prisma db push",
+    "db:migrate": "dotenv -e .env -- prisma migrate dev",
+    "lint": "eslint . --max-warnings 0",
+    "typecheck": "tsc",
+    "check-types": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "^7.4.0",
+    "@prisma/client": "7.4.0",
+    "dotenv": "^16.4.5",
+    "pg": "^8.18.0"
+  },
+  "devDependencies": {
+    "@repo/eslint-config": "workspace:*",
+    "@repo/typescript-config": "workspace:*",
+    "@types/node": "^20.19.30",
+    "@types/pg": "^8.16.0",
+    "dotenv-cli": "^7.4.2",
+    "eslint": "^10.9.1",
+    "prisma": "7.4.0",
+    "tsup": "8.5.0",
+    "typescript": "5.9.2"
+  }
+}

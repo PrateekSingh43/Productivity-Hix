@@ -1,0 +1,35 @@
+{
+  "name": "@repo/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "productivehix-desktop": "./dist/main.js"
+  },
+  "scripts": {
+    "build": "tsup",
+    "clean": "rimraf dist",
+    "start": "tsx src/main.ts",
+    "dev": "tsx watch src/main.ts",
+    "check-types": "tsc --noEmit",
+    "lint": "eslint . --max-warnings 0",
+    "test": "tsx --test src/**/*.test.ts"
+  },
+  "dependencies": {
+    "@repo/activitywatch": "workspace:*",
+    "@repo/telemetry": "workspace:*",
+    "@repo/types": "workspace:*",
+    "@repo/validation": "workspace:*",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@repo/eslint-config": "workspace:*",
+    "@repo/typescript-config": "workspace:*",
+    "@types/node": "24.3.0",
+    "eslint": "10.9.1",
+    "rimraf": "6.0.1",
+    "tsup": "8.5.0",
+    "tsx": "4.20.5",
+    "typescript": "5.9.2"
+  }
+}

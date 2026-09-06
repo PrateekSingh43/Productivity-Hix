@@ -1,0 +1,35 @@
+{
+  "name": "@repo/extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsup",
+    "clean": "rimraf dist",
+    "check-types": "tsc --noEmit",
+    "lint": "eslint . --max-warnings 0",
+    "test": "tsx --test src/**/*.test.ts"
+  },
+  "dependencies": {
+    "@repo/telemetry": "workspace:*",
+    "@repo/types": "workspace:*",
+    "@repo/validation": "workspace:*",
+    "@tanstack/react-query": "^5.102.8",
+    "lucide-react": "^1.40.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@repo/eslint-config": "workspace:*",
+    "@repo/typescript-config": "workspace:*",
+    "@types/chrome": "^0.0.308",
+    "@types/node": "24.3.0",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.5",
+    "eslint": "10.9.1",
+    "rimraf": "6.0.1",
+    "tsup": "8.5.0",
+    "tsx": "4.20.5",
+    "typescript": "5.9.2"
+  }
+}

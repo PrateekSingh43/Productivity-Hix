@@ -1,0 +1,258 @@
+
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum TaskStatus {
+  todo
+  in_progress
+  done
+  cancelled
+}
+
+model User {
+  id                  String                 @id @default(uuid()) @db.Uuid
+  displayName         String?                @map("display_name")
+  avatarUrl           String?                @map("avatar_url")
+  createdAt           DateTime               @default(now()) @map("created_at")
+  updatedAt           DateTime               @updatedAt @map("updated_at")
+  accounts            OAuthAccount[]
+  tasks               Task[]
+  workSessions        WorkSession[]
+  checkIns            CheckIn[]
+  learningAssessments LearningAssessment[]
+  activitySyncStates  ActivitySyncState[]
+  normalizedActivity  NormalizedActivity[]
+  desktopDevices      DesktopDevice[]
+  browserInstallations BrowserInstallation[]
+  deviceAuthorizations DeviceAuthorization[]
+  deviceTokens        DeviceToken[]
+
+  @@map("users")
+}
+
+model OAuthAccount {
+  id              String   @id @default(uuid()) @db.Uuid
+  userId          String   @map("user_id") @db.Uuid
+  provider        String
+  providerSubject String   @map("provider_subject")
+  createdAt       DateTime @default(now()) @map("created_at")
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerSubject])
+  @@index([userId])
+  @@map("oauth_accounts")
+}
+
+model Task {
+  id                     String        @id @default(uuid()) @db.Uuid
+  userId                 String        @map("user_id") @db.Uuid
+  title                  String
+  description            String?
+  status                 TaskStatus    @default(todo)
+  priority               String        @default("medium")
+  plannedDurationMinutes Int?          @default(30) @map("planned_duration_minutes")
+  dueAt                  DateTime?     @map("due_at")
+  completedAt            DateTime?     @map("completed_at")
+  createdAt              DateTime      @default(now()) @map("created_at")
+  updatedAt              DateTime      @updatedAt @map("updated_at")
+  user                   User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessions               WorkSession[]
+  checkIns               CheckIn[]
+
+  @@index([userId, status])
+  @@map("tasks")
+}
+
+model WorkSession {
+  id              String    @id @default(uuid()) @db.Uuid
+  userId          String    @map("user_id") @db.Uuid
+  taskId          String?   @map("task_id") @db.Uuid
+  startedAt       DateTime  @default(now()) @map("started_at")
+  endedAt         DateTime? @map("ended_at")
+  durationSeconds  Int?      @map("duration_seconds")
+  source          String    @default("manual")
+  notes           String?
+  createdAt       DateTime  @default(now()) @map("created_at")
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  task            Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  checkIns        CheckIn[]
+
+  @@index([userId, startedAt])
+  @@map("work_sessions")
+}
+
+model CheckIn {
+  id                 String       @id @default(uuid()) @db.Uuid
+  userId             String       @map("user_id") @db.Uuid
+  workSessionId      String?      @map("work_session_id") @db.Uuid
+  taskId             String?      @map("task_id") @db.Uuid
+  windowStart        DateTime?    @map("window_start")
+  windowEnd          DateTime?    @map("window_end")
+  activityAssessment String?      @map("activity_assessment")
+  alignment          String?
+  reasons            String[]     @default([])
+  state              String?
+  energy             String?
+  focus              String?
+  note               String?      @db.VarChar(350)
+  questionVersion    String       @default("v1") @map("question_version")
+  source             String       @default("extension_hourly")
+  deeperAnswers      Json?        @map("deeper_answers")
+  eventType          String       @default("PERIODIC") @map("event_type")
+  intent             String?      @default("Hourly reflection")
+  progress           Boolean?     @default(true)
+  blocker            String?
+  productive         Boolean?
+  outcome            String?
+  createdAt          DateTime     @default(now()) @map("created_at")
+  user               User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workSession        WorkSession? @relation(fields: [workSessionId], references: [id], onDelete: SetNull)
+  task               Task?        @relation(fields: [taskId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([userId, windowStart])
+  @@map("check_ins")
+}
+
+model LearningAssessment {
+  id          String             @id @default(uuid()) @db.Uuid
+  userId      String             @map("user_id") @db.Uuid
+  topic       String
+  scheduledAt DateTime           @map("scheduled_at")
+  completedAt DateTime?          @map("completed_at")
+  score       Float?
+  createdAt   DateTime           @default(now()) @map("created_at")
+  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  questions   LearningQuestion[]
+
+  @@index([userId, scheduledAt])
+  @@map("learning_assessments")
+}
+
+model LearningQuestion {
+  id             String             @id @default(uuid()) @db.Uuid
+  assessmentId   String             @map("assessment_id") @db.Uuid
+  prompt         String
+  expectedAnswer String?            @map("expected_answer")
+  createdAt      DateTime           @default(now()) @map("created_at")
+  assessment     LearningAssessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  answer         LearningAnswer?
+
+  @@index([assessmentId])
+  @@map("learning_questions")
+}
+
+model LearningAnswer {
+  id         String          @id @default(uuid()) @db.Uuid
+  questionId String          @unique @map("question_id") @db.Uuid
+  answer     String
+  score      Float?
+  answeredAt DateTime        @default(now()) @map("answered_at")
+  question   LearningQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@map("learning_answers")
+}
+
+model ActivitySyncState {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  bucketId  String    @map("bucket_id")
+  cursorAt  DateTime? @map("cursor_at")
+  syncedAt  DateTime  @default(now()) @map("synced_at")
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, bucketId])
+  @@map("activity_sync_states")
+}
+
+model NormalizedActivity {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  externalId String   @map("external_id")
+  bucketId   String   @map("bucket_id")
+  source     String
+  watcher    String
+  timestamp  DateTime
+  duration   Float
+  data       Json
+  createdAt  DateTime @default(now()) @map("created_at")
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, externalId])
+  @@index([userId, timestamp])
+  @@map("normalized_activity")
+}
+
+model DesktopDevice {
+  id             String                @id @default(uuid()) @db.Uuid
+  userId         String                @map("user_id") @db.Uuid
+  name           String
+  platform       String                @default("windows")
+  osVersion      String?               @map("os_version")
+  hostname       String?
+  lastActiveAt   DateTime              @default(now()) @map("last_active_at")
+  createdAt      DateTime              @default(now()) @map("created_at")
+  user           User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokens         DeviceToken[]
+  authorizations DeviceAuthorization[]
+
+  @@index([userId])
+  @@map("desktop_devices")
+}
+
+model BrowserInstallation {
+  id               String   @id @default(uuid()) @db.Uuid
+  userId           String   @map("user_id") @db.Uuid
+  browser          String   @default("chrome")
+  extensionVersion String?  @map("extension_version")
+  userAgent        String?  @map("user_agent")
+  lastActiveAt     DateTime @default(now()) @map("last_active_at")
+  createdAt        DateTime @default(now()) @map("created_at")
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("browser_installations")
+}
+
+model DeviceAuthorization {
+  id         String         @id @default(uuid()) @db.Uuid
+  deviceCode String         @unique @map("device_code")
+  userCode   String         @unique @map("user_code")
+  status     String         @default("pending")
+  userId     String?        @map("user_id") @db.Uuid
+  deviceId   String?        @map("device_id") @db.Uuid
+  clientName String?        @map("client_name")
+  expiresAt  DateTime       @map("expires_at")
+  createdAt  DateTime       @default(now()) @map("created_at")
+  user       User?          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device     DesktopDevice? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+
+  @@index([deviceCode])
+  @@index([userCode])
+  @@map("device_authorizations")
+}
+
+model DeviceToken {
+  id         String         @id @default(uuid()) @db.Uuid
+  tokenHash  String         @unique @map("token_hash")
+  userId     String         @map("user_id") @db.Uuid
+  deviceId   String?        @map("device_id") @db.Uuid
+  source     String         @default("desktop")
+  expiresAt  DateTime?      @map("expires_at")
+  lastUsedAt DateTime       @default(now()) @map("last_used_at")
+  createdAt  DateTime       @default(now()) @map("created_at")
+  user       User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device     DesktopDevice? @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([tokenHash])
+  @@index([userId])
+  @@map("device_tokens")
+}
+

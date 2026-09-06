@@ -11,18 +11,31 @@
     "check-types": "next typegen && tsc --noEmit"
   },
   "dependencies": {
+    "@hookform/resolvers": "^5.9.1",
+    "@repo/telemetry": "workspace:*",
+    "@repo/types": "workspace:*",
     "@repo/ui": "workspace:*",
+    "@repo/validation": "workspace:*",
+    "@tanstack/react-query": "^5.102.8",
+    "@tanstack/react-query-devtools": "^5.102.8",
+    "date-fns": "^4.4.0",
+    "framer-motion": "^13.2.0",
+    "lucide-react": "^1.40.0",
     "next": "16.3.4",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "react-hook-form": "^7.87.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@repo/eslint-config": "workspace:*",
     "@repo/typescript-config": "workspace:*",
+    "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "26.4.1",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.5",
     "eslint": "10.9.1",
+    "tailwindcss": "^4.3.3",
     "typescript": "7.0.2"
   }
 }

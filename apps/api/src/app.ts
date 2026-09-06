@@ -1,0 +1,41 @@
+import "dotenv/config";
+import cors from "cors";
+import express, { type Express } from "express";
+import helmet from "helmet";
+import pinoHttp from "pino-http";
+import { env } from "./config/env";
+import { errorHandler } from "./middleware/error-handler";
+import { requestId } from "./middleware/request-id";
+import { healthRouter } from "./routes/health";
+import { authRouter } from "./routes/auth";
+import { tasksRouter } from "./routes/tasks";
+import { sessionsRouter } from "./routes/sessions";
+import { checkInsRouter } from "./routes/check-ins";
+import { learningRouter } from "./routes/learning";
+import { activityRouter } from "./routes/activity";
+import { analyticsRouter } from "./routes/analytics";
+import { telemetryRouter } from "./routes/telemetry";
+import { exportRouter } from "./routes/export";
+
+export function createApp(): Express {
+  const app = express();
+  app.disable("x-powered-by");
+  app.use(helmet());
+  app.use(cors({ origin: env.WEB_ORIGIN, credentials: true }));
+  app.use(express.json({ limit: "1mb" }));
+  app.use(requestId);
+  app.use(pinoHttp());
+  app.get("/", (_request, response) => response.json({ service: "productivehix-api" }));
+  app.use("/api/health", healthRouter);
+  app.use("/api/auth", authRouter);
+  app.use("/api/tasks", tasksRouter);
+  app.use("/api/sessions", sessionsRouter);
+  app.use("/api/check-ins", checkInsRouter);
+  app.use("/api/learning", learningRouter);
+  app.use("/api/activity", activityRouter);
+  app.use("/api/analytics", analyticsRouter);
+  app.use("/api/telemetry", telemetryRouter);
+  app.use("/api/export", exportRouter);
+  app.use(errorHandler);
+  return app;
+}

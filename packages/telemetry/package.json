@@ -1,0 +1,26 @@
+{
+  "name": "@repo/telemetry",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "check-types": "tsc --noEmit",
+    "lint": "eslint . --max-warnings 0",
+    "test": "tsx --test src/**/*.test.ts"
+  },
+  "devDependencies": {
+    "@repo/eslint-config": "workspace:*",
+    "@repo/typescript-config": "workspace:*",
+    "@types/node": "24.3.0",
+    "eslint": "10.9.1",
+    "tsx": "4.20.5",
+    "typescript": "5.9.2"
+  }
+}
