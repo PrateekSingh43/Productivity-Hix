@@ -6,7 +6,6 @@ import {
   MoreHorizontal,
   Pause,
   Play,
-  RefreshCw,
   ShieldCheck,
   Sun,
   Timer,
@@ -15,17 +14,16 @@ import {
   CheckCircle2,
   Sparkles,
   Sliders,
-  ArrowLeft,
-  Download,
   Terminal,
-  HelpCircle,
+  Download,
+  Target,
+  X,
 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   apiClient,
   getExtensionStatus,
   setTrackingPaused,
-  triggerSync,
   triggerAuth,
   type ExtensionStatus,
 } from "../api/client";
@@ -35,7 +33,8 @@ import { SettingsView } from "./SettingsView";
 import { DiagnosticsView } from "./DiagnosticsView";
 import { InactivityView } from "./InactivityView";
 
-type Tab = "today" | "focus" | "review" | "inactivity" | "more";
+// Locked v1.3 five-view navigation
+type Tab = "today" | "focus" | "reflect" | "review" | "more";
 type MoreSubView = "menu" | "settings" | "diagnostics";
 
 function formatDuration(seconds: number) {
@@ -78,7 +77,6 @@ function Header({
       </div>
       <div>
         <div className="brand">ProductiveHix</div>
-        <div className="eyebrow">PERSONAL OPERATING SYSTEM</div>
       </div>
       <button
         type="button"
@@ -97,6 +95,7 @@ function TopNav({ tab, setTab }: { tab: Tab; setTab: (t: Tab) => void }) {
   const items: Array<[Tab, string, typeof Sun]> = [
     ["today", "Today", Sun],
     ["focus", "Focus", Timer],
+    ["reflect", "Reflect", Sparkles],
     ["review", "Review", Brain],
     ["more", "More", MoreHorizontal],
   ];
@@ -107,8 +106,9 @@ function TopNav({ tab, setTab }: { tab: Tab; setTab: (t: Tab) => void }) {
           key={key}
           className={tab === key ? "nav-item selected" : "nav-item"}
           onClick={() => setTab(key)}
+          type="button"
         >
-          <Icon size={13} />
+          <Icon size={12} />
           {label}
         </button>
       ))}
@@ -116,12 +116,336 @@ function TopNav({ tab, setTab }: { tab: Tab; setTab: (t: Tab) => void }) {
   );
 }
 
-function Metric({ label, value, icon }: { label: string; value: string; icon: React.ReactNode }) {
+function Metric({
+  label,
+  value,
+  icon,
+}: {
+  label: string;
+  value: string;
+  icon: React.ReactNode;
+}) {
   return (
     <div className="metric-card">
       <div className="metric-icon">{icon}</div>
       <strong>{value}</strong>
       <span>{label}</span>
+    </div>
+  );
+}
+
+// -------------------------------------------------------------
+// WORKFLOW PROTOTYPE MODALS / SHEETS (Visual only, no domain mutations)
+// -------------------------------------------------------------
+interface PlanWorkflowModalProps {
+  title: string;
+  subtitle: string;
+  goal: string;
+  priorities: string[];
+  onSave: (goal: string, priorities: string[]) => void;
+  onClose: () => void;
+}
+
+function PlanWorkflowSheet({
+  title,
+  subtitle,
+  goal,
+  priorities,
+  onSave,
+  onClose,
+}: PlanWorkflowModalProps) {
+  const [draftGoal, setDraftGoal] = useState(goal);
+  const [draftP1, setDraftP1] = useState(priorities[0] || "");
+  const [draftP2, setDraftP2] = useState(priorities[1] || "");
+  const [draftP3, setDraftP3] = useState(priorities[2] || "");
+
+  const handleSave = (e: React.FormEvent) => {
+    e.preventDefault();
+    const prios = [draftP1, draftP2, draftP3].filter((p) => p.trim().length > 0);
+    onSave(draftGoal.trim(), prios);
+  };
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        background: "rgba(0,0,0,0.75)",
+        zIndex: 100,
+        display: "flex",
+        flexDirection: "column",
+        justifyContent: "flex-end",
+        padding: "10px",
+      }}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="plan-sheet-title"
+    >
+      <div
+        className="hero-card"
+        style={{
+          padding: 14,
+          maxHeight: "92%",
+          overflowY: "auto",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 10,
+          }}
+        >
+          <div>
+            <span className="section-kicker">{subtitle}</span>
+            <h2
+              id="plan-sheet-title"
+              style={{
+                fontSize: 14,
+                fontWeight: 650,
+                color: "#faf7ff",
+                margin: "2px 0 0",
+              }}
+            >
+              {title}
+            </h2>
+          </div>
+          <button
+            type="button"
+            className="text-button"
+            onClick={onClose}
+            aria-label="Close"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <form onSubmit={handleSave} style={{ display: "grid", gap: 10 }}>
+          <div>
+            <label
+              style={{
+                fontSize: 10.5,
+                color: "#9d91b7",
+                display: "block",
+                marginBottom: 4,
+              }}
+            >
+              Daily Goal (Exactly 1)
+            </label>
+            <input
+              type="text"
+              required
+              value={draftGoal}
+              onChange={(e) => setDraftGoal(e.target.value)}
+              placeholder="e.g. Complete Phase 2 visual primitives"
+              style={{
+                width: "100%",
+                padding: "7px 10px",
+                borderRadius: 8,
+                background: "rgba(255,255,255,0.05)",
+                border: "1px solid rgba(255,255,255,0.12)",
+                color: "#faf7ff",
+                fontSize: 12,
+              }}
+            />
+          </div>
+
+          <div>
+            <label
+              style={{
+                fontSize: 10.5,
+                color: "#9d91b7",
+                display: "block",
+                marginBottom: 4,
+              }}
+            >
+              Priorities (1 to 3 items)
+            </label>
+            <div style={{ display: "grid", gap: 6 }}>
+              <input
+                type="text"
+                value={draftP1}
+                onChange={(e) => setDraftP1(e.target.value)}
+                placeholder="Priority 1 (Required)"
+                required
+                style={{
+                  width: "100%",
+                  padding: "6px 8px",
+                  borderRadius: 6,
+                  background: "rgba(255,255,255,0.04)",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                  color: "#faf7ff",
+                  fontSize: 11,
+                }}
+              />
+              <input
+                type="text"
+                value={draftP2}
+                onChange={(e) => setDraftP2(e.target.value)}
+                placeholder="Priority 2 (Optional)"
+                style={{
+                  width: "100%",
+                  padding: "6px 8px",
+                  borderRadius: 6,
+                  background: "rgba(255,255,255,0.04)",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                  color: "#faf7ff",
+                  fontSize: 11,
+                }}
+              />
+              <input
+                type="text"
+                value={draftP3}
+                onChange={(e) => setDraftP3(e.target.value)}
+                placeholder="Priority 3 (Optional)"
+                style={{
+                  width: "100%",
+                  padding: "6px 8px",
+                  borderRadius: 6,
+                  background: "rgba(255,255,255,0.04)",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                  color: "#faf7ff",
+                  fontSize: 11,
+                }}
+              />
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+            <button
+              type="button"
+              className="secondary-button"
+              style={{ flex: 1 }}
+              onClick={onClose}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="primary-button"
+              style={{ flex: 1 }}
+            >
+              Save Plan
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function OutcomeWorkflowSheet({
+  goal,
+  currentOutcome,
+  onSave,
+  onClose,
+}: {
+  goal: string;
+  currentOutcome: string;
+  onSave: (outcome: string) => void;
+  onClose: () => void;
+}) {
+  const outcomes = [
+    { id: "Achieved", desc: "Completed the primary objective for the day" },
+    { id: "Partially achieved", desc: "Significant progress, partially fulfilled" },
+    { id: "Not achieved", desc: "Blocked or shifted priorities" },
+  ];
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        background: "rgba(0,0,0,0.75)",
+        zIndex: 100,
+        display: "flex",
+        flexDirection: "column",
+        justifyContent: "flex-end",
+        padding: "10px",
+      }}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="outcome-sheet-title"
+    >
+      <div className="hero-card" style={{ padding: 14 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 8,
+          }}
+        >
+          <div>
+            <span className="section-kicker">EVENING REFLECTION</span>
+            <h2
+              id="outcome-sheet-title"
+              style={{
+                fontSize: 14,
+                fontWeight: 650,
+                color: "#faf7ff",
+                margin: "2px 0 0",
+              }}
+            >
+              Assess Daily Goal Outcome
+            </h2>
+          </div>
+          <button
+            type="button"
+            className="text-button"
+            onClick={onClose}
+            aria-label="Close"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <p style={{ fontSize: 11, color: "#948ca2", margin: "0 0 10px" }}>
+          Goal: <strong style={{ color: "#f7f3fc" }}>{goal || "Today's Goal"}</strong>
+        </p>
+
+        <div style={{ display: "grid", gap: 6, marginBottom: 12 }}>
+          {outcomes.map((o) => (
+            <button
+              key={o.id}
+              type="button"
+              onClick={() => onSave(o.id)}
+              className="secondary-button"
+              style={{
+                textAlign: "left",
+                display: "block",
+                padding: "8px 10px",
+                background:
+                  currentOutcome === o.id
+                    ? "rgba(139,92,246,0.25)"
+                    : undefined,
+                borderColor:
+                  currentOutcome === o.id ? "#a78bfa" : undefined,
+              }}
+            >
+              <strong style={{ fontSize: 11.5, color: "#faf7ff", display: "block" }}>
+                {o.id}
+              </strong>
+              <span style={{ fontSize: 10, color: "#948ca2" }}>{o.desc}</span>
+            </button>
+          ))}
+        </div>
+
+        <button
+          type="button"
+          className="secondary-button full"
+          onClick={onClose}
+        >
+          Dismiss
+        </button>
+      </div>
     </div>
   );
 }
@@ -138,10 +462,29 @@ function TodayView({
   setTab: (t: Tab) => void;
   onStartReflect: () => void;
 }) {
-  const summary = useQuery({ queryKey: ["activity-summary"], queryFn: apiClient.getTodaySummary.bind(apiClient) });
-  const tasks = useQuery({ queryKey: ["tasks"], queryFn: apiClient.getTasks.bind(apiClient) });
+  const summary = useQuery({
+    queryKey: ["activity-summary"],
+    queryFn: apiClient.getTodaySummary.bind(apiClient),
+  });
+  const tasks = useQuery({
+    queryKey: ["tasks"],
+    queryFn: apiClient.getTasks.bind(apiClient),
+  });
   const activeTask =
-    tasks.data?.find((task) => task.status === "in_progress") ?? tasks.data?.find((task) => task.status === "todo");
+    tasks.data?.find((task) => task.status === "in_progress") ??
+    tasks.data?.find((task) => task.status === "todo");
+
+  // Local presentation state for Goal & Priorities (visual prototyping)
+  const [dailyGoal, setDailyGoal] = useState("Ship Phase 2 presentation primitives");
+  const [priorities, setPriorities] = useState<string[]>([
+    "Build presentation primitives",
+    "Establish accessible keyboard focus",
+  ]);
+  const [goalOutcome, setGoalOutcome] = useState<string>("Not assessed");
+
+  const [activeWorkflow, setActiveWorkflow] = useState<
+    "none" | "planToday" | "planTomorrow" | "outcome"
+  >("none");
 
   const current = status?.currentActivity;
   const activeSeconds = summary.data?.activeTime ?? 0;
@@ -150,29 +493,147 @@ function TodayView({
 
   return (
     <main className="content">
-      {/* Current Activity */}
+      {/* 1. Daily Plan Card */}
+      <section className="hero-card" style={{ padding: "12px 14px" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 6,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <Target size={13} color="#a78bfa" />
+            <span className="section-kicker" style={{ color: "#a78bfa" }}>
+              DAILY PLAN
+            </span>
+          </div>
+          {goalOutcome !== "Not assessed" && (
+            <span
+              style={{
+                fontSize: 9.5,
+                color: "#34d399",
+                background: "rgba(52,211,153,0.12)",
+                padding: "2px 6px",
+                borderRadius: 4,
+              }}
+            >
+              {goalOutcome}
+            </span>
+          )}
+        </div>
+
+        <h2
+          style={{
+            fontSize: 12.5,
+            fontWeight: 650,
+            color: "#faf7ff",
+            margin: "0 0 6px",
+            lineHeight: 1.3,
+          }}
+        >
+          {dailyGoal || "No daily goal set for today"}
+        </h2>
+
+        {priorities.length > 0 && (
+          <div
+            style={{
+              display: "grid",
+              gap: 3,
+              marginBottom: 10,
+              paddingLeft: 4,
+            }}
+          >
+            {priorities.map((p, idx) => (
+              <div
+                key={idx}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 5,
+                  fontSize: 10.5,
+                  color: "#948ca2",
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 9,
+                    fontFamily: "monospace",
+                    color: "#a78bfa",
+                  }}
+                >
+                  P{idx + 1}
+                </span>
+                <span style={{ color: "#d8d1e8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {p}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Action Buttons for Visual Prototyping */}
+        <div style={{ display: "flex", gap: 4 }}>
+          <button
+            type="button"
+            className="secondary-button"
+            style={{ flex: 1, padding: "4px 2px", fontSize: 10, marginTop: 0 }}
+            onClick={() => setActiveWorkflow("planToday")}
+          >
+            {dailyGoal ? "Edit Plan" : "Plan Today"}
+          </button>
+          <button
+            type="button"
+            className="secondary-button"
+            style={{ flex: 1, padding: "4px 2px", fontSize: 10, marginTop: 0 }}
+            onClick={() => setActiveWorkflow("planTomorrow")}
+          >
+            Plan Tomorrow
+          </button>
+          <button
+            type="button"
+            className="secondary-button"
+            style={{ flex: 1, padding: "4px 2px", fontSize: 10, marginTop: 0 }}
+            onClick={() => setActiveWorkflow("outcome")}
+          >
+            Outcome
+          </button>
+        </div>
+      </section>
+
+      {/* 2. Observed Browser Activity */}
       <section className="hero-card">
         <div className="section-kicker">
-          <span className="live-dot" />CURRENT ACTIVITY <span className="source-label">Browser</span>
+          <span className="live-dot" />
+          CURRENT ACTIVITY <span className="source-label">Browser</span>
         </div>
         {current ? (
           <div className="activity-line">
-            <div className="site-icon">{current.domain.slice(0, 1).toUpperCase()}</div>
+            <div className="site-icon">
+              {current.domain.slice(0, 1).toUpperCase()}
+            </div>
             <div className="activity-copy">
               <strong>{current.domain}</strong>
               <span>{current.pageTitle}</span>
             </div>
-            <span className="activity-time">{formatDuration(current.durationMs / 1000)}</span>
+            <span className="activity-time">
+              {formatDuration(current.durationMs / 1000)}
+            </span>
           </div>
         ) : (
           <div className="empty-activity">
             <ShieldCheck size={16} />
-            <span>{status?.trackingPaused ? "Tracking is paused" : "Waiting for browser activity"}</span>
+            <span>
+              {status?.trackingPaused
+                ? "Tracking is paused"
+                : "Waiting for browser activity"}
+            </span>
           </div>
         )}
       </section>
 
-      {/* Metrics Row */}
+      {/* 3. Metrics Row */}
       <div className="metric-grid">
         {summary.isLoading ? (
           [1, 2, 3].map((i) => (
@@ -183,8 +644,16 @@ function TodayView({
           ))
         ) : (
           <>
-            <Metric label="Active" value={formatDuration(activeSeconds / 1000)} icon={<Activity size={13} />} />
-            <Metric label="Sessions" value={String(sessionsCount)} icon={<Timer size={13} />} />
+            <Metric
+              label="Active"
+              value={formatDuration(activeSeconds / 1000)}
+              icon={<Activity size={13} />}
+            />
+            <Metric
+              label="Sessions"
+              value={String(sessionsCount)}
+              icon={<Timer size={13} />}
+            />
             <Metric
               label="Agent"
               value={status?.desktop?.connected ? "Ready" : "Offline"}
@@ -194,7 +663,7 @@ function TodayView({
         )}
       </div>
 
-      {/* Contextual Reflection Prompt if Eligible or Desired */}
+      {/* Contextual Reflection Prompt if Eligible */}
       {isEligibleForCheckIn && (
         <div
           style={{
@@ -208,8 +677,14 @@ function TodayView({
           }}
         >
           <div>
-            <strong style={{ fontSize: 11, color: "#faf7ff", display: "block" }}>Hourly check-in ready</strong>
-            <span style={{ fontSize: 10, color: "#c6b5ef" }}>Take 45 seconds to reflect on this block</span>
+            <strong
+              style={{ fontSize: 11, color: "#faf7ff", display: "block" }}
+            >
+              Hourly check-in ready
+            </strong>
+            <span style={{ fontSize: 10, color: "#c6b5ef" }}>
+              Take 45 seconds to reflect on this block
+            </span>
           </div>
           <button
             type="button"
@@ -222,7 +697,7 @@ function TodayView({
         </div>
       )}
 
-      {/* Current Planned Task & Action */}
+      {/* 4. Current Planned Task & Action */}
       <section className="task-card">
         <div className="section-kicker">NEXT INTENTIONAL WORK</div>
         {tasks.isLoading ? (
@@ -233,8 +708,16 @@ function TodayView({
         ) : activeTask ? (
           <>
             <h2>{activeTask.title}</h2>
-            <p>{activeTask.status === "in_progress" ? "In progress • Session ready" : "Ready to execute"}</p>
-            <button className="primary-button full" onClick={() => setTab("focus")}>
+            <p>
+              {activeTask.status === "in_progress"
+                ? "In progress • Session ready"
+                : "Ready to execute"}
+            </p>
+            <button
+              className="primary-button full"
+              onClick={() => setTab("focus")}
+              type="button"
+            >
               <Play size={13} fill="currentColor" />
               Continue task in Focus
             </button>
@@ -243,12 +726,57 @@ function TodayView({
           <>
             <h2>Plan your next win</h2>
             <p>Create or select a task from your dashboard.</p>
-            <button className="secondary-button full" onClick={() => openDashboard("/tasks")}>
+            <button
+              className="secondary-button full"
+              onClick={() => openDashboard("/tasks")}
+              type="button"
+            >
               View tasks <ExternalLink size={12} />
             </button>
           </>
         )}
       </section>
+
+      {/* Workflow Prototype Sheets */}
+      {activeWorkflow === "planToday" && (
+        <PlanWorkflowSheet
+          title="Plan Today"
+          subtitle="MORNING INTENTION"
+          goal={dailyGoal}
+          priorities={priorities}
+          onSave={(newGoal, newPriorities) => {
+            setDailyGoal(newGoal);
+            setPriorities(newPriorities);
+            setActiveWorkflow("none");
+          }}
+          onClose={() => setActiveWorkflow("none")}
+        />
+      )}
+
+      {activeWorkflow === "planTomorrow" && (
+        <PlanWorkflowSheet
+          title="Plan Tomorrow"
+          subtitle="EVENING SHUTDOWN"
+          goal=""
+          priorities={[]}
+          onSave={() => {
+            setActiveWorkflow("none");
+          }}
+          onClose={() => setActiveWorkflow("none")}
+        />
+      )}
+
+      {activeWorkflow === "outcome" && (
+        <OutcomeWorkflowSheet
+          goal={dailyGoal}
+          currentOutcome={goalOutcome}
+          onSave={(outcome) => {
+            setGoalOutcome(outcome);
+            setActiveWorkflow("none");
+          }}
+          onClose={() => setActiveWorkflow("none")}
+        />
+      )}
     </main>
   );
 }
@@ -264,8 +792,14 @@ function FocusView({
   onStartReflect: () => void;
 }) {
   const queryClient = useQueryClient();
-  const tasks = useQuery({ queryKey: ["tasks"], queryFn: apiClient.getTasks.bind(apiClient) });
-  const sessions = useQuery({ queryKey: ["sessions"], queryFn: apiClient.getSessions.bind(apiClient) });
+  const tasks = useQuery({
+    queryKey: ["tasks"],
+    queryFn: apiClient.getTasks.bind(apiClient),
+  });
+  const sessions = useQuery({
+    queryKey: ["sessions"],
+    queryFn: apiClient.getSessions.bind(apiClient),
+  });
   const activeSession = sessions.data?.find((session) => !session.endedAt);
   const task =
     tasks.data?.find((item) => item.id === activeSession?.taskId) ??
@@ -286,11 +820,18 @@ function FocusView({
       const duration = preset === "custom" ? customMins : preset;
       return apiClient.startSession(task?.id, duration);
     },
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["sessions"] }),
+    onSuccess: () =>
+      void queryClient.invalidateQueries({ queryKey: ["sessions"] }),
   });
 
   const finish = useMutation({
-    mutationFn: async ({ markDone, openCheckIn }: { markDone: boolean; openCheckIn?: boolean }) => {
+    mutationFn: async ({
+      markDone,
+      openCheckIn,
+    }: {
+      markDone: boolean;
+      openCheckIn?: boolean;
+    }) => {
       if (!activeSession) return;
       if (markDone && task) {
         try {
@@ -309,24 +850,30 @@ function FocusView({
     },
   });
 
-  const elapsedSec = activeSession ? Math.floor((now - Date.parse(activeSession.startedAt)) / 1000) : 0;
-  const targetDurationSec = preset === "custom" ? customMins * 60 : preset * 60;
+  const elapsedSec = activeSession
+    ? Math.floor((now - Date.parse(activeSession.startedAt)) / 1000)
+    : 0;
+  const targetDurationSec =
+    preset === "custom" ? customMins * 60 : preset * 60;
   const remainingSec = Math.max(0, targetDurationSec - elapsedSec);
 
-  // Post-focus completion reflection dialog
   if (showReflection && activeSession) {
     return (
       <main className="content" style={{ gap: 10 }}>
         <div className="section-heading compact">
           <div>
             <span className="section-kicker">FOCUS COMPLETE</span>
-            <h1>What happened?</h1>
+            <h1 style={{ fontSize: 15 }}>What happened?</h1>
           </div>
         </div>
 
         <section className="focus-card">
           <p style={{ margin: "0 0 6px", fontSize: 11.5, color: "#948ca2" }}>
-            Reflect on this focus session for <strong style={{ color: "#f7f3fc" }}>{task?.title ?? "your task"}</strong>:
+            Reflect on this focus session for{" "}
+            <strong style={{ color: "#f7f3fc" }}>
+              {task?.title ?? "your task"}
+            </strong>
+            :
           </p>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -355,7 +902,9 @@ function FocusView({
               className="secondary-button full"
               style={{ marginTop: 0 }}
               disabled={finish.isPending}
-              onClick={() => finish.mutate({ markDone: false, openCheckIn: true })}
+              onClick={() =>
+                finish.mutate({ markDone: false, openCheckIn: true })
+              }
             >
               Got stuck (Reflect on blocker)
             </button>
@@ -379,29 +928,36 @@ function FocusView({
     <main className="content" style={{ gap: 10 }}>
       <div className="section-heading compact">
         <div>
-          <span className="section-kicker">{activeSession ? "FOCUSING" : "FOCUS BLOCK"}</span>
-          <h1>{activeSession ? "Deliberate execution." : "One thing at a time."}</h1>
+          <span className="section-kicker">
+            {activeSession ? "FOCUSING" : "FOCUS BLOCK"}
+          </span>
+          <h1 style={{ fontSize: 15 }}>
+            {activeSession ? "Deliberate execution." : "One thing at a time."}
+          </h1>
         </div>
       </div>
 
       <section className="focus-card">
-        {/* Timer Display Box */}
         <div className="focus-timer-box">
           <div>
             <span>{activeSession ? "Time remaining" : "Duration"}</span>
-            <strong>{formatClock(activeSession ? remainingSec : targetDurationSec)}</strong>
+            <strong>
+              {formatClock(activeSession ? remainingSec : targetDurationSec)}
+            </strong>
           </div>
           <Timer size={26} color="#a78bfa" />
         </div>
 
-        {/* Task Label */}
         <div className="focus-details">
           <span className="section-kicker">CURRENT TASK</span>
           <h2>{task?.title ?? "An intentional work block"}</h2>
-          <p>{activeSession ? "Work session is active and being recorded." : "Choose your focus block below."}</p>
+          <p>
+            {activeSession
+              ? "Work session is active and being recorded."
+              : "Choose your focus block below."}
+          </p>
         </div>
 
-        {/* Presets (Only 25m, 50m, Custom) */}
         {!activeSession && (
           <div>
             <div style={{ display: "flex", gap: 5 }}>
@@ -416,7 +972,8 @@ function FocusView({
                     marginTop: 0,
                     padding: "7px 2px",
                     fontSize: 11,
-                    background: preset === mins ? "rgba(139,92,246,0.3)" : undefined,
+                    background:
+                      preset === mins ? "rgba(139,92,246,0.3)" : undefined,
                     borderColor: preset === mins ? "#a78bfa" : undefined,
                     color: preset === mins ? "#faf7ff" : undefined,
                   }}
@@ -433,7 +990,8 @@ function FocusView({
                   marginTop: 0,
                   padding: "7px 2px",
                   fontSize: 11,
-                  background: preset === "custom" ? "rgba(139,92,246,0.3)" : undefined,
+                  background:
+                    preset === "custom" ? "rgba(139,92,246,0.3)" : undefined,
                   borderColor: preset === "custom" ? "#a78bfa" : undefined,
                   color: preset === "custom" ? "#faf7ff" : undefined,
                 }}
@@ -443,14 +1001,27 @@ function FocusView({
             </div>
 
             {preset === "custom" && (
-              <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8 }}>
-                <span style={{ fontSize: 10.5, color: "#90869e" }}>Duration:</span>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  marginTop: 8,
+                }}
+              >
+                <span style={{ fontSize: 10.5, color: "#90869e" }}>
+                  Duration:
+                </span>
                 <input
                   type="number"
                   min={5}
                   max={180}
                   value={customMins}
-                  onChange={(e) => setCustomMins(Math.max(5, Math.min(180, Number(e.target.value) || 25)))}
+                  onChange={(e) =>
+                    setCustomMins(
+                      Math.max(5, Math.min(180, Number(e.target.value) || 25))
+                    )
+                  }
                   style={{
                     width: 50,
                     padding: "3px 6px",
@@ -462,13 +1033,14 @@ function FocusView({
                     textAlign: "center",
                   }}
                 />
-                <span style={{ fontSize: 10, color: "#90869e" }}>min (5–180)</span>
+                <span style={{ fontSize: 10, color: "#90869e" }}>
+                  min (5–180)
+                </span>
               </div>
             )}
           </div>
         )}
 
-        {/* Action Button */}
         {activeSession ? (
           <button
             type="button"
@@ -487,7 +1059,11 @@ function FocusView({
             disabled={start.isPending || status?.trackingPaused}
           >
             <Play size={13} fill="currentColor" />
-            {status?.trackingPaused ? "Resume tracking first" : `Start ${preset === "custom" ? customMins : preset}m Focus`}
+            {status?.trackingPaused
+              ? "Resume tracking first"
+              : `Start ${
+                  preset === "custom" ? customMins : preset
+                }m Focus`}
           </button>
         )}
       </section>
@@ -496,23 +1072,98 @@ function FocusView({
 }
 
 // -------------------------------------------------------------
-// REVIEW VIEW (In-extension quick recall flashcard & hourly reflection)
+// REFLECT VIEW (Locked 3rd tab: Hourly check-in wizard & reflections)
 // -------------------------------------------------------------
-function ReviewView({
-  showCheckInWizard = false,
-  onStartCheckInWizard,
-  onCloseCheckInWizard,
+function ReflectView({
   activeTask,
   patterns,
   onCheckInComplete,
 }: {
-  showCheckInWizard?: boolean;
-  onStartCheckInWizard?: () => void;
-  onCloseCheckInWizard?: () => void;
   activeTask?: Task;
   patterns?: any[];
   onCheckInComplete?: () => void;
 }) {
+  const [activeMode, setActiveMode] = useState<"menu" | "hourly" | "inactivity">("menu");
+
+  if (activeMode === "hourly") {
+    return (
+      <CheckInView
+        currentTask={activeTask}
+        patterns={patterns ?? []}
+        onComplete={() => {
+          setActiveMode("menu");
+          onCheckInComplete?.();
+        }}
+        onCancel={() => setActiveMode("menu")}
+      />
+    );
+  }
+
+  if (activeMode === "inactivity") {
+    return (
+      <InactivityView
+        onComplete={() => {
+          setActiveMode("menu");
+          onCheckInComplete?.();
+        }}
+      />
+    );
+  }
+
+  return (
+    <main className="content" style={{ gap: 10 }}>
+      <div className="section-heading compact">
+        <div>
+          <span className="section-kicker">REFLECTION WORKSPACE</span>
+          <h1 style={{ fontSize: 15 }}>Close the loop on reality.</h1>
+        </div>
+      </div>
+
+      <section className="hero-card" style={{ padding: 14 }}>
+        <div style={{ display: "grid", gap: 3, marginBottom: 12 }}>
+          <strong style={{ fontSize: 12.5, color: "#faf7ff" }}>
+            Hourly Check-in
+          </strong>
+          <span style={{ fontSize: 11, color: "#948ca2" }}>
+            30-second qualitative reflection on energy, blockers, and cognitive focus.
+          </span>
+        </div>
+        <button
+          type="button"
+          className="primary-button full"
+          style={{ marginTop: 0 }}
+          onClick={() => setActiveMode("hourly")}
+        >
+          <Sparkles size={13} /> Start Hourly Check-in
+        </button>
+      </section>
+
+      <section className="hero-card" style={{ padding: 14 }}>
+        <div style={{ display: "grid", gap: 3, marginBottom: 12 }}>
+          <strong style={{ fontSize: 12.5, color: "#faf7ff" }}>
+            Inactivity Recovery
+          </strong>
+          <span style={{ fontSize: 11, color: "#948ca2" }}>
+            Label prolonged periods of observed inactivity (Break, Meeting, Away).
+          </span>
+        </div>
+        <button
+          type="button"
+          className="secondary-button full"
+          style={{ marginTop: 0 }}
+          onClick={() => setActiveMode("inactivity")}
+        >
+          Review Inactivity Blocks
+        </button>
+      </section>
+    </main>
+  );
+}
+
+// -------------------------------------------------------------
+// REVIEW VIEW (Locked 4th tab: Delayed Spaced Learning Recall)
+// -------------------------------------------------------------
+function ReviewView() {
   const queryClient = useQueryClient();
   const assessments = useQuery({
     queryKey: ["assessments"],
@@ -521,12 +1172,14 @@ function ReviewView({
 
   const due = useMemo(() => {
     return (assessments.data ?? []).filter(
-      (a) => !a.completedAt && Date.parse(a.scheduledAt) <= Date.now(),
+      (a) => !a.completedAt && Date.parse(a.scheduledAt) <= Date.now()
     );
   }, [assessments.data]);
 
   const activeAssessment = due[0];
-  const activeQuestion = activeAssessment?.questions?.find((q) => q.score === null) ?? activeAssessment?.questions?.[0];
+  const activeQuestion =
+    activeAssessment?.questions?.find((q) => q.score === null) ??
+    activeAssessment?.questions?.[0];
 
   const [revealed, setRevealed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -535,7 +1188,11 @@ function ReviewView({
     if (!activeQuestion) return;
     setSubmitting(true);
     try {
-      await apiClient.submitLearningAnswer(activeQuestion.id, activeQuestion.expectedAnswer ?? "Recall review", score);
+      await apiClient.submitLearningAnswer(
+        activeQuestion.id,
+        activeQuestion.expectedAnswer ?? "Recall review",
+        score
+      );
       void queryClient.invalidateQueries({ queryKey: ["assessments"] });
       setRevealed(false);
     } catch (e) {
@@ -545,55 +1202,18 @@ function ReviewView({
     }
   };
 
-  // If check-in wizard is active: render it directly inside the Review tab surface
-  if (showCheckInWizard) {
-    return (
-      <CheckInView
-        currentTask={activeTask}
-        patterns={patterns ?? []}
-        onComplete={() => onCheckInComplete?.()}
-        onCancel={() => onCloseCheckInWizard?.()}
-      />
-    );
-  }
-
   return (
     <main className="content" style={{ gap: 10 }}>
-      {/* Hourly reflection trigger card */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          padding: "9px 12px",
-          background: "linear-gradient(135deg, rgba(139,92,246,0.16) 0%, rgba(109,40,217,0.08) 100%)",
-          border: "1px solid rgba(167,139,250,0.28)",
-          borderRadius: 10,
-        }}
-      >
-        <div style={{ display: "grid", gap: 2 }}>
-          <span className="section-kicker" style={{ color: "#a78bfa" }}>HOURLY REFLECTION</span>
-          <strong style={{ fontSize: 11, color: "#f8f6ff" }}>How was your last work block?</strong>
-          <span style={{ fontSize: 9.5, color: "#b3a8c6" }}>Quick 30s check-in on focus and blockers</span>
-        </div>
-        {onStartCheckInWizard && (
-          <button
-            type="button"
-            className="primary-button"
-            onClick={onStartCheckInWizard}
-            style={{ margin: 0, padding: "5px 10px", fontSize: 10.5, height: "auto", flexShrink: 0 }}
-          >
-            Reflect Now
-          </button>
-        )}
-      </div>
-
       <div className="section-heading compact">
         <div>
           <span className="section-kicker">LEARNING RECALL</span>
-          <h1>Recall, then move on.</h1>
+          <h1 style={{ fontSize: 15 }}>Recall, then move on.</h1>
         </div>
-        <button className="text-button" onClick={() => openDashboard("/learning")}>
+        <button
+          className="text-button"
+          onClick={() => openDashboard("/learning")}
+          type="button"
+        >
           Full view <ExternalLink size={11} />
         </button>
       </div>
@@ -606,21 +1226,38 @@ function ReviewView({
           </>
         ) : due.length > 0 && activeQuestion ? (
           <>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+              }}
+            >
               <span className="section-kicker" style={{ color: "#a78bfa" }}>
                 {due.length} {due.length === 1 ? "REVIEW DUE" : "REVIEWS DUE"}
               </span>
-              <span style={{ fontSize: 10, color: "#8a8298" }}>{activeAssessment.topic}</span>
+              <span style={{ fontSize: 10, color: "#8a8298" }}>
+                {activeAssessment.topic}
+              </span>
             </div>
 
             <div className="flashcard-box">
-              <span style={{ fontSize: 9.5, color: "#a78bfa", textTransform: "uppercase", letterSpacing: ".06em" }}>
+              <span
+                style={{
+                  fontSize: 9.5,
+                  color: "#a78bfa",
+                  textTransform: "uppercase",
+                  letterSpacing: ".06em",
+                }}
+              >
                 QUESTION
               </span>
               <div className="flashcard-question">{activeQuestion.prompt}</div>
 
               {revealed && activeQuestion.expectedAnswer && (
-                <div className="flashcard-answer">{activeQuestion.expectedAnswer}</div>
+                <div className="flashcard-answer">
+                  {activeQuestion.expectedAnswer}
+                </div>
               )}
             </div>
 
@@ -657,12 +1294,31 @@ function ReviewView({
           </>
         ) : (
           <div style={{ textAlign: "center", padding: "16px 8px" }}>
-            <div style={{ width: 36, height: 36, borderRadius: "50%", background: "rgba(52,211,153,0.12)", display: "grid", placeItems: "center", color: "#34d399", margin: "0 auto 10px" }}>
+            <div
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: "50%",
+                background: "rgba(52,211,153,0.12)",
+                display: "grid",
+                placeItems: "center",
+                color: "#34d399",
+                margin: "0 auto 10px",
+              }}
+            >
               <CheckCircle2 size={18} />
             </div>
-            <h2 style={{ fontSize: 14, margin: "0 0 4px", color: "#f7f3fc" }}>You’re caught up.</h2>
-            <p style={{ fontSize: 11, color: "#948ca2", margin: "0 0 12px" }}>No reviews are due right now.</p>
-            <button className="secondary-button" onClick={() => openDashboard("/learning")}>
+            <h2 style={{ fontSize: 14, margin: "0 0 4px", color: "#f7f3fc" }}>
+              You&apos;re caught up.
+            </h2>
+            <p style={{ fontSize: 11, color: "#948ca2", margin: "0 0 12px" }}>
+              No learning recall prompts are due right now.
+            </p>
+            <button
+              className="secondary-button"
+              onClick={() => openDashboard("/learning")}
+              type="button"
+            >
               Open learning dashboard <ExternalLink size={12} />
             </button>
           </div>
@@ -688,19 +1344,29 @@ function MoreView({
   const [exporting, setExporting] = useState(false);
   const [exportSuccess, setExportSuccess] = useState(false);
   const paused = status?.trackingPaused ?? false;
-  const toggle = useMutation({ mutationFn: async () => setTrackingPaused(!paused), onSuccess: refresh });
-  const authMutation = useMutation({ mutationFn: async () => triggerAuth(), onSuccess: refresh });
+  const toggle = useMutation({
+    mutationFn: async () => setTrackingPaused(!paused),
+    onSuccess: refresh,
+  });
+  const authMutation = useMutation({
+    mutationFn: async () => triggerAuth(),
+    onSuccess: refresh,
+  });
 
   const handleExportData = async () => {
     setExporting(true);
     setExportSuccess(false);
     try {
       const data = await apiClient.exportData();
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const blob = new Blob([JSON.stringify(data, null, 2)], {
+        type: "application/json",
+      });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `productivehix-export-${new Date().toISOString().slice(0, 10)}.json`;
+      a.download = `productivehix-export-${new Date()
+        .toISOString()
+        .slice(0, 10)}.json`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -718,7 +1384,7 @@ function MoreView({
       <div className="section-heading compact">
         <div>
           <span className="section-kicker">CONTROL CENTER</span>
-          <h1>Quietly in the background.</h1>
+          <h1 style={{ fontSize: 15 }}>Quietly in the background.</h1>
         </div>
       </div>
 
@@ -730,12 +1396,20 @@ function MoreView({
           </div>
           <div className="setting-copy">
             <strong>Account</strong>
-            <span>{status?.authenticated ? "Connected to local operating system" : "Unpaired device"}</span>
+            <span>
+              {status?.authenticated
+                ? "Connected to local operating system"
+                : "Unpaired device"}
+            </span>
           </div>
           {status?.authenticated ? (
             <span className="connection-label good">Paired</span>
           ) : (
-            <button className="text-button" onClick={() => authMutation.mutate()}>
+            <button
+              className="text-button"
+              onClick={() => authMutation.mutate()}
+              type="button"
+            >
               Pair <ExternalLink size={11} />
             </button>
           )}
@@ -764,7 +1438,11 @@ function MoreView({
           <div className="confirm-row">
             <span>Pause telemetry now?</span>
             <div>
-              <button type="button" className="text-button" onClick={() => setConfirmPause(false)}>
+              <button
+                type="button"
+                className="text-button"
+                onClick={() => setConfirmPause(false)}
+              >
                 Cancel
               </button>
               <button
@@ -787,15 +1465,23 @@ function MoreView({
             <Monitor size={14} />
           </div>
           <div className="setting-copy">
-            <strong>Desktop agent</strong>
+            <strong>Desktop watcher</strong>
             <span>
               {status?.desktop?.connected
-                ? `Connected (${status.desktop.activityWatchRunning ? "AW Running" : "AW Inactive"})`
+                ? `Connected (${
+                    status.desktop.activityWatchRunning
+                      ? "AW Running"
+                      : "AW Inactive"
+                  })`
                 : "Not connected"}
             </span>
           </div>
-          <span className={`connection-label ${status?.desktop?.connected ? "good" : "muted"}`}>
-            {status?.desktop?.connected ? "Ready" : "Set up"}
+          <span
+            className={`connection-label ${
+              status?.desktop?.connected ? "good" : "muted"
+            }`}
+          >
+            {status?.desktop?.connected ? "Ready" : "Offline"}
           </span>
         </div>
       </section>
@@ -805,7 +1491,13 @@ function MoreView({
         <button
           type="button"
           className="setting-row"
-          style={{ width: "100%", background: "transparent", border: 0, textAlign: "left", cursor: "pointer" }}
+          style={{
+            width: "100%",
+            background: "transparent",
+            border: 0,
+            textAlign: "left",
+            cursor: "pointer",
+          }}
           onClick={() => setSubView("settings")}
         >
           <div className="setting-icon">
@@ -821,7 +1513,13 @@ function MoreView({
         <button
           type="button"
           className="setting-row"
-          style={{ width: "100%", background: "transparent", border: 0, textAlign: "left", cursor: "pointer" }}
+          style={{
+            width: "100%",
+            background: "transparent",
+            border: 0,
+            textAlign: "left",
+            cursor: "pointer",
+          }}
           onClick={() => setSubView("diagnostics")}
         >
           <div className="setting-icon">
@@ -849,7 +1547,11 @@ function MoreView({
             onClick={handleExportData}
             disabled={exporting}
           >
-            {exporting ? "Exporting..." : exportSuccess ? "Downloaded!" : "Export"}
+            {exporting
+              ? "Exporting..."
+              : exportSuccess
+              ? "Downloaded!"
+              : "Export"}
           </button>
         </div>
       </section>
@@ -871,7 +1573,6 @@ function MoreView({
 export function App() {
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<Tab>("today");
-  const [showCheckInWizard, setShowCheckInWizard] = useState(false);
   const [moreSubView, setMoreSubView] = useState<MoreSubView>("menu");
 
   const status = useQuery({
@@ -894,13 +1595,11 @@ export function App() {
     tasks.data?.find((t) => t.status === "in_progress") ??
     tasks.data?.find((t) => t.status === "todo");
 
-  // Read destination on open (from notification button click via chrome.storage or query param)
   useEffect(() => {
     if (typeof chrome !== "undefined" && chrome.storage?.local) {
       chrome.storage.local.get(["openToTab"], (result) => {
         if (result.openToTab === "reflect") {
-          setTab("review");
-          setShowCheckInWizard(true);
+          setTab("reflect");
           void chrome.storage.local.remove("openToTab");
         } else if (result.openToTab) {
           setTab(result.openToTab as Tab);
@@ -913,10 +1612,18 @@ export function App() {
       const params = new URLSearchParams(window.location.search);
       const tabParam = params.get("tab");
       const viewParam = params.get("view");
-      if (tabParam === "reflect" || viewParam === "checkin" || viewParam === "reflect") {
-        setTab("review");
-        setShowCheckInWizard(true);
-      } else if (tabParam === "focus" || tabParam === "review" || tabParam === "more" || tabParam === "inactivity") {
+      if (
+        tabParam === "reflect" ||
+        viewParam === "checkin" ||
+        viewParam === "reflect"
+      ) {
+        setTab("reflect");
+      } else if (
+        tabParam === "focus" ||
+        tabParam === "review" ||
+        tabParam === "more" ||
+        tabParam === "today"
+      ) {
         setTab(tabParam as Tab);
       } else if (viewParam === "diagnostics") {
         setTab("more");
@@ -927,9 +1634,6 @@ export function App() {
 
   const handleTabChange = (newTab: Tab) => {
     setTab(newTab);
-    if (newTab !== "review") {
-      setShowCheckInWizard(false);
-    }
     setMoreSubView("menu");
   };
 
@@ -939,51 +1643,42 @@ export function App() {
         status={status.data}
         onPillClick={() => {
           setTab("more");
-          setShowCheckInWizard(false);
         }}
       />
 
       <TopNav tab={tab} setTab={handleTabChange} />
 
-      {/* VIEW RENDERER */}
+      {/* VIEW RENDERER: Locked 5 Views */}
       {tab === "today" ? (
         <TodayView
           status={status.data}
           setTab={setTab}
           onStartReflect={() => {
-            setTab("review");
-            setShowCheckInWizard(true);
+            setTab("reflect");
           }}
         />
       ) : tab === "focus" ? (
         <FocusView
           status={status.data}
           onStartReflect={() => {
-            setTab("review");
-            setShowCheckInWizard(true);
+            setTab("reflect");
           }}
         />
-      ) : tab === "review" ? (
-        <ReviewView
-          showCheckInWizard={showCheckInWizard}
-          onStartCheckInWizard={() => setShowCheckInWizard(true)}
-          onCloseCheckInWizard={() => setShowCheckInWizard(false)}
+      ) : tab === "reflect" ? (
+        <ReflectView
           activeTask={activeTask}
           patterns={patterns.data ?? []}
           onCheckInComplete={() => {
-            setShowCheckInWizard(false);
-            void queryClient.invalidateQueries({ queryKey: ["extension-status"] });
-            void queryClient.invalidateQueries({ queryKey: ["activity-summary"] });
+            void queryClient.invalidateQueries({
+              queryKey: ["extension-status"],
+            });
+            void queryClient.invalidateQueries({
+              queryKey: ["activity-summary"],
+            });
           }}
         />
-      ) : tab === "inactivity" ? (
-        <InactivityView
-          onComplete={() => {
-            setTab("today");
-            void queryClient.invalidateQueries({ queryKey: ["extension-status"] });
-            void queryClient.invalidateQueries({ queryKey: ["activity-summary"] });
-          }}
-        />
+      ) : tab === "review" ? (
+        <ReviewView />
       ) : moreSubView === "settings" ? (
         <SettingsView
           status={status.data}

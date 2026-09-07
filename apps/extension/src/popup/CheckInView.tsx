@@ -134,6 +134,7 @@ export function CheckInView({ currentTask, patterns = [], onComplete, onCancel }
       note: note.trim().slice(0, 350) || null,
       questionVersion: "v1",
       source: "extension_hourly",
+      eventType: "PERIODIC",
       deeperAnswers: Object.keys(deeperAnswers).length > 0 ? deeperAnswers : null,
     };
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { ArrowLeft, Clock, Bell, Timer, ShieldCheck, Zap, Play, Check } from "lucide-react";
 import {
   updateSchedulerConfig,
@@ -33,6 +33,7 @@ export function SettingsView({ status, onBack, onRefresh }: SettingsViewProps) {
   // Live countdown state
   const [countdown, setCountdown] = useState<number | null>(null);
   const [testDispatched, setTestDispatched] = useState(false);
+  const lastTriggeredRef = useRef<number>(0);
 
   useEffect(() => {
     if (scheduler) {
@@ -57,13 +58,14 @@ export function SettingsView({ status, onBack, onRefresh }: SettingsViewProps) {
       if (scheduler?.nextTriggerAt) {
         const remaining = Math.max(0, Math.ceil((scheduler.nextTriggerAt - Date.now()) / 1000));
         setCountdown(remaining);
-        if (remaining <= 0 && !scheduler.checkInsPaused) {
+        if (remaining <= 0 && !scheduler.checkInsPaused && Date.now() - lastTriggeredRef.current > 4000) {
+          lastTriggeredRef.current = Date.now();
           void triggerCheckInNotification().then(() => onRefresh());
         }
       }
     }, 1000);
     return () => clearInterval(timer);
-  }, [scheduler?.nextTriggerAt, scheduler?.checkInsPaused]);
+  }, [scheduler?.nextTriggerAt, scheduler?.checkInsPaused, onRefresh]);
 
   const saveSchedulerSetting = async (patch: {
     checkInsPaused?: boolean;

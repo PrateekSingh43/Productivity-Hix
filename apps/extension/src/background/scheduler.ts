@@ -41,7 +41,7 @@ const DEFAULT_STATE: SchedulerState = {
   devIntervalSeconds: 10,
   customIntervalSeconds: 10,
   nextTriggerAt: null,
-  sleepScheduleEnabled: true,
+  sleepScheduleEnabled: false,
   sleepStart: "23:00",
   sleepEnd: "07:00",
   afterFocusReflection: true,
@@ -180,7 +180,7 @@ export class CheckInScheduler {
 
     // Check sleep schedule
     if (this.state.sleepScheduleEnabled && isWithinSleepSchedule(nowMs, this.state.sleepStart, this.state.sleepEnd)) {
-      return { eligible: false, reason: `Sleep schedule active (${this.state.sleepStart}–${this.state.sleepEnd})` };
+      return { eligible: false, reason: `Quiet hours / Sleep schedule active (${this.state.sleepStart}–${this.state.sleepEnd})` };
     }
 
     // Cooldown check
@@ -337,8 +337,11 @@ export class CheckInScheduler {
     if (typeof updates.devMode === "boolean") this.state.devMode = updates.devMode;
     if (typeof updates.checkInsPaused === "boolean") this.state.checkInsPaused = updates.checkInsPaused;
     if (typeof updates.sleepScheduleEnabled === "boolean") this.state.sleepScheduleEnabled = updates.sleepScheduleEnabled;
+    if (typeof (updates as any).quietHoursEnabled === "boolean") this.state.sleepScheduleEnabled = (updates as any).quietHoursEnabled;
     if (typeof updates.sleepStart === "string") this.state.sleepStart = updates.sleepStart;
+    if (typeof (updates as any).quietHoursStart === "string") this.state.sleepStart = (updates as any).quietHoursStart;
     if (typeof updates.sleepEnd === "string") this.state.sleepEnd = updates.sleepEnd;
+    if (typeof (updates as any).quietHoursEnd === "string") this.state.sleepEnd = (updates as any).quietHoursEnd;
     if (typeof updates.afterFocusReflection === "boolean") this.state.afterFocusReflection = updates.afterFocusReflection;
 
     const newInterval = updates.customIntervalSeconds ?? updates.devIntervalSeconds;

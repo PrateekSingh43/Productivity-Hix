@@ -7,7 +7,7 @@ import { Sidebar } from "./sidebar";
 import { useLiveTelemetry } from "../../src/hooks/use-live-telemetry";
 
 const titles: Record<string, string> = {
-  "/": "Overview",
+  "/": "Home",
   "/today": "Today",
   "/timeline": "Timeline",
   "/tasks": "Tasks",
@@ -45,7 +45,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <div className="hidden h-5 w-px bg-border-subtle lg:block" />
               <div className="min-w-0">
                 <p className="truncate text-sm font-semibold tracking-tight text-text-primary">{title}</p>
-                <p className="hidden text-[11px] text-text-tertiary sm:block">Your personal operating system</p>
               </div>
             </div>
 
@@ -55,7 +54,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 className="inline-flex items-center gap-2 rounded-full border border-border-default bg-bg-secondary px-2.5 py-1.5 text-xs font-medium text-text-secondary hover:border-border-strong hover:text-text-primary"
               >
                 <span className={`h-1.5 w-1.5 rounded-full ${recentlyActive ? "bg-success shadow-[0_0_10px_rgba(82,211,151,0.75)]" : "bg-text-tertiary"}`} />
-                <span className="hidden sm:inline">{telemetry.connected ? "Tracking connected" : "Tracking idle"}</span>
+                <span className="hidden sm:inline">{telemetry.connected ? "Tracking connected" : "Tracking offline"}</span>
                 <Activity size={13} className="sm:hidden" />
               </Link>
               <Link

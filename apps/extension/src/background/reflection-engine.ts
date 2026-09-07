@@ -58,7 +58,7 @@ export class ReflectionEngine {
   public async reloadConfig() {
     const data = await chrome.storage.local.get(SCHEDULER_STORAGE_KEY);
     if (data[SCHEDULER_STORAGE_KEY]) {
-      this.config = data[SCHEDULER_STORAGE_KEY];
+      this.config = { ...this.config, ...data[SCHEDULER_STORAGE_KEY] };
       
       // If the cooldown in the UI was reset, clear our cooldown
       if (!this.config.checkInCooldownUntil) {
@@ -66,6 +66,69 @@ export class ReflectionEngine {
         await this.saveState();
       }
     }
+  }
+
+  public async updateConfig(patch: Partial<any>) {
+    this.config = { ...this.config, ...patch };
+
+    // Support quiet hours aliases
+    if (patch.quietHoursEnabled !== undefined) {
+      this.config.sleepScheduleEnabled = patch.quietHoursEnabled;
+    }
+    if (patch.quietHoursStart) {
+      this.config.sleepStart = patch.quietHoursStart;
+    }
+    if (patch.quietHoursEnd) {
+      this.config.sleepEnd = patch.quietHoursEnd;
+    }
+
+    if (patch.resetCooldown) {
+      this.state.cooldownUntil = null;
+      this.state.activeTimeMs = 0;
+    }
+
+    const intervalSec = this.config.devMode ? (this.config.devIntervalSeconds || 10) : 50 * 60;
+    this.config.nextTriggerAt = Date.now() + intervalSec * 1000;
+    this.config.activeSecondsInWindow = 0;
+
+    await chrome.storage.local.set({ [SCHEDULER_STORAGE_KEY]: this.config });
+    await this.saveState();
+    console.log("[ReflectionEngine] Updated config:", this.config);
+  }
+
+  public async resetTimer(seconds?: number) {
+    if (seconds) {
+      this.config.devIntervalSeconds = seconds;
+      this.config.devMode = true;
+    }
+    const intervalSec = seconds || (this.config.devMode ? (this.config.devIntervalSeconds || 10) : 50 * 60);
+    this.state.activeTimeMs = 0;
+    this.state.cooldownUntil = null;
+    this.config.nextTriggerAt = Date.now() + intervalSec * 1000;
+    this.config.activeSecondsInWindow = 0;
+    await chrome.storage.local.set({ [SCHEDULER_STORAGE_KEY]: this.config });
+    await this.saveState();
+  }
+
+  public getSchedulerStatus() {
+    const intervalSec = this.config.devMode ? (this.config.devIntervalSeconds || 10) : 50 * 60;
+    const activeSec = Math.floor(this.state.activeTimeMs / 1000);
+    const remainingSec = Math.max(0, intervalSec - activeSec);
+    const nextTriggerAt = Date.now() + remainingSec * 1000;
+
+    return {
+      ...this.config,
+      activeSecondsInWindow: activeSec,
+      nextTriggerAt,
+      remainingSecondsUntilTrigger: remainingSec,
+      lastNotificationSentAt: this.state.lastNotificationSentAt ? new Date(this.state.lastNotificationSentAt).toISOString() : null,
+      checkInCooldownUntil: this.state.cooldownUntil ? new Date(this.state.cooldownUntil).toISOString() : null,
+      eligibility: {
+        eligible: remainingSec <= 0,
+        reason: remainingSec <= 0 ? "Active time threshold reached" : `Accumulating active time (${remainingSec}s remaining)`,
+        remainingSeconds: remainingSec,
+      },
+    };
   }
 
   public async forceReset() {
@@ -112,9 +175,24 @@ export class ReflectionEngine {
       this.state.activeTimeMs += dtMs;
     }
 
-    // Edge trigger: if transitioning from ACTIVE to IDLE, evaluate if we should show a check-in
-    if (this.previousActivityState === "ACTIVE" && activityState === "IDLE") {
+    const requiredMs = this.config.devMode
+      ? Math.max(3000, (this.config.devIntervalSeconds || 10) * 1000)
+      : 50 * 60 * 1000; // 50 minutes
+
+    // 1. Direct active time threshold trigger:
+    // When active work reaches the required cadence (e.g. 10s in dev mode, 50m in prod),
+    // trigger check-in directly!
+    if (this.state.activeTimeMs >= requiredMs) {
       await this.evaluateEligibility(now);
+    } 
+    // 2. Opportunistic pause trigger:
+    // If the user steps away (ACTIVE -> IDLE) after accumulating a substantial block of work
+    // (at least 25 minutes in prod, or requiredMs in dev mode), prompt for check-in!
+    else if (this.previousActivityState === "ACTIVE" && activityState === "IDLE") {
+      const pauseThresholdMs = this.config.devMode ? requiredMs : 25 * 60 * 1000;
+      if (this.state.activeTimeMs >= pauseThresholdMs) {
+        await this.evaluateEligibility(now);
+      }
     }
 
     this.previousActivityState = activityState;
@@ -130,20 +208,24 @@ export class ReflectionEngine {
       return;
     }
 
-    const requiredMs = this.config.devMode
-      ? Math.max(5000, (this.config.devIntervalSeconds || 10) * 1000)
-      : 50 * 60 * 1000; // 50 minutes
-
-    if (this.state.activeTimeMs >= requiredMs) {
-      await this.triggerNotification(now, false);
-    }
+    await this.triggerNotification(now, false);
   }
 
   private async isFocusSessionActive(): Promise<boolean> {
+    if (this.config.devMode) return false;
     try {
       const { apiClient } = await import("../api/client");
       const sessions = await apiClient.getSessions();
-      return sessions.some(s => !s.endedAt);
+      const now = Date.now();
+      return sessions.some(s => {
+        if (s.endedAt) return false;
+        const startTime = new Date(s.startedAt).getTime();
+        const durationMs = (s.durationSeconds || 30 * 60) * 1000;
+        if (now - startTime > Math.max(durationMs + 5 * 60 * 1000, 4 * 60 * 60 * 1000)) {
+          return false;
+        }
+        return true;
+      });
     } catch {
       return false;
     }
@@ -154,18 +236,21 @@ export class ReflectionEngine {
     this.isTriggering = true;
 
     try {
-      const focusActive = await this.isFocusSessionActive();
-      if (focusActive && !force) {
-        console.log("[ReflectionEngine] Blocked periodic notification because a focus session is active.");
-        return;
+      if (!force) {
+        const focusActive = await this.isFocusSessionActive();
+        if (focusActive) {
+          console.log("[ReflectionEngine] Blocked periodic notification because a focus session is active.");
+          return;
+        }
       }
 
       const activeMinutes = Math.max(1, Math.round(this.state.activeTimeMs / 60000));
 
-      await showCheckInNotification({
+      const notifId = await showCheckInNotification({
         activeMinutes,
         isAwayReview: false
       });
+      console.log("[ReflectionEngine] Native notification dispatched successfully:", notifId);
 
       // Reset accumulators and set cooldown
       this.state.activeTimeMs = 0;
@@ -175,7 +260,7 @@ export class ReflectionEngine {
       const cooldownMs = this.config.devMode ? 2000 : Math.min(15 * 60 * 1000, intervalSec * 1000);
       this.state.cooldownUntil = now + cooldownMs;
 
-      // Also update the old CheckInScheduler config so the UI countdown resets properly
+      // Update config so UI timer immediately resets to full countdown
       this.config.checkInCooldownUntil = new Date(this.state.cooldownUntil).toISOString();
       this.config.nextTriggerAt = now + intervalSec * 1000;
       this.config.activeSecondsInWindow = 0;

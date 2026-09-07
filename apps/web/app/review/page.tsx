@@ -1,17 +1,30 @@
-import { BaselinePlaceholder } from "../../components/layout/baseline-placeholder";
+"use client";
+
+import { PageContainer } from "../../components/layout/page-container";
+import { PageHeader } from "../../components/layout/page-header";
+import { Section } from "../../components/layout/section";
+import { EmptyState } from "../../components/primitives/empty-state";
+import { CheckCircle2 } from "lucide-react";
 
 export default function ReviewPage() {
   return (
-    <BaselinePlaceholder
-      title="Review"
-      subtitle="Delayed Learning Validation"
-      concept="Validates whether information studied days or weeks ago has transferred to durable memory, prompting targeted recall prompts at optimal spaced intervals."
-      metricsNeeded="Active learning cards"
-      previewItems={[
-        { label: "Due Today", value: "2 prompts" },
-        { label: "Optimal Interval", value: "3 days" },
-        { label: "Confidence Rating", value: "High (4.2/5)" },
-      ]}
-    />
+    <PageContainer>
+      <PageHeader
+        title="Review"
+        subtitle="Delayed recall validation and retention prompts"
+        breadcrumbs={[
+          { label: "ProductiveHix", href: "/" },
+          { label: "Review" },
+        ]}
+      />
+
+      <Section>
+        <EmptyState
+          icon={CheckCircle2}
+          title="No Reviews Due"
+          description="You are completely caught up. When tracked topics from your study or focus sessions reach their scheduled recall interval, they will appear here."
+        />
+      </Section>
+    </PageContainer>
   );
 }

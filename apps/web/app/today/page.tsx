@@ -1,253 +1,255 @@
 "use client";
 
-import { motion } from "framer-motion";
+import React, { useState } from "react";
 import {
-  Calendar,
-  Activity,
-  Target,
-  CheckCircle,
-  Zap,
+  Sparkles,
+  Plus,
+  CheckCircle2,
+  Circle,
+  Monitor,
+  Globe,
+  Radio,
+  Clock,
+  Play,
 } from "lucide-react";
+import { PageContainer } from "../../components/layout/page-container";
+import { PageHeader } from "../../components/layout/page-header";
+import { Section } from "../../components/layout/section";
+import { SectionHeader } from "../../components/layout/section-header";
+import { GoalCard, GoalCardState } from "../../components/primitives/goal-card";
+import { CurrentFocusCard } from "../../components/primitives/current-focus-card";
+import { EmptyState } from "../../components/primitives/empty-state";
+import { useTasks, useActivitySummary } from "../../src/hooks/queries/use-dashboard";
 import { useLiveTelemetry } from "../../src/hooks/use-live-telemetry";
 
-const container = {
-  hidden: { opacity: 0 },
-  show: { opacity: 1, transition: { staggerChildren: 0.06 } },
-};
-const item = {
-  hidden: { opacity: 0, y: 12 },
-  show: { opacity: 1, y: 0, transition: { duration: 0.35 } },
-};
-
-const timeBlocks = [
-  { time: "09:00", label: "Deep Work", app: "VS Code", type: "focus", actual: true },
-  { time: "10:30", label: "Documentation", app: "Browser", type: "research", actual: true },
-  { time: "12:00", label: "Break", app: null, type: "rest", actual: false },
-  { time: "13:00", label: "Implementation", app: "VS Code", type: "focus", actual: false },
-  { time: "15:00", label: "Review", app: "ProductiveHix", type: "meta", actual: false },
-];
-
 export default function TodayPage() {
+  // GoalCard presentation state
+  const [goalState, setGoalState] = useState<GoalCardState>("planned");
+  const [goalTitle, setGoalTitle] = useState("Ship Phase 2 Design System Primitives");
+  const [priorities, setPriorities] = useState([
+    "Build presentation primitives and layout shells",
+    "Establish accessible keyboard focus and reduced-motion tokens",
+    "Prototype extension 5-tab visual workflows",
+  ]);
+  const [goalOutcome, setGoalOutcome] = useState<
+    "Achieved" | "Partially achieved" | "Not achieved" | "Not assessed"
+  >("Not assessed");
+
+  // Focus Session execution state
+  const [sessionActive, setSessionActive] = useState(false);
+  const [activeTask, setActiveTask] = useState<string | null>(null);
+
+  const tasksQuery = useTasks();
+  const activityQuery = useActivitySummary();
   const telemetry = useLiveTelemetry();
 
+  const tasks = tasksQuery.data ?? [];
+
+  // Date context
+  const now = new Date();
+  const dateStr = now.toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+  });
+
+  const totalActiveMinutes = activityQuery.data?.activeTime
+    ? Math.round(activityQuery.data.activeTime / 60)
+    : null;
+
+  const handleChooseTask = () => {
+    const el = document.getElementById("tasks-section");
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth" });
+    } else if (tasks.length > 0) {
+      setActiveTask(tasks[0].title);
+    }
+  };
+
   return (
-    <motion.div
-      variants={container}
-      initial="hidden"
-      animate="show"
-      className="space-y-8"
-    >
-      {/* Header */}
-      <motion.div variants={item} className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-white">Today</h1>
-          <p className="text-sm text-slate-500 mt-1">Daily Focus Summary</p>
-        </div>
-      </motion.div>
+    <PageContainer>
+      {/* Quiet, operational Today header — no dev controls */}
+      <PageHeader
+        title="Today"
+        subtitle={dateStr}
+        breadcrumbs={[
+          { label: "Home", href: "/" },
+          { label: "Today" },
+        ]}
+      />
 
-      {/* Hero: Daily Flow Strip */}
-      <motion.div
-        variants={item}
-        className="bg-[#111111] border border-white/[0.06] rounded-2xl p-8 relative overflow-hidden"
-      >
-        <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2" />
+      {/* 1. Daily Goal Card (Top visual hierarchy) */}
+      <Section>
+        <GoalCard
+          state={goalState}
+          goalTitle={goalTitle}
+          priorities={priorities}
+          outcome={goalOutcome}
+          onPlanToday={() => setGoalState("editable")}
+          onEdit={() => setGoalState("editable")}
+          onSave={(newGoal, newPriorities) => {
+            setGoalTitle(newGoal);
+            setPriorities(newPriorities);
+            setGoalState("planned");
+          }}
+          onCancel={() => setGoalState(goalTitle ? "planned" : "unplanned")}
+          onAssessOutcome={(o) => {
+            if (goalState !== "outcome-pending") {
+              setGoalState("outcome-pending");
+            } else {
+              setGoalOutcome(o);
+              setGoalState("outcome-assessed");
+            }
+          }}
+        />
+      </Section>
 
-        <div className="relative">
-          <div className="flex items-center gap-3 mb-6">
-            <div className="p-2 rounded-xl bg-indigo-500/10 border border-indigo-500/20">
-              <Zap className="w-5 h-5 text-indigo-400" />
-            </div>
-            <div>
-              <p className="text-xs font-medium text-indigo-400 uppercase tracking-wider">
-                Personal Operating System
-              </p>
-              <h2 className="text-xl font-semibold text-white mt-0.5">
-                Building Your Today Baseline
-              </h2>
-            </div>
-          </div>
+      {/* 2. Current Focus / Session Block (NOW layer) */}
+      <Section>
+        <CurrentFocusCard
+          isActive={sessionActive}
+          taskTitle={activeTask || undefined}
+          taskPriority={activeTask ? "HIGH" : undefined}
+          supportingPriority={activeTask && priorities.length > 0 ? priorities[0] : undefined}
+          elapsedSeconds={sessionActive ? 1420 : 0}
+          observedApplication={telemetry.activeApp || undefined}
+          observedTitle={telemetry.windowTitle || undefined}
+          observedType={telemetry.activeDomain ? "browser" : "desktop"}
+          onChooseTask={handleChooseTask}
+          onStartFocus={() => setSessionActive(true)}
+          onPause={() => setSessionActive(false)}
+          onResume={() => setSessionActive(true)}
+          onComplete={() => {
+            setSessionActive(false);
+            setActiveTask(null);
+          }}
+        />
+      </Section>
 
-          <p className="text-sm text-slate-400 max-w-2xl leading-relaxed mb-8">
-            Provides a consolidated breakdown of today&apos;s intentions, focus
-            sessions, context switches, and completed outcomes. ProductiveHix
-            analyzes your desktop focus and self-reflections to construct this
-            view without fabricating synthetic metrics.
-          </p>
+      {/* 3. Today's Tasks (Grouped by intention) */}
+      <Section id="tasks-section">
+        <SectionHeader
+          title="TODAY'S TASKS"
+          description="Concrete action items supporting today's plan or independent work"
+        />
 
-          {/* Horizontal Time Strip */}
-          <div className="flex items-center gap-1">
-            {timeBlocks.map((block, i) => (
-              <div key={i} className="flex-1 group cursor-pointer">
-                <div
-                  className={`h-2 rounded-full mb-2 transition-all ${
-                    block.actual
-                      ? block.type === "focus"
-                        ? "bg-indigo-500"
-                        : "bg-violet-500"
-                      : "bg-white/[0.06] group-hover:bg-white/[0.1]"
-                  }`}
-                />
-                <p className="text-[10px] text-slate-500 group-hover:text-slate-300 transition-colors">
-                  {block.time}
-                </p>
-                <p className="text-[10px] text-slate-600 group-hover:text-slate-400 transition-colors truncate">
-                  {block.label}
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </motion.div>
-
-      {/* Main Grid */}
-      <div className="grid grid-cols-12 gap-6">
-        {/* Session Plan — 7 cols */}
-        <motion.div
-          variants={item}
-          className="col-span-7 bg-[#111111] border border-white/[0.06] rounded-2xl p-6"
-        >
-          <h3 className="text-sm font-medium text-white mb-4">
-            Planned Sessions
-          </h3>
-          <div className="space-y-3">
-            {timeBlocks.map((block, i) => (
+        {tasks.length > 0 ? (
+          <div className="space-y-2">
+            {tasks.map((task) => (
               <div
-                key={i}
-                className="flex items-center gap-4 p-3 rounded-xl hover:bg-white/[0.04] transition-colors group"
+                key={task.id}
+                className="flex items-center justify-between p-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--background-card)] hover:border-[var(--foreground-muted)] transition-colors"
               >
-                <div
-                  className={`w-1 h-8 rounded-full ${
-                    block.type === "focus"
-                      ? "bg-indigo-500"
-                      : block.type === "research"
-                      ? "bg-violet-500"
-                      : block.type === "rest"
-                      ? "bg-slate-600"
-                      : "bg-amber-500"
-                  }`}
-                />
-                <div className="w-14 text-xs text-slate-500 font-mono">
-                  {block.time}
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    aria-label={`Toggle task: ${task.title}`}
+                    className="text-[var(--foreground-muted)] hover:text-[var(--foreground-primary)]"
+                  >
+                    {task.status === "done" ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                    ) : (
+                      <Circle className="w-4 h-4" />
+                    )}
+                  </button>
+                  <span
+                    className={`text-xs ${
+                      task.status === "done"
+                        ? "line-through text-[var(--foreground-muted)]"
+                        : "text-[var(--foreground-primary)]"
+                    }`}
+                  >
+                    {task.title}
+                  </span>
                 </div>
-                <div className="flex-1">
-                  <p className="text-sm text-slate-200">{block.label}</p>
-                  {block.app && (
-                    <p className="text-xs text-slate-500">{block.app}</p>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--background-subtle)] text-[var(--foreground-muted)] border border-[var(--border-subtle)]">
+                    Daily Priority 1
+                  </span>
+                  {!sessionActive && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveTask(task.title);
+                        setSessionActive(true);
+                      }}
+                      className="inline-flex items-center gap-1 text-xs text-[var(--foreground-primary)] hover:opacity-90 px-2.5 py-1 rounded bg-[var(--background-subtle)] border border-[var(--border-subtle)]"
+                    >
+                      <Play size={11} className="fill-current" />
+                      <span>Start Focus</span>
+                    </button>
                   )}
                 </div>
-                {block.actual ? (
-                  <span className="text-[10px] font-medium text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded-full">
-                    Done
-                  </span>
-                ) : (
-                  <span className="text-[10px] font-medium text-slate-500 bg-white/[0.06] px-2 py-1 rounded-full">
-                    Planned
-                  </span>
-                )}
               </div>
             ))}
           </div>
-        </motion.div>
+        ) : (
+          <EmptyState
+            title="No Tasks for Today"
+            description="Create tasks for today's work. They can support a Daily Priority or Goal, or remain independent."
+          />
+        )}
+      </Section>
 
-        {/* Metrics Preview — 5 cols */}
-        <motion.div variants={item} className="col-span-5 space-y-6">
-          <div className="bg-[#111111] border border-white/[0.06] rounded-2xl p-6">
-            <h3 className="text-sm font-medium text-white mb-4">
-              Preview Metrics
-            </h3>
-            <div className="space-y-4">
-              <div className="flex items-center justify-between p-4 rounded-xl bg-white/[0.03] border border-white/[0.06]">
-                <div className="flex items-center gap-3">
-                  <Target className="w-4 h-4 text-indigo-400" />
-                  <span className="text-sm text-slate-300">
-                    Target Sessions
-                  </span>
-                </div>
-                <span className="text-lg font-semibold text-white">
-                  4{" "}
-                  <span className="text-sm text-slate-500 font-normal">
-                    blocks
-                  </span>
-                </span>
-              </div>
-              <div className="flex items-center justify-between p-4 rounded-xl bg-white/[0.03] border border-white/[0.06]">
-                <div className="flex items-center gap-3">
-                  <CheckCircle className="w-4 h-4 text-emerald-400" />
-                  <span className="text-sm text-slate-300">Planned Tasks</span>
-                </div>
-                <span className="text-lg font-semibold text-white">
-                  3{" "}
-                  <span className="text-sm text-slate-500 font-normal">
-                    priorities
-                  </span>
-                </span>
-              </div>
-              <div className="flex items-center justify-between p-4 rounded-xl bg-white/[0.03] border border-white/[0.06]">
-                <div className="flex items-center gap-3">
-                  <Activity className="w-4 h-4 text-violet-400" />
-                  <span className="text-sm text-slate-300">
-                    Current Focus Depth
-                  </span>
-                </div>
-                <span className="text-lg font-semibold text-white">
-                  {telemetry.connected ? "Active" : "—"}{" "}
-                  <span className="text-sm text-slate-500 font-normal">
-                    {telemetry.connected ? "tracking" : "offline"}
-                  </span>
-                </span>
-              </div>
-            </div>
-          </div>
+      {/* 4. Today's Reality (Observational Telemetry Layer) */}
+      <Section>
+        <SectionHeader
+          title="TODAY'S REALITY"
+          description="Objective telemetry reported from desktop and browser collectors — Intention vs Observation"
+        />
 
-          <div className="bg-[#111111] border border-white/[0.06] rounded-2xl p-6">
-            <h3 className="text-sm font-medium text-white mb-3">
-              Data Signal Collection
-            </h3>
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-slate-500">
-                  Daily session activity
-                </span>
-                <span
-                  className={`text-xs font-medium ${
-                    telemetry.connected
-                      ? "text-emerald-400"
-                      : "text-slate-500"
-                  }`}
-                >
-                  {telemetry.connected ? "Today active" : "Waiting..."}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-slate-500">Verification</span>
-                <span
-                  className={`text-xs font-medium ${
-                    telemetry.connected
-                      ? "text-emerald-400"
-                      : "text-slate-500"
-                  }`}
-                >
-                  {telemetry.connected
-                    ? "Desktop bridge active"
-                    : "Not connected"}
-                </span>
-              </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--background-card)] p-4">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs text-[var(--foreground-muted)]">
+                Observed duration
+              </span>
+              <Clock className="w-3.5 h-3.5 text-[var(--foreground-muted)]" />
             </div>
-            <div className="mt-4 h-1 rounded-full bg-white/[0.06] overflow-hidden">
-              <div
-                className={`h-full rounded-full ${
-                  telemetry.connected ? "bg-emerald-500 w-[75%]" : "bg-slate-600 w-[10%]"
-                }`}
-              />
+            <div className="text-xl font-semibold font-mono text-[var(--foreground-primary)]">
+              {totalActiveMinutes !== null && totalActiveMinutes > 0
+                ? `${totalActiveMinutes}m`
+                : totalActiveMinutes === 0
+                ? "0m"
+                : "—"}
             </div>
-            <p className="text-[10px] text-slate-600 mt-2">
-              {telemetry.connected
-                ? "In Progress — syncing"
-                : "Waiting for desktop bridge connection"}
+            <p className="text-[11px] text-[var(--foreground-muted)] mt-1">
+              Desktop + Browser observed time
             </p>
           </div>
-        </motion.div>
-      </div>
-    </motion.div>
+
+          <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--background-card)] p-4">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs text-[var(--foreground-muted)]">
+                Desktop application
+              </span>
+              <Monitor className="w-3.5 h-3.5 text-[var(--foreground-muted)]" />
+            </div>
+            <div className="text-sm font-medium text-[var(--foreground-primary)] truncate">
+              {telemetry.activeApp || "No foreground application"}
+            </div>
+            <p className="text-[11px] text-[var(--foreground-muted)] truncate mt-1">
+              {telemetry.windowTitle || "Waiting for signal..."}
+            </p>
+          </div>
+
+          <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--background-card)] p-4">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs text-[var(--foreground-muted)]">
+                Browser activity
+              </span>
+              <Globe className="w-3.5 h-3.5 text-[var(--foreground-muted)]" />
+            </div>
+            <div className="text-sm font-medium text-[var(--foreground-primary)] truncate">
+              {telemetry.activeDomain || "No active domain"}
+            </div>
+            <p className="text-[11px] text-[var(--foreground-muted)] truncate mt-1">
+              {telemetry.activeTabTitle || "Waiting for signal..."}
+            </p>
+          </div>
+        </div>
+      </Section>
+    </PageContainer>
   );
 }

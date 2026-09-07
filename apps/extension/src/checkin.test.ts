@@ -48,14 +48,14 @@ test("CheckInScheduler enforces quiet hours, cooldown, and paused states", async
   assert.equal(eligibility.eligible, false);
   assert.equal(eligibility.reason, "Check-ins are paused by user");
 
-  // Quiet hours active (00:00 to 23:59 covers all day)
-  await scheduler.updateConfig({ checkInsPaused: false, quietHoursEnabled: true, quietHoursStart: "00:00", quietHoursEnd: "23:59" });
+  // Quiet hours / Sleep schedule active (00:00 to 23:59 covers all day)
+  await scheduler.updateConfig({ checkInsPaused: false, sleepScheduleEnabled: true, sleepStart: "00:00", sleepEnd: "23:59" });
   eligibility = await scheduler.evaluateEligibility();
   assert.equal(eligibility.eligible, false);
-  assert.ok(eligibility.reason.includes("Quiet hours"));
+  assert.ok(eligibility.reason.includes("Quiet hours") || eligibility.reason.includes("Sleep schedule"));
 
-  // Disable quiet hours, record check-in completed -> triggers cooldown
-  await scheduler.updateConfig({ quietHoursEnabled: false });
+  // Disable sleep schedule, record check-in completed -> triggers cooldown
+  await scheduler.updateConfig({ sleepScheduleEnabled: false });
   await scheduler.recordCheckInCompleted();
 
   const state = await scheduler.getState();
@@ -80,6 +80,7 @@ test("CheckInQueue enqueues offline payloads and retrieves them", async () => {
     note: "Offline focus block",
     questionVersion: "v1",
     source: "extension",
+    eventType: "PERIODIC",
   });
 
   const queued = await queue.getQueue();

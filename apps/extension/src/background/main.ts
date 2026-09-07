@@ -7,8 +7,12 @@ import { getDesktopStatus } from "./desktop";
 import { ExtensionQueue } from "./queue";
 import { ExtensionSyncManager } from "./sync";
 import { TabTracker } from "./tabs";
-import { checkInScheduler } from "./scheduler";
+import { activityEngine } from "./activity-engine";
+import { reflectionEngine } from "./reflection-engine";
+import { inactivityEngine } from "./inactivity-engine";
 import { checkInQueue } from "./checkin-queue";
+// Initialize engines so their constructors run
+import "./availability-manager";
 
 
 const queue = new ExtensionQueue();
@@ -26,22 +30,7 @@ function triggerDebouncedFlush(delayMs = 1500) {
   }, delayMs);
 }
 
-function startSchedulerTicker() {
-  if (schedulerTicker) return;
-  schedulerTicker = setInterval(async () => {
-    try {
-      const state = checkInScheduler.getState();
-      if (state.checkInsPaused) return;
-      
-      // We purposefully DO NOT trigger the notification here anymore.
-      // We only evaluate eligibility passively. The actual notification
-      // will be triggered by `notifyUserStoppedWorking()` when the user 
-      // naturally stops working (e.g. idle or focus loss).
-    } catch (err) {
-      console.warn("[SCHEDULER TICKER] Error checking eligibility:", err);
-    }
-  }, 1000);
-}
+// The old scheduler ticker has been replaced by the state-driven engines.
 
 async function recordTabEvent(eventPromise: Promise<BrowserActivityEvent | null>) {
   const settings = await getSettings();
@@ -51,9 +40,10 @@ async function recordTabEvent(eventPromise: Promise<BrowserActivityEvent | null>
     await queue.enqueue([event]);
     triggerDebouncedFlush();
 
-    // Record meaningful activity for check-in scheduler
+    // Record meaningful activity for activity engine
     if (event.data && "domain" in event.data && typeof event.data.domain === "string") {
-      void checkInScheduler.recordActivity(event.data.domain, event.durationMs);
+      const ts = typeof event.timestamp === "number" ? event.timestamp : Date.now();
+      activityEngine.registerBrowserActivity(ts);
     }
   }
 }
@@ -62,9 +52,7 @@ async function initialize() {
   const settings = await getSettings();
   tracker.setInstallationId(settings.installationId);
 
-  // Initialize scheduler state
-  await checkInScheduler.loadState();
-  startSchedulerTicker();
+  // Initialize engines (they load their state automatically in constructor)
 
   // Bootstrap real dev authentication device token if not present
   if (!settings.deviceToken) {
@@ -111,11 +99,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 chrome.windows.onFocusChanged.addListener(async (windowId) => {
   await recordTabEvent(tracker.handleWindowFocusChanged(windowId));
   
-  if (windowId === chrome.windows.WINDOW_ID_NONE) {
-    // User clicked away from the browser (transition to STOPPED)
-    console.log("[MAIN] User switched away from browser, checking eligibility...");
-    await checkInScheduler.notifyUserStoppedWorking();
-  }
+  // No longer need to manually notify stopped working, ActivityEngine handles IDLE transitions
 });
 
 // Idle state changed
@@ -126,11 +110,7 @@ chrome.idle.onStateChanged.addListener(async (state) => {
   await queue.enqueue([idleEvent]);
   triggerDebouncedFlush();
 
-  if (state !== "active") {
-    // User went idle or locked screen (transition to STOPPED)
-    console.log("[MAIN] User went idle, checking eligibility...");
-    await checkInScheduler.notifyUserStoppedWorking();
-  }
+  // IDLE state transitions are handled automatically by AvailabilityManager and ActivityEngine
 });
 
 // MV3 Alarms for queue flushing, long-session heartbeat, and hourly reflection evaluation
@@ -144,10 +124,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     void checkInQueue.flush();
   } else if (alarm.name === "productivehix-heartbeat") {
     void recordTabEvent(tracker.handlePeriodicHeartbeat());
-  } else if (alarm.name === "productivehix-checkin-eval" || alarm.name === "productivehix-checkin-timer") {
-    // Passively evaluate eligibility. If eligible, it arms the system
-    // to pop the notification at the next natural stopping point.
-    checkInScheduler.evaluateEligibility();
+    activityEngine.registerDesktopActivity(); // Record desktop heartbeat as activity
   }
 });
 
@@ -160,9 +137,7 @@ async function statusResponse() {
     checkInQueue.count(),
   ]);
 
-  const schedulerState = checkInScheduler.getState();
-  const eligibility = checkInScheduler.evaluateEligibility();
-  const remainingSecondsUntilTrigger = checkInScheduler.getRemainingSeconds();
+  const schedulerData = reflectionEngine.getSchedulerStatus();
 
   return {
     installationId: settings.installationId,
@@ -179,10 +154,8 @@ async function statusResponse() {
     desktop,
     currentActivity: settings.trackingPaused ? null : tracker.getCurrentActivity(),
     scheduler: {
-      ...schedulerState,
-      eligibility,
+      ...schedulerData,
       pendingCheckIns,
-      remainingSecondsUntilTrigger,
     },
   };
 }
@@ -203,7 +176,7 @@ async function handleSubmitCheckIn(payload: CheckInCreateInput): Promise<{
       });
 
       if (result?.id) {
-        await checkInScheduler.recordCheckInCompleted();
+        await reflectionEngine.forceReset();
         return { success: true, queuedOffline: false, checkIn: result };
       }
     } catch (err) {
@@ -211,14 +184,18 @@ async function handleSubmitCheckIn(payload: CheckInCreateInput): Promise<{
     }
   }
 
-  // Fall back to offline resilient queue
   await checkInQueue.enqueue(payload);
-  await checkInScheduler.recordCheckInCompleted();
+  await reflectionEngine.forceReset();
   return { success: true, queuedOffline: true };
 }
 
 chrome.runtime.onMessage.addListener(
   (message: any, _sender, sendResponse) => {
+    if (message.type === "browser-activity-signal") {
+      activityEngine.registerBrowserActivity(message.timestamp || Date.now());
+      sendResponse({ received: true });
+      return true;
+    }
     if (message.type === "get-status") {
       void statusResponse().then(sendResponse);
       return true;
@@ -238,20 +215,24 @@ chrome.runtime.onMessage.addListener(
       return true;
     }
     if (message.type === "trigger-checkin-notification") {
-      void checkInScheduler.triggerNotificationIfEligible(true).then((sent) => {
-        sendResponse({ sent, state: checkInScheduler.getState() });
+      void reflectionEngine.forceTrigger().then(async () => {
+        const res = await statusResponse();
+        sendResponse({ sent: true, state: res.scheduler });
       });
       return true;
     }
     if (message.type === "reset-scheduler-timer") {
-      void checkInScheduler.resetTimer(message.seconds).then((state) => {
-        sendResponse({ success: true, state });
+      void reflectionEngine.resetTimer(message.seconds).then(async () => {
+        const res = await statusResponse();
+        sendResponse({ success: true, state: res.scheduler });
       });
       return true;
     }
     if (message.type === "update-scheduler-config") {
-      void checkInScheduler.updateConfig(message.config).then((state) => {
-        sendResponse({ success: true, state });
+      void reflectionEngine.updateConfig(message.config || {}).then(async () => {
+        await inactivityEngine.reloadConfig();
+        const res = await statusResponse();
+        sendResponse({ success: true, state: res.scheduler });
       });
       return true;
     }

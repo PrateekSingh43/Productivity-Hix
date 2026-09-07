@@ -3,6 +3,7 @@
 :root {
   --background-default: #09090b;
   --background-inset: #0d0d10;
+  --background-card: #111115;
   --background-secondary: #131318;
   --background-tertiary: #1a1a22;
   --border-subtle: #23232d;
@@ -28,6 +29,7 @@
 @theme inline {
   --color-bg-default: var(--background-default);
   --color-bg-inset: var(--background-inset);
+  --color-bg-card: var(--background-card);
   --color-bg-secondary: var(--background-secondary);
   --color-bg-tertiary: var(--background-tertiary);
   --color-border-subtle: var(--border-subtle);
@@ -62,5 +64,13 @@
   button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible {
     outline: 2px solid var(--accent-default);
     outline-offset: 2px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, ::before, ::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }

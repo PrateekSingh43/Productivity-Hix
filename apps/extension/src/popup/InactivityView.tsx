@@ -18,6 +18,9 @@ export function InactivityView({
         eventType: "AWAY_REVIEW",
         activityAssessment: "AWAY",
         note: reason.trim(),
+        reasons: [],
+        questionVersion: "",
+        source: ""
       });
     },
     onSuccess: () => {

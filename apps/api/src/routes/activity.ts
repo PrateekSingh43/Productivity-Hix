@@ -61,6 +61,13 @@ activityRouter.get("/sessions", async (request, response, next) => {
     next(error);
   }
 });
+activityRouter.get("/sync", async (request, response, next) => {
+  try {
+    response.json(await syncActivity(userIdFrom(request)));
+  } catch (error) {
+    next(error);
+  }
+});
 activityRouter.post("/sync", async (request, response, next) => {
   try {
     request.log.info("Activity sync requested");
