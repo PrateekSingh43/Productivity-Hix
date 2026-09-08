@@ -217,3 +217,19 @@ test("deriveSessions: does not mutate the caller's input array", () => {
   deriveSessions(events, 300);
   assert.equal(events[0]!.externalId, originalFirstId, "Input array must not be mutated in-place");
 });
+
+// 13. Non-finite durations (Infinity, -Infinity) are ignored
+test("deriveSessions: 13. events with non-finite durations (Infinity, -Infinity) are ignored", () => {
+  const events = [
+    mockEvent("ev-inf", "2026-01-01T10:00:00.000Z", Infinity),
+    mockEvent("ev-neginf", "2026-01-01T10:05:00.000Z", -Infinity),
+    mockEvent("ev-valid", "2026-01-01T10:10:00.000Z", 600),
+  ];
+  const sessions = deriveSessions(events, 300);
+
+  assert.equal(sessions.length, 1);
+  assert.equal(sessions[0]!.startedAt, "2026-01-01T10:10:00.000Z");
+  assert.equal(sessions[0]!.endedAt, "2026-01-01T10:20:00.000Z");
+  assert.equal(sessions[0]!.durationSeconds, 600);
+});
+

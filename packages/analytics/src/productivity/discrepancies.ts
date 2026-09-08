@@ -4,7 +4,7 @@ import { isIdleActivity } from "../activity/categories";
 export type SelfReportDiscrepancy = {
   checkInId: string;
   reportedProductive: boolean | null;
-  observedActiveSeconds: number;
+  observedActiveSeconds: number | null;
   note:
     | "reported-progress-without-observed-time"
     | "observed-time-without-progress"
@@ -64,7 +64,7 @@ function calculateObservedActiveSeconds(
     if (isIdleActivity(event)) continue;
 
     const durationSec = event.duration;
-    if (typeof durationSec !== "number" || durationSec <= 0 || Number.isNaN(durationSec)) {
+    if (!Number.isFinite(durationSec) || durationSec <= 0) {
       continue;
     }
 
@@ -114,7 +114,7 @@ export function findDiscrepancies(
       return {
         checkInId: checkIn.id,
         reportedProductive: checkIn.productive,
-        observedActiveSeconds: 0,
+        observedActiveSeconds: null,
         note: "insufficient-evidence",
       };
     }

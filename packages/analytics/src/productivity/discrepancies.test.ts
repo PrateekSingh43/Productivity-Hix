@@ -172,7 +172,7 @@ test("discrepancies: 7. missing windowStart marks observation as insufficient-ev
   const events = [mockEvent("2026-01-01T10:30:00.000Z", 600)];
   const res = findDiscrepancies([checkIn], events);
 
-  assert.equal(res[0]!.observedActiveSeconds, 0);
+  assert.equal(res[0]!.observedActiveSeconds, null);
   assert.equal(res[0]!.note, "insufficient-evidence");
 });
 
@@ -198,7 +198,7 @@ test("discrepancies: 8. missing windowEnd uses createdAt only if createdAt > win
     progress: true,
   });
   const res2 = findDiscrepancies([checkInInvalid], events);
-  assert.equal(res2[0]!.observedActiveSeconds, 0);
+  assert.equal(res2[0]!.observedActiveSeconds, null);
   assert.equal(res2[0]!.note, "insufficient-evidence");
 });
 
@@ -213,7 +213,7 @@ test("discrepancies: 9. missing both window boundaries marks as insufficient-evi
   const events = [mockEvent("2026-01-01T10:30:00.000Z", 600)];
   const res = findDiscrepancies([checkIn], events);
 
-  assert.equal(res[0]!.observedActiveSeconds, 0);
+  assert.equal(res[0]!.observedActiveSeconds, null);
   assert.equal(res[0]!.note, "insufficient-evidence");
 });
 
@@ -236,6 +236,7 @@ test("discrepancies: 10. invalid timestamps in check-in or events are handled sa
   ];
 
   const res = findDiscrepancies([checkInBad, checkInGood], events);
+  assert.equal(res[0]!.observedActiveSeconds, null);
   assert.equal(res[0]!.note, "insufficient-evidence");
   assert.equal(res[1]!.observedActiveSeconds, 300);
   assert.equal(res[1]!.note, "aligned");
@@ -283,4 +284,23 @@ test("discrepancies: 12. multiple overlapping events produce exact unioned activ
 
   assert.equal(res[0]!.observedActiveSeconds, 2700);
   assert.equal(res[0]!.note, "observed-time-without-progress");
+});
+
+// 13. Non-finite durations (Infinity, -Infinity) are ignored
+test("discrepancies: 13. non-finite durations (Infinity, -Infinity) are ignored", () => {
+  const checkIn = mockCheckIn({
+    windowStart: "2026-01-01T10:00:00.000Z",
+    windowEnd: "2026-01-01T11:00:00.000Z",
+    progress: true,
+  });
+
+  const events = [
+    mockEvent("2026-01-01T10:10:00.000Z", Infinity),
+    mockEvent("2026-01-01T10:20:00.000Z", -Infinity),
+    mockEvent("2026-01-01T10:30:00.000Z", 300),
+  ];
+
+  const res = findDiscrepancies([checkIn], events);
+  assert.equal(res[0]!.observedActiveSeconds, 300);
+  assert.equal(res[0]!.note, "aligned");
 });

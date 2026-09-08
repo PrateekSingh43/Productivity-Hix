@@ -15,7 +15,7 @@ export function deriveSessions(events: NormalizedActivityEvent[], gapSeconds = 3
     if (isIdleActivity(event)) continue;
 
     const durationSec = event.duration;
-    if (typeof durationSec !== "number" || durationSec <= 0 || Number.isNaN(durationSec)) {
+    if (!Number.isFinite(durationSec) || durationSec <= 0) {
       continue;
     }
 
