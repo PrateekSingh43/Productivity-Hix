@@ -7,3 +7,4 @@ export * from "./session";
 export * from "./task";
 export * from "./telemetry";
 export * from "./device-auth";
+export * from "./plan";

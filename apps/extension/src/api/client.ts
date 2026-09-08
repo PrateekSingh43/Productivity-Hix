@@ -1,7 +1,7 @@
-import type { LearningAssessment, Task, WorkSession, CheckIn, CheckInPatternCandidate } from "@repo/types";
+import type { LearningAssessment, Task, WorkSession, CheckIn, CheckInPatternCandidate, DayPlanResponse, DailyGoal, GoalOutcome } from "@repo/types";
 import type { ActivitySummary } from "@repo/types";
 import type { TelemetryBatch, BatchIngestionResult } from "@repo/telemetry";
-import type { CheckInCreateInput } from "@repo/validation";
+import type { CheckInCreateInput, DailyPlanUpsertInput } from "@repo/validation";
 import { getSettings } from "../storage/settings";
 
 export class ExtensionApiClient {
@@ -32,7 +32,53 @@ export class ExtensionApiClient {
   getCheckIns() { return this.request<CheckIn[]>("/api/check-ins"); }
   getCheckInPatterns() { return this.request<CheckInPatternCandidate[]>("/api/check-ins/patterns"); }
   
-  updateTask(id: string, data: { status?: Task["status"]; title?: string }) {
+  getTodayPlan(date?: string, timezone?: string) {
+    const params = new URLSearchParams();
+    if (date) params.set("date", date);
+    if (timezone) params.set("timezone", timezone);
+    const query = params.toString() ? `?${params.toString()}` : "";
+    return this.request<DayPlanResponse>(`/api/plans/today${query}`);
+  }
+
+  getTomorrowPlan(timezone?: string) {
+    const params = new URLSearchParams();
+    if (timezone) params.set("timezone", timezone);
+    const query = params.toString() ? `?${params.toString()}` : "";
+    return this.request<DayPlanResponse>(`/api/plans/tomorrow${query}`);
+  }
+
+  getPlan(date: string) {
+    return this.request<DayPlanResponse>(`/api/plans/${date}`);
+  }
+
+  savePlan(data: DailyPlanUpsertInput) {
+    return this.request<DayPlanResponse>("/api/plans", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  updateGoalOutcome(goalId: string, outcome: GoalOutcome | null) {
+    return this.request<DailyGoal>(`/api/plans/goals/${goalId}/outcome`, {
+      method: "PATCH",
+      body: JSON.stringify({ outcome }),
+    });
+  }
+
+  deleteGoal(goalId: string) {
+    return this.request<{ success: boolean }>(`/api/plans/goals/${goalId}`, {
+      method: "DELETE",
+    });
+  }
+
+  createTask(data: { title: string; plannedDurationMinutes?: number; priority?: Task["priority"]; goalId?: string | null; productiveDate?: string | null }) {
+    return this.request<Task>("/api/tasks", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  updateTask(id: string, data: { status?: Task["status"]; title?: string; priority?: Task["priority"]; goalId?: string | null; productiveDate?: string | null }) {
     return this.request<Task>(`/api/tasks/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),

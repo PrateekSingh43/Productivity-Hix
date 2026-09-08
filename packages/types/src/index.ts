@@ -6,3 +6,5 @@ export * from "./learning";
 export * from "./session";
 export * from "./task";
 export * from "./timeline";
+export * from "./plan";
+export * from "./productive-day";

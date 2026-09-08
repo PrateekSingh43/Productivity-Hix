@@ -16,6 +16,8 @@ import {
   Trash2,
   Flame,
   FileText,
+  Target,
+  Check,
 } from "lucide-react";
 import Link from "next/link";
 import type { Task, TaskPriority, TaskStatus } from "@repo/types";
@@ -23,6 +25,7 @@ import {
   useTaskDetail,
   useTaskActivity,
 } from "../../src/hooks/queries/use-tasks";
+import { useTodayPlan } from "../../src/hooks/queries/use-plans";
 import {
   useUpdateTaskMutation,
   useDeleteTaskMutation,
@@ -55,6 +58,8 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
   const taskId = task?.id ?? null;
   const { data: taskDetail, isLoading: isLoadingDetail } = useTaskDetail(taskId);
   const { data: activitySummary = [], isLoading: isLoadingActivity } = useTaskActivity(taskId);
+  const todayPlan = useTodayPlan();
+  const goals = todayPlan.data?.goals ?? [];
 
   const updateTaskMutation = useUpdateTaskMutation();
   const deleteTaskMutation = useDeleteTaskMutation();
@@ -66,19 +71,30 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
   const [priority, setPriority] = useState<TaskPriority>("medium");
   const [status, setStatus] = useState<TaskStatus>("todo");
   const [plannedDuration, setPlannedDuration] = useState<number>(30);
-  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [goalId, setGoalId] = useState<string>("");
+  const [lastLoadedId, setLastLoadedId] = useState<string | null>(null);
+  const [isSaved, setIsSaved] = useState(false);
 
-  // Sync state when task/taskDetail changes
+  // Sync state ONLY when opening or switching to a different task
   useEffect(() => {
-    const current = taskDetail || task;
-    if (current) {
-      setTitle(current.title);
-      setDescription(current.description || "");
-      setPriority(current.priority);
-      setStatus(current.status);
-      setPlannedDuration(current.plannedDurationMinutes || 30);
+    if (task && task.id !== lastLoadedId) {
+      setTitle(task.title || "");
+      setDescription(task.description || "");
+      setPriority(task.priority || "medium");
+      setStatus(task.status || "todo");
+      setPlannedDuration(task.plannedDurationMinutes || 30);
+      setGoalId(task.goalId || "");
+      setLastLoadedId(task.id);
+      setIsSaved(false);
     }
-  }, [task, taskDetail]);
+  }, [task, lastLoadedId]);
+
+  // If taskDetail arrives with richer description (e.g. if initial task object had none)
+  useEffect(() => {
+    if (taskDetail && taskDetail.id === lastLoadedId && !description && taskDetail.description) {
+      setDescription(taskDetail.description);
+    }
+  }, [taskDetail, lastLoadedId, description]);
 
   if (!task) return null;
 
@@ -97,47 +113,36 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
 
   const varianceMinutes = actualMinutes - plannedDuration;
 
-  const handleSaveTitle = () => {
-    setIsEditingTitle(false);
-    if (title.trim() && title !== currentTask.title) {
-      updateTaskMutation.mutate({
+  // Check if draft has unsaved changes compared to loaded task
+  const isDirty =
+    title.trim() !== (currentTask.title || "").trim() ||
+    description.trim() !== (currentTask.description || "").trim() ||
+    status !== currentTask.status ||
+    priority !== currentTask.priority ||
+    plannedDuration !== (currentTask.plannedDurationMinutes || 30) ||
+    (goalId || "") !== (currentTask.goalId || "");
+
+  const handleSaveAll = () => {
+    if (!title.trim()) return;
+    updateTaskMutation.mutate(
+      {
         id: currentTask.id,
-        input: { title: title.trim() },
-      });
-    }
-  };
-
-  const handleSaveDescription = () => {
-    if (description !== (currentTask.description || "")) {
-      updateTaskMutation.mutate({
-        id: currentTask.id,
-        input: { description: description.trim() || null },
-      });
-    }
-  };
-
-  const handleStatusChange = (newStatus: TaskStatus) => {
-    setStatus(newStatus);
-    updateTaskMutation.mutate({
-      id: currentTask.id,
-      input: { status: newStatus },
-    });
-  };
-
-  const handlePriorityChange = (newPriority: TaskPriority) => {
-    setPriority(newPriority);
-    updateTaskMutation.mutate({
-      id: currentTask.id,
-      input: { priority: newPriority },
-    });
-  };
-
-  const handlePlannedChange = (newDuration: number) => {
-    setPlannedDuration(newDuration);
-    updateTaskMutation.mutate({
-      id: currentTask.id,
-      input: { plannedDurationMinutes: newDuration },
-    });
+        input: {
+          title: title.trim(),
+          description: description.trim() || null,
+          status,
+          priority,
+          plannedDurationMinutes: plannedDuration,
+          goalId: goalId ? goalId : null,
+        },
+      },
+      {
+        onSuccess: () => {
+          setIsSaved(true);
+          setTimeout(() => setIsSaved(false), 2500);
+        },
+      },
+    );
   };
 
   const handleDelete = () => {
@@ -167,8 +172,8 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
             {/* Mark Done Checkbox */}
             <button
               type="button"
-              onClick={() => handleStatusChange(isDone ? "todo" : "done")}
-              className={`shrink-0 transition-transform active:scale-95 ${
+              onClick={() => setStatus(status === "done" ? "todo" : "done")}
+              className={`shrink-0 transition-transform active:scale-95 cursor-pointer ${
                 isDone ? "text-emerald-400 hover:text-emerald-300" : "text-[#6b7280] hover:text-[#707df7]"
               }`}
               title={isDone ? "Mark incomplete" : "Mark done"}
@@ -186,10 +191,26 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Save Button */}
+            <button
+              type="button"
+              onClick={handleSaveAll}
+              disabled={!title.trim() || updateTaskMutation.isPending || !isDirty}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-sm)] text-xs font-semibold transition-all cursor-pointer ${
+                isDirty
+                  ? "bg-[#707df7] hover:bg-[#5f6de6] text-white shadow-md shadow-indigo-500/20"
+                  : "bg-[#181a24] text-[#6b7280] border border-[#262b3a] cursor-not-allowed opacity-50"
+              }`}
+              title="Save task changes"
+            >
+              <Check size={13} />
+              <span>{updateTaskMutation.isPending ? "Saving..." : isSaved ? "Saved!" : "Save"}</span>
+            </button>
+
             <button
               type="button"
               onClick={handleDelete}
-              className="p-1.5 rounded-[var(--radius-sm)] text-[#6b7280] hover:text-red-400 hover:bg-red-500/10 transition-colors"
+              className="p-1.5 rounded-[var(--radius-sm)] text-[#6b7280] hover:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer"
               title="Delete task"
             >
               <Trash2 size={16} />
@@ -197,7 +218,7 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
             <button
               type="button"
               onClick={onClose}
-              className="p-1.5 rounded-[var(--radius-sm)] text-[#6b7280] hover:text-[#f4f4f6] hover:bg-[#1a1c26] transition-colors"
+              className="p-1.5 rounded-[var(--radius-sm)] text-[#6b7280] hover:text-[#f4f4f6] hover:bg-[#1a1c26] transition-colors cursor-pointer"
             >
               <X size={18} />
             </button>
@@ -207,28 +228,23 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
         {/* Scrollable Content */}
         <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-6">
           {/* Title Editor */}
-          <div className="space-y-1">
-            {isEditingTitle ? (
-              <input
-                type="text"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                onBlur={handleSaveTitle}
-                onKeyDown={(e) => e.key === "Enter" && handleSaveTitle()}
-                className="w-full bg-[#0a0c11] border border-[#3b435a] rounded-[var(--radius-sm)] p-2.5 text-base font-semibold text-[#f4f4f6] outline-none"
-                autoFocus
-              />
-            ) : (
-              <h2
-                onClick={() => setIsEditingTitle(true)}
-                className={`text-lg sm:text-xl font-bold tracking-tight cursor-pointer hover:text-white transition-colors ${
-                  isDone ? "line-through text-[#5c6479]" : "text-[#f4f4f6]"
-                }`}
-                title="Click to edit title"
-              >
-                {title || "Untitled Task"}
-              </h2>
-            )}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label className="text-[10px] uppercase font-semibold tracking-wider text-[#6b7280]">
+                Task Title
+              </label>
+              {isDirty && (
+                <span className="text-[10px] text-amber-400 font-medium">● Unsaved changes</span>
+              )}
+            </div>
+            <input
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleSaveAll()}
+              placeholder="Task title..."
+              className="w-full bg-[#0a0c11] border border-[#262b3a] focus:border-[#707df7] rounded-[var(--radius-sm)] p-2.5 text-sm sm:text-base font-semibold text-[#f4f4f6] outline-none transition-colors"
+            />
           </div>
 
           {/* Properties Grid */}
@@ -240,11 +256,15 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
               </label>
               <select
                 value={status}
-                onChange={(e) => handleStatusChange(e.target.value as TaskStatus)}
-                className="w-full bg-[#141720] border border-[#262b3a] rounded-[var(--radius-sm)] px-2.5 py-1.5 text-xs text-[#f4f4f6] outline-none focus:border-[#707df7]"
+                onChange={(e) => setStatus(e.target.value as TaskStatus)}
+                className="w-full bg-[#141720] border border-[#262b3a] rounded-[var(--radius-sm)] px-2.5 py-1.5 text-xs text-[#f4f4f6] outline-none focus:border-[#707df7] cursor-pointer [&>option]:bg-[#141720] [&>option]:text-[#f4f4f6]"
               >
                 {STATUSES.map((s) => (
-                  <option key={s.value} value={s.value}>
+                  <option
+                    key={s.value}
+                    value={s.value}
+                    style={{ backgroundColor: "#141720", color: "#f4f4f6" }}
+                  >
                     {s.label}
                   </option>
                 ))}
@@ -258,11 +278,15 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
               </label>
               <select
                 value={priority}
-                onChange={(e) => handlePriorityChange(e.target.value as TaskPriority)}
-                className="w-full bg-[#141720] border border-[#262b3a] rounded-[var(--radius-sm)] px-2.5 py-1.5 text-xs text-[#f4f4f6] outline-none focus:border-[#707df7]"
+                onChange={(e) => setPriority(e.target.value as TaskPriority)}
+                className="w-full bg-[#141720] border border-[#262b3a] rounded-[var(--radius-sm)] px-2.5 py-1.5 text-xs text-[#f4f4f6] outline-none focus:border-[#707df7] cursor-pointer [&>option]:bg-[#141720] [&>option]:text-[#f4f4f6]"
               >
                 {PRIORITIES.map((p) => (
-                  <option key={p.value} value={p.value}>
+                  <option
+                    key={p.value}
+                    value={p.value}
+                    style={{ backgroundColor: "#141720", color: "#f4f4f6" }}
+                  >
                     {p.label}
                   </option>
                 ))}
@@ -276,11 +300,15 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
               </label>
               <select
                 value={plannedDuration}
-                onChange={(e) => handlePlannedChange(Number(e.target.value))}
-                className="w-full bg-[#141720] border border-[#262b3a] rounded-[var(--radius-sm)] px-2.5 py-1.5 text-xs text-[#f4f4f6] font-mono outline-none focus:border-[#707df7]"
+                onChange={(e) => setPlannedDuration(Number(e.target.value))}
+                className="w-full bg-[#141720] border border-[#262b3a] rounded-[var(--radius-sm)] px-2.5 py-1.5 text-xs text-[#f4f4f6] font-mono outline-none focus:border-[#707df7] cursor-pointer [&>option]:bg-[#141720] [&>option]:text-[#f4f4f6]"
               >
                 {DURATION_OPTIONS.map((mins) => (
-                  <option key={mins} value={mins}>
+                  <option
+                    key={mins}
+                    value={mins}
+                    style={{ backgroundColor: "#141720", color: "#f4f4f6" }}
+                  >
                     {formatDuration(mins)} (planned)
                   </option>
                 ))}
@@ -305,6 +333,32 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
                 )}
               </div>
             </div>
+
+            {/* Linked Goal Selector */}
+            <div className="space-y-1 col-span-2 pt-1 border-t border-[#1b1f2b]">
+              <label className="text-[10px] uppercase font-semibold tracking-wider text-[#6b7280] flex items-center gap-1">
+                <Target size={11} className="text-[#707df7]" />
+                Linked Daily Goal
+              </label>
+              <select
+                value={goalId}
+                onChange={(e) => setGoalId(e.target.value)}
+                className="w-full bg-[#141720] border border-[#262b3a] rounded-[var(--radius-sm)] px-2.5 py-1.5 text-xs text-[#f4f4f6] outline-none focus:border-[#707df7] cursor-pointer [&>option]:bg-[#141720] [&>option]:text-[#f4f4f6]"
+              >
+                <option value="" style={{ backgroundColor: "#141720", color: "#f4f4f6" }}>
+                  Independent Task (No Goal)
+                </option>
+                {goals.map((g) => (
+                  <option
+                    key={g.id}
+                    value={g.id}
+                    style={{ backgroundColor: "#141720", color: "#f4f4f6" }}
+                  >
+                    Goal: {g.title}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           {/* Notes / Description */}
@@ -316,7 +370,6 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              onBlur={handleSaveDescription}
               placeholder="Add deliberate intention, scope, or notes for this task..."
               rows={3}
               className="w-full rounded-[var(--radius-md)] border border-[#232733] bg-[#0c0d12] p-3 text-xs text-[#f4f4f6] placeholder-[#4f566a] outline-none focus:border-[#707df7] transition-colors resize-none leading-relaxed"
@@ -478,16 +531,41 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
           </div>
         </div>
 
-        {/* Footer info */}
-        <div className="p-4 border-t border-[#1e222e] bg-[#0d0f15] flex items-center justify-between text-[11px] text-[#6b7280]">
-          <span>
-            Created: {format(new Date(currentTask.createdAt), "MMM d, HH:mm")}
-          </span>
-          {currentTask.completedAt && (
-            <span className="text-emerald-400">
-              Completed: {format(new Date(currentTask.completedAt), "MMM d, HH:mm")}
+        {/* Footer actions & info */}
+        <div className="p-4 border-t border-[#1e222e] bg-[#0d0f15] flex items-center justify-between gap-3">
+          <div className="flex flex-col text-[11px] text-[#6b7280]">
+            <span>
+              Created: {format(new Date(currentTask.createdAt), "MMM d, HH:mm")}
             </span>
-          )}
+            {currentTask.completedAt && (
+              <span className="text-emerald-400">
+                Completed: {format(new Date(currentTask.completedAt), "MMM d, HH:mm")}
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-3 py-1.5 rounded-[var(--radius-sm)] text-xs text-[#8f96a8] hover:text-[#f4f4f6] hover:bg-[#181a24] border border-transparent hover:border-[#262b3a] transition-all cursor-pointer"
+            >
+              Close
+            </button>
+            <button
+              type="button"
+              onClick={handleSaveAll}
+              disabled={!isDirty || updateTaskMutation.isPending || !title.trim()}
+              className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-[var(--radius-sm)] text-xs font-semibold transition-all cursor-pointer ${
+                isDirty && title.trim()
+                  ? "bg-[#707df7] hover:bg-[#5f6de6] text-white shadow-md shadow-indigo-500/20"
+                  : "bg-[#181a24] text-[#6b7280] border border-[#262b3a] cursor-not-allowed opacity-50"
+              }`}
+            >
+              <Check size={14} />
+              <span>{updateTaskMutation.isPending ? "Saving..." : isSaved ? "Saved!" : "Save Changes"}</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>

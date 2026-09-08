@@ -18,6 +18,12 @@ import {
   Download,
   Target,
   X,
+  Plus,
+  Trash2,
+  ChevronDown,
+  ChevronRight,
+  ListTodo,
+  Radio,
 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -27,7 +33,12 @@ import {
   triggerAuth,
   type ExtensionStatus,
 } from "../api/client";
-import type { Task } from "@repo/types";
+import type { Task, DailyGoal, GoalOutcome } from "@repo/types";
+import {
+  resolveProductiveDay,
+  resolveTomorrowProductiveDay,
+  formatProductiveDateLabel,
+} from "@repo/types";
 import { CheckInView } from "./CheckInView";
 import { SettingsView } from "./SettingsView";
 import { DiagnosticsView } from "./DiagnosticsView";
@@ -65,9 +76,13 @@ function Skeleton({ className = "" }: { className?: string }) {
 function Header({
   status,
   onPillClick,
+  isStandalone,
+  onClose,
 }: {
   status?: ExtensionStatus;
   onPillClick?: () => void;
+  isStandalone?: boolean;
+  onClose?: () => void;
 }) {
   const active = status ? !status.trackingPaused : true;
   return (
@@ -75,18 +90,49 @@ function Header({
       <div className="brand-mark">
         <Activity size={15} strokeWidth={2.6} />
       </div>
-      <div>
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
         <div className="brand">ProductiveHix</div>
+        {status?.desktop?.connected ? (
+          <span
+            title="Desktop tracking active"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 3,
+              fontSize: 9.5,
+              color: "#34d399",
+              background: "rgba(52,211,153,0.1)",
+              padding: "1px 5px",
+              borderRadius: 4,
+            }}
+          >
+            <span style={{ width: 4.5, height: 4.5, borderRadius: "50%", background: "#34d399" }} />
+            Desktop
+          </span>
+        ) : null}
       </div>
-      <button
-        type="button"
-        className={`tracking-pill ${active ? "is-active" : "is-paused"}`}
-        onClick={onPillClick}
-        title="Tracking status (Click to view controls)"
-      >
-        <span className="status-dot" />
-        {active ? "Tracking" : "Paused"}
-      </button>
+      <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
+        <button
+          type="button"
+          className={`tracking-pill ${active ? "is-active" : "is-paused"}`}
+          onClick={onPillClick}
+          title="Tracking status (Click to view controls)"
+        >
+          <span className="status-dot" />
+          {active ? "Tracking" : "Paused"}
+        </button>
+        {isStandalone ? (
+          <button
+            type="button"
+            className="icon-button"
+            onClick={onClose || (() => window.close())}
+            title="Close reflection window"
+            style={{ color: "#a59cb5", padding: "4px" }}
+          >
+            <X size={15} />
+          </button>
+        ) : null}
+      </div>
     </header>
   );
 }
@@ -137,33 +183,59 @@ function Metric({
 // -------------------------------------------------------------
 // WORKFLOW PROTOTYPE MODALS / SHEETS (Visual only, no domain mutations)
 // -------------------------------------------------------------
-interface PlanWorkflowModalProps {
+// -------------------------------------------------------------
+// WORKFLOW SHEETS (Authoritative backend domain mutations)
+// -------------------------------------------------------------
+interface PlanWorkflowSheetProps {
   title: string;
   subtitle: string;
-  goal: string;
-  priorities: string[];
-  onSave: (goal: string, priorities: string[]) => void;
+  date: string;
+  initialGoals?: Array<{ id?: string; title: string }>;
+  onSave: (goals: Array<{ id?: string; title: string; order: number }>) => Promise<void> | void;
   onClose: () => void;
 }
 
 function PlanWorkflowSheet({
   title,
   subtitle,
-  goal,
-  priorities,
+  date,
+  initialGoals = [],
   onSave,
   onClose,
-}: PlanWorkflowModalProps) {
-  const [draftGoal, setDraftGoal] = useState(goal);
-  const [draftP1, setDraftP1] = useState(priorities[0] || "");
-  const [draftP2, setDraftP2] = useState(priorities[1] || "");
-  const [draftP3, setDraftP3] = useState(priorities[2] || "");
+}: PlanWorkflowSheetProps) {
+  const [draftGoals, setDraftGoals] = useState<Array<{ id?: string; title: string }>>(
+    initialGoals.length > 0 ? initialGoals : [{ title: "" }]
+  );
+  const [saving, setSaving] = useState(false);
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    const prios = [draftP1, draftP2, draftP3].filter((p) => p.trim().length > 0);
-    onSave(draftGoal.trim(), prios);
+    const cleaned = draftGoals
+      .filter((g) => g.title.trim().length > 0)
+      .map((g, idx) => ({ id: g.id, title: g.title.trim(), order: idx }));
+    setSaving(true);
+    try {
+      await onSave(cleaned);
+    } finally {
+      setSaving(false);
+    }
   };
+
+  const addGoal = () => {
+    setDraftGoals((prev) => [...prev, { title: "" }]);
+  };
+
+  const updateGoal = (idx: number, val: string) => {
+    const next = [...draftGoals];
+    next[idx] = { ...next[idx], title: val };
+    setDraftGoals(next);
+  };
+
+  const removeGoal = (idx: number) => {
+    setDraftGoals((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  const formattedDate = date ? formatProductiveDateLabel(date) : "";
 
   return (
     <div
@@ -211,7 +283,7 @@ function PlanWorkflowSheet({
                 margin: "2px 0 0",
               }}
             >
-              {title}
+              {title} {formattedDate && <span style={{ fontSize: 11, color: "#9d91b7", fontWeight: 400 }}>({formattedDate})</span>}
             </h2>
           </div>
           <button
@@ -226,93 +298,86 @@ function PlanWorkflowSheet({
 
         <form onSubmit={handleSave} style={{ display: "grid", gap: 10 }}>
           <div>
-            <label
-              style={{
-                fontSize: 10.5,
-                color: "#9d91b7",
-                display: "block",
-                marginBottom: 4,
-              }}
-            >
-              Daily Goal (Exactly 1)
-            </label>
-            <input
-              type="text"
-              required
-              value={draftGoal}
-              onChange={(e) => setDraftGoal(e.target.value)}
-              placeholder="e.g. Complete Phase 2 visual primitives"
-              style={{
-                width: "100%",
-                padding: "7px 10px",
-                borderRadius: 8,
-                background: "rgba(255,255,255,0.05)",
-                border: "1px solid rgba(255,255,255,0.12)",
-                color: "#faf7ff",
-                fontSize: 12,
-              }}
-            />
-          </div>
-
-          <div>
-            <label
-              style={{
-                fontSize: 10.5,
-                color: "#9d91b7",
-                display: "block",
-                marginBottom: 4,
-              }}
-            >
-              Priorities (1 to 3 items)
-            </label>
-            <div style={{ display: "grid", gap: 6 }}>
-              <input
-                type="text"
-                value={draftP1}
-                onChange={(e) => setDraftP1(e.target.value)}
-                placeholder="Priority 1 (Required)"
-                required
-                style={{
-                  width: "100%",
-                  padding: "6px 8px",
-                  borderRadius: 6,
-                  background: "rgba(255,255,255,0.04)",
-                  border: "1px solid rgba(255,255,255,0.1)",
-                  color: "#faf7ff",
-                  fontSize: 11,
-                }}
-              />
-              <input
-                type="text"
-                value={draftP2}
-                onChange={(e) => setDraftP2(e.target.value)}
-                placeholder="Priority 2 (Optional)"
-                style={{
-                  width: "100%",
-                  padding: "6px 8px",
-                  borderRadius: 6,
-                  background: "rgba(255,255,255,0.04)",
-                  border: "1px solid rgba(255,255,255,0.1)",
-                  color: "#faf7ff",
-                  fontSize: 11,
-                }}
-              />
-              <input
-                type="text"
-                value={draftP3}
-                onChange={(e) => setDraftP3(e.target.value)}
-                placeholder="Priority 3 (Optional)"
-                style={{
-                  width: "100%",
-                  padding: "6px 8px",
-                  borderRadius: 6,
-                  background: "rgba(255,255,255,0.04)",
-                  border: "1px solid rgba(255,255,255,0.1)",
-                  color: "#faf7ff",
-                  fontSize: 11,
-                }}
-              />
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+              <label style={{ fontSize: 10.5, color: "#9d91b7" }}>
+                Daily Goals (0..N objectives)
+              </label>
+              <span style={{ fontSize: 9.5, color: "#a78bfa" }}>
+                1–3 recommended
+              </span>
             </div>
+
+            <div style={{ display: "grid", gap: 6 }}>
+              {draftGoals.map((g, idx) => (
+                <div key={idx} style={{ display: "flex", gap: 5, alignItems: "center" }}>
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontFamily: "monospace",
+                      color: "#a78bfa",
+                      background: "rgba(167,139,250,0.1)",
+                      padding: "4px 6px",
+                      borderRadius: 4,
+                    }}
+                  >
+                    {(idx + 1).toString().padStart(2, "0")}
+                  </span>
+                  <input
+                    type="text"
+                    required={idx === 0 && draftGoals.length === 1}
+                    value={g.title}
+                    onChange={(e) => updateGoal(idx, e.target.value)}
+                    placeholder={`Goal ${idx + 1} title`}
+                    style={{
+                      flex: 1,
+                      padding: "6px 8px",
+                      borderRadius: 6,
+                      background: "rgba(255,255,255,0.05)",
+                      border: "1px solid rgba(255,255,255,0.12)",
+                      color: "#faf7ff",
+                      fontSize: 11.5,
+                    }}
+                    autoFocus={idx === draftGoals.length - 1}
+                  />
+                  {draftGoals.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => removeGoal(idx)}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        color: "#9d91b7",
+                        cursor: "pointer",
+                        padding: 3,
+                      }}
+                      title="Remove goal"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              onClick={addGoal}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+                fontSize: 11,
+                color: "#a78bfa",
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                padding: "6px 2px",
+                marginTop: 4,
+              }}
+            >
+              <Plus size={12} />
+              <span>Add another goal</span>
+            </button>
           </div>
 
           <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
@@ -321,6 +386,7 @@ function PlanWorkflowSheet({
               className="secondary-button"
               style={{ flex: 1 }}
               onClick={onClose}
+              disabled={saving}
             >
               Cancel
             </button>
@@ -328,8 +394,9 @@ function PlanWorkflowSheet({
               type="submit"
               className="primary-button"
               style={{ flex: 1 }}
+              disabled={saving}
             >
-              Save Plan
+              {saving ? "Saving..." : "Save Plan"}
             </button>
           </div>
         </form>
@@ -339,21 +406,35 @@ function PlanWorkflowSheet({
 }
 
 function OutcomeWorkflowSheet({
-  goal,
-  currentOutcome,
+  goals,
   onSave,
   onClose,
 }: {
-  goal: string;
-  currentOutcome: string;
-  onSave: (outcome: string) => void;
+  goals: DailyGoal[];
+  onSave: (goalId: string, outcome: GoalOutcome) => Promise<void> | void;
   onClose: () => void;
 }) {
-  const outcomes = [
-    { id: "Achieved", desc: "Completed the primary objective for the day" },
-    { id: "Partially achieved", desc: "Significant progress, partially fulfilled" },
-    { id: "Not achieved", desc: "Blocked or shifted priorities" },
+  const [selectedGoalId, setSelectedGoalId] = useState<string>(goals[0]?.id || "");
+  const [saving, setSaving] = useState(false);
+
+  const outcomes: Array<{ id: GoalOutcome; label: string; desc: string }> = [
+    { id: "ACHIEVED", label: "Achieved", desc: "Completed primary objective" },
+    { id: "PARTIALLY_ACHIEVED", label: "Partially achieved", desc: "Material progress made" },
+    { id: "NOT_ACHIEVED", label: "Not achieved", desc: "Blocked or shifted priorities" },
+    { id: "NOT_ASSESSED", label: "Not assessed", desc: "Skip assessment" },
   ];
+
+  const currentGoal = goals.find((g) => g.id === selectedGoalId) || goals[0];
+
+  const handleSelectOutcome = async (outcome: GoalOutcome) => {
+    if (!currentGoal) return;
+    setSaving(true);
+    try {
+      await onSave(currentGoal.id, outcome);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div
@@ -374,7 +455,7 @@ function OutcomeWorkflowSheet({
       aria-modal="true"
       aria-labelledby="outcome-sheet-title"
     >
-      <div className="hero-card" style={{ padding: 14 }}>
+      <div className="hero-card" style={{ padding: 14, maxHeight: "92%", overflowY: "auto" }}>
         <div
           style={{
             display: "flex",
@@ -394,7 +475,7 @@ function OutcomeWorkflowSheet({
                 margin: "2px 0 0",
               }}
             >
-              Assess Daily Goal Outcome
+              Assess Goal Outcomes
             </h2>
           </div>
           <button
@@ -407,8 +488,32 @@ function OutcomeWorkflowSheet({
           </button>
         </div>
 
+        {goals.length > 1 && (
+          <div style={{ display: "flex", gap: 4, marginBottom: 10, overflowX: "auto", paddingBottom: 4 }}>
+            {goals.map((g, idx) => (
+              <button
+                key={g.id}
+                type="button"
+                onClick={() => setSelectedGoalId(g.id)}
+                style={{
+                  fontSize: 10.5,
+                  padding: "4px 8px",
+                  borderRadius: 4,
+                  border: g.id === (currentGoal?.id ?? "") ? "1px solid #a78bfa" : "1px solid rgba(255,255,255,0.1)",
+                  background: g.id === (currentGoal?.id ?? "") ? "rgba(167,139,250,0.15)" : "transparent",
+                  color: g.id === (currentGoal?.id ?? "") ? "#faf7ff" : "#9d91b7",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                Goal {idx + 1}
+              </button>
+            ))}
+          </div>
+        )}
+
         <p style={{ fontSize: 11, color: "#948ca2", margin: "0 0 10px" }}>
-          Goal: <strong style={{ color: "#f7f3fc" }}>{goal || "Today's Goal"}</strong>
+          Assessing: <strong style={{ color: "#f7f3fc" }}>{currentGoal?.title || "Goal"}</strong>
         </p>
 
         <div style={{ display: "grid", gap: 6, marginBottom: 12 }}>
@@ -416,22 +521,23 @@ function OutcomeWorkflowSheet({
             <button
               key={o.id}
               type="button"
-              onClick={() => onSave(o.id)}
+              disabled={saving}
+              onClick={() => handleSelectOutcome(o.id)}
               className="secondary-button"
               style={{
                 textAlign: "left",
                 display: "block",
                 padding: "8px 10px",
                 background:
-                  currentOutcome === o.id
+                  currentGoal?.outcome === o.id
                     ? "rgba(139,92,246,0.25)"
                     : undefined,
                 borderColor:
-                  currentOutcome === o.id ? "#a78bfa" : undefined,
+                  currentGoal?.outcome === o.id ? "#a78bfa" : undefined,
               }}
             >
               <strong style={{ fontSize: 11.5, color: "#faf7ff", display: "block" }}>
-                {o.id}
+                {o.label}
               </strong>
               <span style={{ fontSize: 10, color: "#948ca2" }}>{o.desc}</span>
             </button>
@@ -451,7 +557,7 @@ function OutcomeWorkflowSheet({
 }
 
 // -------------------------------------------------------------
-// TODAY VIEW
+// TODAY VIEW (Four locked structural blocks)
 // -------------------------------------------------------------
 function TodayView({
   status,
@@ -462,38 +568,127 @@ function TodayView({
   setTab: (t: Tab) => void;
   onStartReflect: () => void;
 }) {
-  const summary = useQuery({
-    queryKey: ["activity-summary"],
-    queryFn: apiClient.getTodaySummary.bind(apiClient),
+  const queryClient = useQueryClient();
+
+  // 1. Domain Queries (Direct from backend)
+  const todayPlan = useQuery({
+    queryKey: ["plan", "today"],
+    queryFn: () => apiClient.getTodayPlan(),
+    refetchOnWindowFocus: true,
   });
+
   const tasks = useQuery({
     queryKey: ["tasks"],
     queryFn: apiClient.getTasks.bind(apiClient),
+    refetchOnWindowFocus: true,
   });
-  const activeTask =
-    tasks.data?.find((task) => task.status === "in_progress") ??
-    tasks.data?.find((task) => task.status === "todo");
 
-  // Local presentation state for Goal & Priorities (visual prototyping)
-  const [dailyGoal, setDailyGoal] = useState("Ship Phase 2 presentation primitives");
-  const [priorities, setPriorities] = useState<string[]>([
-    "Build presentation primitives",
-    "Establish accessible keyboard focus",
-  ]);
-  const [goalOutcome, setGoalOutcome] = useState<string>("Not assessed");
+  const sessions = useQuery({
+    queryKey: ["sessions"],
+    queryFn: apiClient.getSessions.bind(apiClient),
+    refetchOnWindowFocus: true,
+  });
 
+  const summary = useQuery({
+    queryKey: ["activity-summary"],
+    queryFn: apiClient.getTodaySummary.bind(apiClient),
+    refetchOnWindowFocus: true,
+  });
+
+  // Local selection & sheet state
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [activeWorkflow, setActiveWorkflow] = useState<
     "none" | "planToday" | "planTomorrow" | "outcome"
   >("none");
 
+  const plan = todayPlan.data;
+  const goals = plan?.goals ?? [];
+  const independentTasks = plan?.independentTasks ?? [];
+  const allTasks = tasks.data ?? [];
+
+  // Active focus session detection
+  const activeSession = sessions.data?.find((s) => !s.endedAt);
+  const activeTask = activeSession
+    ? allTasks.find((t) => t.id === activeSession.taskId)
+    : selectedTaskId
+    ? allTasks.find((t) => t.id === selectedTaskId)
+    : null;
+
+  // Incomplete tasks filter
+  const incompleteTasks = allTasks.filter(
+    (t) => t.status !== "done" && t.status !== "cancelled"
+  );
+
+  // Deterministic Next Up (2–3 incomplete tasks)
+  const priorityRank: Record<string, number> = { high: 3, medium: 2, low: 1, none: 0 };
+  const nextUpCandidates = [...incompleteTasks].sort((a, b) => {
+    if (a.status === "in_progress" && b.status !== "in_progress") return -1;
+    if (b.status === "in_progress" && a.status !== "in_progress") return 1;
+    const pA = priorityRank[a.priority] ?? 1;
+    const pB = priorityRank[b.priority] ?? 1;
+    if (pB !== pA) return pB - pA;
+    return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+  });
+  const nextUpTasks = nextUpCandidates.slice(0, 3);
+
+  // Intentional work & metrics calculations
+  const intentionalSeconds = (sessions.data ?? []).reduce(
+    (sum, s) => sum + (s.durationSeconds ?? 0),
+    0
+  );
+  const sessionsCompleted = (sessions.data ?? []).filter((s) => Boolean(s.endedAt)).length;
+  const tasksCompleted = allTasks.filter((t) => t.status === "done").length;
+  const observedSeconds = (summary.data?.activeTime ?? 0) / 1000;
+
   const current = status?.currentActivity;
-  const activeSeconds = summary.data?.activeTime ?? 0;
-  const sessionsCount = summary.data?.sessions ?? 0;
   const isEligibleForCheckIn = status?.scheduler?.eligibility?.eligible ?? false;
+
+  // Session execution handlers
+  const handleStartFocus = async (taskId?: string) => {
+    const tid = taskId || activeTask?.id;
+    if (!tid) return;
+    await apiClient.startSession(tid);
+    await apiClient.updateTask(tid, { status: "in_progress" });
+    queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    queryClient.invalidateQueries({ queryKey: ["tasks"] });
+  };
+
+  const handleFinishFocus = async () => {
+    if (!activeSession) return;
+    await apiClient.finishSession(activeSession.id);
+    if (activeSession.taskId) {
+      await apiClient.updateTask(activeSession.taskId, { status: "done" });
+    }
+    queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    queryClient.invalidateQueries({ queryKey: ["tasks"] });
+    queryClient.invalidateQueries({ queryKey: ["activity-summary"] });
+  };
+
+  // Plan workflow handlers (authoritative backend mutation)
+  const handleSavePlan = async (updatedGoals: Array<{ id?: string; title: string; order: number }>) => {
+    const targetDate =
+      activeWorkflow === "planTomorrow"
+        ? resolveTomorrowProductiveDay()
+        : plan?.date || resolveProductiveDay();
+
+    await apiClient.savePlan({
+      date: targetDate,
+      goals: updatedGoals,
+    });
+    queryClient.invalidateQueries({ queryKey: ["plan"] });
+    queryClient.invalidateQueries({ queryKey: ["tasks"] });
+    setActiveWorkflow("none");
+  };
+
+  const handleAssessOutcome = async (goalId: string, outcome: GoalOutcome) => {
+    await apiClient.updateGoalOutcome(goalId, outcome);
+    queryClient.invalidateQueries({ queryKey: ["plan"] });
+    setActiveWorkflow("none");
+  };
 
   return (
     <main className="content">
-      {/* 1. Daily Plan Card */}
+      {/* 1. TODAY'S PLAN (0..N Goals with compact tasks) */}
       <section className="hero-card" style={{ padding: "12px 14px" }}>
         <div
           style={{
@@ -506,137 +701,350 @@ function TodayView({
           <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
             <Target size={13} color="#a78bfa" />
             <span className="section-kicker" style={{ color: "#a78bfa" }}>
-              DAILY PLAN
+              TODAY&apos;S PLAN
             </span>
           </div>
-          {goalOutcome !== "Not assessed" && (
+          {goals.length > 0 && (
             <span
               style={{
                 fontSize: 9.5,
-                color: "#34d399",
-                background: "rgba(52,211,153,0.12)",
+                color: "#a78bfa",
+                background: "rgba(167,139,250,0.12)",
                 padding: "2px 6px",
                 borderRadius: 4,
               }}
             >
-              {goalOutcome}
+              {goals.length} {goals.length === 1 ? "Goal" : "Goals"}
             </span>
           )}
         </div>
 
-        <h2
-          style={{
-            fontSize: 12.5,
-            fontWeight: 650,
-            color: "#faf7ff",
-            margin: "0 0 6px",
-            lineHeight: 1.3,
-          }}
-        >
-          {dailyGoal || "No daily goal set for today"}
-        </h2>
+        {todayPlan.isLoading ? (
+          <div style={{ padding: "6px 0" }}>
+            <Skeleton className="metric-value" />
+            <Skeleton className="metric-label" />
+          </div>
+        ) : goals.length > 0 ? (
+          <div style={{ display: "grid", gap: 8, marginBottom: 10 }}>
+            {goals.map((goal, idx) => {
+              const goalTasks = goal.tasks ?? [];
+              return (
+                <div key={goal.id} style={{ borderBottom: idx === goals.length - 1 ? "none" : "1px solid rgba(255,255,255,0.06)", paddingBottom: 6 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4 }}>
+                    <h2
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 650,
+                        color: "#faf7ff",
+                        margin: 0,
+                        lineHeight: 1.3,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      <span style={{ color: "#a78bfa", marginRight: 4, fontFamily: "monospace" }}>
+                        {(idx + 1).toString().padStart(2, "0")}
+                      </span>
+                      {goal.title}
+                    </h2>
+                    {goal.outcome && (
+                      <span
+                        style={{
+                          fontSize: 9,
+                          color: "#34d399",
+                          background: "rgba(52,211,153,0.1)",
+                          padding: "1px 5px",
+                          borderRadius: 3,
+                          flexShrink: 0,
+                        }}
+                      >
+                        {goal.outcome.replace("_", " ")}
+                      </span>
+                    )}
+                  </div>
 
-        {priorities.length > 0 && (
-          <div
-            style={{
-              display: "grid",
-              gap: 3,
-              marginBottom: 10,
-              paddingLeft: 4,
-            }}
-          >
-            {priorities.map((p, idx) => (
-              <div
-                key={idx}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 5,
-                  fontSize: 10.5,
-                  color: "#948ca2",
-                }}
-              >
-                <span
-                  style={{
-                    fontSize: 9,
-                    fontFamily: "monospace",
-                    color: "#a78bfa",
-                  }}
-                >
-                  P{idx + 1}
-                </span>
-                <span style={{ color: "#d8d1e8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {p}
-                </span>
-              </div>
-            ))}
+                  {goalTasks.length > 0 && (
+                    <div style={{ display: "grid", gap: 2, marginTop: 4, paddingLeft: 12 }}>
+                      {goalTasks.slice(0, 3).map((t, tIdx) => (
+                        <div
+                          key={t.id}
+                          style={{
+                            fontSize: 10,
+                            color: t.status === "done" ? "#8e84a5" : "#c6b5ef",
+                            opacity: t.status === "done" ? 0.75 : 1,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          <span style={{ color: "#7c6f96", marginRight: 3, fontFamily: "monospace" }}>
+                            {tIdx === goalTasks.length - 1 ? "└──" : "├──"}
+                          </span>
+                          {t.title}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div style={{ padding: "6px 0 10px" }}>
+            <p style={{ fontSize: 11.5, color: "#faf7ff", fontWeight: 600, margin: "0 0 2px" }}>
+              Your day hasn&apos;t been planned yet
+            </p>
+            <p style={{ fontSize: 10.5, color: "#948ca2", margin: 0 }}>
+              Define today&apos;s primary objectives in 30 seconds.
+            </p>
           </div>
         )}
 
-        {/* Action Buttons for Visual Prototyping */}
+        {/* Plan Actions */}
         <div style={{ display: "flex", gap: 4 }}>
           <button
             type="button"
             className="secondary-button"
-            style={{ flex: 1, padding: "4px 2px", fontSize: 10, marginTop: 0 }}
+            style={{ flex: 1, padding: "5px 2px", fontSize: 10, marginTop: 0 }}
             onClick={() => setActiveWorkflow("planToday")}
           >
-            {dailyGoal ? "Edit Plan" : "Plan Today"}
+            {goals.length > 0 ? "Edit Plan" : "Plan Today"}
           </button>
           <button
             type="button"
             className="secondary-button"
-            style={{ flex: 1, padding: "4px 2px", fontSize: 10, marginTop: 0 }}
+            style={{ flex: 1, padding: "5px 2px", fontSize: 10, marginTop: 0 }}
             onClick={() => setActiveWorkflow("planTomorrow")}
           >
             Plan Tomorrow
           </button>
-          <button
-            type="button"
-            className="secondary-button"
-            style={{ flex: 1, padding: "4px 2px", fontSize: 10, marginTop: 0 }}
-            onClick={() => setActiveWorkflow("outcome")}
-          >
-            Outcome
-          </button>
+          {goals.length > 0 && (
+            <button
+              type="button"
+              className="secondary-button"
+              style={{ flex: 1, padding: "5px 2px", fontSize: 10, marginTop: 0 }}
+              onClick={() => setActiveWorkflow("outcome")}
+            >
+              Outcome
+            </button>
+          )}
         </div>
       </section>
 
-      {/* 2. Observed Browser Activity */}
-      <section className="hero-card">
-        <div className="section-kicker">
-          <span className="live-dot" />
-          CURRENT ACTIVITY <span className="source-label">Browser</span>
+      {/* 2. CURRENT FOCUS (Contextual NOW Layer with observed telemetry) */}
+      <section className="task-card">
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+          <div className="section-kicker" style={{ margin: 0 }}>
+            {activeSession ? (
+              <span style={{ color: "#34d399", display: "flex", alignItems: "center", gap: 4 }}>
+                <span className="live-dot" /> ACTIVE SESSION
+              </span>
+            ) : (
+              "CURRENT FOCUS"
+            )}
+          </div>
+          {activeTask && !activeSession && (
+            <button
+              type="button"
+              className="text-button"
+              style={{ fontSize: 10, color: "#9d91b7" }}
+              onClick={() => setSelectedTaskId(null)}
+            >
+              Switch
+            </button>
+          )}
         </div>
-        {current ? (
-          <div className="activity-line">
-            <div className="site-icon">
-              {current.domain.slice(0, 1).toUpperCase()}
+
+        {activeSession && activeTask ? (
+          <div>
+            <h2 style={{ fontSize: 13, fontWeight: 650, color: "#faf7ff", margin: "0 0 2px" }}>
+              {activeTask.title}
+            </h2>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10.5, color: "#c6b5ef", marginBottom: 6 }}>
+              {activeTask.goalTitle && <span>Goal: {activeTask.goalTitle}</span>}
+              {current && (
+                <span style={{ color: "#a78bfa" }}>
+                  Observed: {current.domain}
+                </span>
+              )}
             </div>
-            <div className="activity-copy">
-              <strong>{current.domain}</strong>
-              <span>{current.pageTitle}</span>
+
+            <div style={{ display: "flex", gap: 4 }}>
+              <button
+                type="button"
+                className="secondary-button"
+                style={{ flex: 1, padding: "6px", fontSize: 10.5 }}
+                onClick={() => setTab("focus")}
+              >
+                <Timer size={12} /> Open Timer
+              </button>
+              <button
+                type="button"
+                className="primary-button"
+                style={{ flex: 1, padding: "6px", fontSize: 10.5, background: "#34d399", color: "#000" }}
+                onClick={handleFinishFocus}
+              >
+                <CheckCircle2 size={12} /> Complete
+              </button>
             </div>
-            <span className="activity-time">
-              {formatDuration(current.durationMs / 1000)}
-            </span>
+          </div>
+        ) : activeTask ? (
+          <div>
+            <h2 style={{ fontSize: 13, fontWeight: 650, color: "#faf7ff", margin: "0 0 2px" }}>
+              {activeTask.title}
+            </h2>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10.5, color: "#9d91b7", marginBottom: 8 }}>
+              {activeTask.goalTitle && <span>Goal: {activeTask.goalTitle}</span>}
+              <span>Estimate: {activeTask.plannedDurationMinutes ?? 30}m</span>
+            </div>
+
+            <button
+              className="primary-button full"
+              onClick={() => handleStartFocus(activeTask.id)}
+              type="button"
+              style={{ marginTop: 0 }}
+            >
+              <Play size={13} fill="currentColor" />
+              Start Focus
+            </button>
+          </div>
+        ) : incompleteTasks.length > 0 ? (
+          <div>
+            <p style={{ fontSize: 11, color: "#948ca2", margin: "0 0 6px" }}>
+              Select a task to begin an intentional session:
+            </p>
+            <div style={{ display: "grid", gap: 4, marginBottom: 4 }}>
+              {incompleteTasks.slice(0, 3).map((t) => (
+                <div
+                  key={t.id}
+                  onClick={() => setSelectedTaskId(t.id)}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    padding: "6px 8px",
+                    background: "rgba(255,255,255,0.03)",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                    borderRadius: 6,
+                    cursor: "pointer",
+                  }}
+                >
+                  <span style={{ fontSize: 11, color: "#faf7ff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {t.title}
+                  </span>
+                  <span style={{ fontSize: 9.5, color: "#9d91b7", flexShrink: 0, marginLeft: 6 }}>
+                    {t.plannedDurationMinutes ?? 30}m
+                  </span>
+                </div>
+              ))}
+            </div>
           </div>
         ) : (
-          <div className="empty-activity">
-            <ShieldCheck size={16} />
-            <span>
-              {status?.trackingPaused
-                ? "Tracking is paused"
-                : "Waiting for browser activity"}
-            </span>
+          <div>
+            <h2 style={{ fontSize: 12.5, fontWeight: 650, color: "#faf7ff", margin: "0 0 2px" }}>
+              Nothing ready to focus on.
+            </h2>
+            <p style={{ fontSize: 10.5, color: "#948ca2", margin: "0 0 8px" }}>
+              Create or select a task to begin an intentional focus session.
+            </p>
+            <div style={{ display: "flex", gap: 4 }}>
+              <button
+                className="secondary-button full"
+                onClick={() => openDashboard("/tasks")}
+                type="button"
+                style={{ marginTop: 0 }}
+              >
+                <ListTodo size={12} /> View Tasks
+              </button>
+            </div>
           </div>
         )}
       </section>
 
-      {/* 3. Metrics Row */}
+      {/* 3. NEXT UP (2–3 Deterministic Tasks) */}
+      <section className="hero-card" style={{ padding: "10px 12px" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+          <div className="section-kicker" style={{ margin: 0 }}>
+            NEXT UP
+          </div>
+          <button
+            type="button"
+            className="text-button"
+            style={{ fontSize: 10, color: "#a78bfa", display: "flex", alignItems: "center", gap: 3 }}
+            onClick={() => openDashboard("/tasks")}
+          >
+            <span>View all</span>
+            <ExternalLink size={10} />
+          </button>
+        </div>
+
+        {tasks.isLoading ? (
+          <div style={{ display: "grid", gap: 4 }}>
+            <Skeleton className="metric-label" />
+            <Skeleton className="metric-label" />
+          </div>
+        ) : nextUpTasks.length > 0 ? (
+          <div style={{ display: "grid", gap: 5 }}>
+            {nextUpTasks.map((t) => (
+              <div
+                key={t.id}
+                onClick={() => setSelectedTaskId(t.id)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "5px 8px",
+                  background: "rgba(255,255,255,0.02)",
+                  border: "1px solid rgba(255,255,255,0.06)",
+                  borderRadius: 5,
+                  cursor: "pointer",
+                }}
+              >
+                <div style={{ minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: "#faf7ff",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {t.title}
+                  </div>
+                  <div style={{ fontSize: 9.5, color: "#9d91b7" }}>
+                    {t.plannedDurationMinutes ?? 30}m · {t.goalTitle || "Independent"}
+                  </div>
+                </div>
+                <span
+                  style={{
+                    fontSize: 8.5,
+                    textTransform: "uppercase",
+                    padding: "1px 4px",
+                    borderRadius: 3,
+                    background: "rgba(255,255,255,0.06)",
+                    color: t.priority === "high" ? "#f87171" : "#9d91b7",
+                    fontFamily: "monospace",
+                    flexShrink: 0,
+                  }}
+                >
+                  {t.priority}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p style={{ fontSize: 10.5, color: "#948ca2", margin: "2px 0" }}>
+            No remaining tasks for today.
+          </p>
+        )}
+      </section>
+
+      {/* 4. TODAY SUMMARY (Meaningful execution/observation metrics) */}
       <div className="metric-grid">
         {summary.isLoading ? (
-          [1, 2, 3].map((i) => (
+          [1, 2, 3, 4].map((i) => (
             <div className="metric-card" key={i}>
               <Skeleton className="metric-value" />
               <Skeleton className="metric-label" />
@@ -645,25 +1053,30 @@ function TodayView({
         ) : (
           <>
             <Metric
-              label="Active"
-              value={formatDuration(activeSeconds / 1000)}
-              icon={<Activity size={13} />}
-            />
-            <Metric
-              label="Sessions"
-              value={String(sessionsCount)}
+              label="Intentional"
+              value={formatDuration(intentionalSeconds)}
               icon={<Timer size={13} />}
             />
             <Metric
-              label="Agent"
-              value={status?.desktop?.connected ? "Ready" : "Offline"}
-              icon={<Monitor size={13} />}
+              label="Sessions"
+              value={String(sessionsCompleted)}
+              icon={<CheckCircle2 size={13} />}
+            />
+            <Metric
+              label="Tasks Done"
+              value={String(tasksCompleted)}
+              icon={<Target size={13} />}
+            />
+            <Metric
+              label="Observed"
+              value={formatDuration(observedSeconds)}
+              icon={<Activity size={13} />}
             />
           </>
         )}
       </div>
 
-      {/* Contextual Reflection Prompt if Eligible */}
+      {/* Contextual Hourly Reflection Prompt if Eligible */}
       {isEligibleForCheckIn && (
         <div
           style={{
@@ -697,58 +1110,14 @@ function TodayView({
         </div>
       )}
 
-      {/* 4. Current Planned Task & Action */}
-      <section className="task-card">
-        <div className="section-kicker">NEXT INTENTIONAL WORK</div>
-        {tasks.isLoading ? (
-          <>
-            <Skeleton className="task-title" />
-            <Skeleton className="task-meta" />
-          </>
-        ) : activeTask ? (
-          <>
-            <h2>{activeTask.title}</h2>
-            <p>
-              {activeTask.status === "in_progress"
-                ? "In progress • Session ready"
-                : "Ready to execute"}
-            </p>
-            <button
-              className="primary-button full"
-              onClick={() => setTab("focus")}
-              type="button"
-            >
-              <Play size={13} fill="currentColor" />
-              Continue task in Focus
-            </button>
-          </>
-        ) : (
-          <>
-            <h2>Plan your next win</h2>
-            <p>Create or select a task from your dashboard.</p>
-            <button
-              className="secondary-button full"
-              onClick={() => openDashboard("/tasks")}
-              type="button"
-            >
-              View tasks <ExternalLink size={12} />
-            </button>
-          </>
-        )}
-      </section>
-
-      {/* Workflow Prototype Sheets */}
+      {/* Workflow Modals */}
       {activeWorkflow === "planToday" && (
         <PlanWorkflowSheet
           title="Plan Today"
           subtitle="MORNING INTENTION"
-          goal={dailyGoal}
-          priorities={priorities}
-          onSave={(newGoal, newPriorities) => {
-            setDailyGoal(newGoal);
-            setPriorities(newPriorities);
-            setActiveWorkflow("none");
-          }}
+          date={plan?.date || resolveProductiveDay()}
+          initialGoals={goals.map((g) => ({ id: g.id, title: g.title }))}
+          onSave={handleSavePlan}
           onClose={() => setActiveWorkflow("none")}
         />
       )}
@@ -757,23 +1126,17 @@ function TodayView({
         <PlanWorkflowSheet
           title="Plan Tomorrow"
           subtitle="EVENING SHUTDOWN"
-          goal=""
-          priorities={[]}
-          onSave={() => {
-            setActiveWorkflow("none");
-          }}
+          date={resolveTomorrowProductiveDay()}
+          initialGoals={[]}
+          onSave={handleSavePlan}
           onClose={() => setActiveWorkflow("none")}
         />
       )}
 
-      {activeWorkflow === "outcome" && (
+      {activeWorkflow === "outcome" && goals.length > 0 && (
         <OutcomeWorkflowSheet
-          goal={dailyGoal}
-          currentOutcome={goalOutcome}
-          onSave={(outcome) => {
-            setGoalOutcome(outcome);
-            setActiveWorkflow("none");
-          }}
+          goals={goals}
+          onSave={handleAssessOutcome}
           onClose={() => setActiveWorkflow("none")}
         />
       )}
@@ -1077,35 +1440,54 @@ function FocusView({
 function ReflectView({
   activeTask,
   patterns,
+  mode = "hourly",
+  isStandalone,
+  onModeChange,
   onCheckInComplete,
 }: {
   activeTask?: Task;
   patterns?: any[];
+  mode?: "menu" | "hourly" | "inactivity";
+  isStandalone?: boolean;
+  onModeChange?: (mode: "menu" | "hourly" | "inactivity") => void;
   onCheckInComplete?: () => void;
 }) {
-  const [activeMode, setActiveMode] = useState<"menu" | "hourly" | "inactivity">("menu");
+  const [internalMode, setInternalMode] = useState<"menu" | "hourly" | "inactivity">(mode);
 
-  if (activeMode === "hourly") {
+  useEffect(() => {
+    setInternalMode(mode);
+  }, [mode]);
+
+  const setMode = (m: "menu" | "hourly" | "inactivity") => {
+    setInternalMode(m);
+    onModeChange?.(m);
+  };
+
+  if (internalMode === "hourly") {
     return (
       <CheckInView
         currentTask={activeTask}
         patterns={patterns ?? []}
+        isStandalone={isStandalone}
         onComplete={() => {
-          setActiveMode("menu");
+          setMode("menu");
           onCheckInComplete?.();
         }}
-        onCancel={() => setActiveMode("menu")}
+        onCancel={() => setMode("menu")}
+        onSwitchToInactivity={() => setMode("inactivity")}
       />
     );
   }
 
-  if (activeMode === "inactivity") {
+  if (internalMode === "inactivity") {
     return (
       <InactivityView
+        isStandalone={isStandalone}
         onComplete={() => {
-          setActiveMode("menu");
+          setMode("menu");
           onCheckInComplete?.();
         }}
+        onCancel={() => setMode("menu")}
       />
     );
   }
@@ -1132,7 +1514,7 @@ function ReflectView({
           type="button"
           className="primary-button full"
           style={{ marginTop: 0 }}
-          onClick={() => setActiveMode("hourly")}
+          onClick={() => setMode("hourly")}
         >
           <Sparkles size={13} /> Start Hourly Check-in
         </button>
@@ -1151,7 +1533,7 @@ function ReflectView({
           type="button"
           className="secondary-button full"
           style={{ marginTop: 0 }}
-          onClick={() => setActiveMode("inactivity")}
+          onClick={() => setMode("inactivity")}
         >
           Review Inactivity Blocks
         </button>
@@ -1574,6 +1956,24 @@ export function App() {
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<Tab>("today");
   const [moreSubView, setMoreSubView] = useState<MoreSubView>("menu");
+  const [reflectMode, setReflectMode] = useState<"hourly" | "inactivity" | "menu">("hourly");
+
+  const isStandalone = useMemo(() => {
+    try {
+      return (
+        typeof window !== "undefined" &&
+        new URLSearchParams(window.location.search).get("standalone") === "true"
+      );
+    } catch {
+      return false;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isStandalone) {
+      document.body.classList.add("standalone");
+    }
+  }, [isStandalone]);
 
   const status = useQuery({
     queryKey: ["extension-status"],
@@ -1596,51 +1996,105 @@ export function App() {
     tasks.data?.find((t) => t.status === "todo");
 
   useEffect(() => {
+    const applyRouting = (targetTab?: string, targetMode?: string) => {
+      if (targetMode === "hourly" || targetMode === "inactivity" || targetMode === "menu") {
+        setReflectMode(targetMode);
+      }
+      if (targetTab === "inactivity") {
+        setTab("reflect");
+        setReflectMode("inactivity");
+      } else if (
+        targetTab === "reflect" ||
+        targetTab === "checkin"
+      ) {
+        setTab("reflect");
+        if (!targetMode) {
+          setReflectMode("hourly");
+        }
+      } else if (
+        targetTab === "focus" ||
+        targetTab === "review" ||
+        targetTab === "more" ||
+        targetTab === "today"
+      ) {
+        setTab(targetTab as Tab);
+      }
+    };
+
     if (typeof chrome !== "undefined" && chrome.storage?.local) {
-      chrome.storage.local.get(["openToTab"], (result) => {
-        if (result.openToTab === "reflect") {
-          setTab("reflect");
-          void chrome.storage.local.remove("openToTab");
-        } else if (result.openToTab) {
-          setTab(result.openToTab as Tab);
-          void chrome.storage.local.remove("openToTab");
+      chrome.storage.local.get(["openToTab", "reflectMode"], (result) => {
+        if (result.openToTab || result.reflectMode) {
+          applyRouting(result.openToTab, result.reflectMode);
+          void chrome.storage.local.remove(["openToTab", "reflectMode"]);
         }
       });
     }
 
     try {
       const params = new URLSearchParams(window.location.search);
-      const tabParam = params.get("tab");
-      const viewParam = params.get("view");
-      if (
-        tabParam === "reflect" ||
-        viewParam === "checkin" ||
-        viewParam === "reflect"
-      ) {
-        setTab("reflect");
-      } else if (
-        tabParam === "focus" ||
-        tabParam === "review" ||
-        tabParam === "more" ||
-        tabParam === "today"
-      ) {
-        setTab(tabParam as Tab);
-      } else if (viewParam === "diagnostics") {
-        setTab("more");
-        setMoreSubView("diagnostics");
+      const tabParam = params.get("tab") || params.get("view");
+      const modeParam = params.get("mode");
+      if (tabParam || modeParam) {
+        applyRouting(tabParam || undefined, modeParam || undefined);
       }
     } catch {}
+
+    const handleMessage = (msg: any) => {
+      if (msg?.type === "NAVIGATE_POPUP") {
+        applyRouting(msg.tab, msg.mode);
+      }
+    };
+
+    const handleStorageChange = (changes: { [key: string]: chrome.storage.StorageChange }) => {
+      const newTab = changes.openToTab?.newValue;
+      const newMode = changes.reflectMode?.newValue;
+      if (newTab || newMode) {
+        applyRouting(newTab, newMode);
+      }
+    };
+
+    // Clear notification badge when popup is opened
+    try {
+      if (typeof chrome !== "undefined" && chrome.action?.setBadgeText) {
+        void chrome.action.setBadgeText({ text: "" });
+      }
+    } catch {}
+
+    if (typeof chrome !== "undefined") {
+      chrome.runtime?.onMessage?.addListener(handleMessage);
+      chrome.storage?.onChanged?.addListener(handleStorageChange);
+      return () => {
+        chrome.runtime?.onMessage?.removeListener(handleMessage);
+        chrome.storage?.onChanged?.removeListener(handleStorageChange);
+      };
+    }
   }, []);
 
   const handleTabChange = (newTab: Tab) => {
     setTab(newTab);
     setMoreSubView("menu");
+    if (newTab === "reflect") {
+      setReflectMode("hourly");
+    }
   };
+
+function notifyCloseModal() {
+  try {
+    if (typeof window !== "undefined") {
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({ type: "PRODUCTIVEHIX_CLOSE_MODAL" }, "*");
+      }
+      window.close();
+    }
+  } catch {}
+}
 
   return (
     <div className="app-shell">
       <Header
         status={status.data}
+        isStandalone={isStandalone}
+        onClose={notifyCloseModal}
         onPillClick={() => {
           setTab("more");
         }}
@@ -1654,6 +2108,7 @@ export function App() {
           status={status.data}
           setTab={setTab}
           onStartReflect={() => {
+            setReflectMode("hourly");
             setTab("reflect");
           }}
         />
@@ -1661,6 +2116,7 @@ export function App() {
         <FocusView
           status={status.data}
           onStartReflect={() => {
+            setReflectMode("hourly");
             setTab("reflect");
           }}
         />
@@ -1668,6 +2124,9 @@ export function App() {
         <ReflectView
           activeTask={activeTask}
           patterns={patterns.data ?? []}
+          mode={reflectMode}
+          isStandalone={isStandalone}
+          onModeChange={setReflectMode}
           onCheckInComplete={() => {
             void queryClient.invalidateQueries({
               queryKey: ["extension-status"],
@@ -1675,6 +2134,12 @@ export function App() {
             void queryClient.invalidateQueries({
               queryKey: ["activity-summary"],
             });
+            if (isStandalone) {
+              notifyCloseModal();
+            } else {
+              setTab("today");
+              setReflectMode("hourly");
+            }
           }}
         />
       ) : tab === "review" ? (

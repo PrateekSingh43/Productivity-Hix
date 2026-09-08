@@ -9,6 +9,7 @@ import { requestId } from "./middleware/request-id";
 import { healthRouter } from "./routes/health";
 import { authRouter } from "./routes/auth";
 import { tasksRouter } from "./routes/tasks";
+import { plansRouter } from "./routes/plans";
 import { sessionsRouter } from "./routes/sessions";
 import { checkInsRouter } from "./routes/check-ins";
 import { learningRouter } from "./routes/learning";
@@ -28,6 +29,7 @@ export function createApp(): Express {
   app.get("/", (_request, response) => response.json({ service: "productivehix-api" }));
   app.use("/api/health", healthRouter);
   app.use("/api/auth", authRouter);
+  app.use("/api/plans", plansRouter);
   app.use("/api/tasks", tasksRouter);
   app.use("/api/sessions", sessionsRouter);
   app.use("/api/check-ins", checkInsRouter);

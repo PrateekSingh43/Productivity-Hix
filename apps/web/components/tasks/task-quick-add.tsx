@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Clock, Flag, AlignLeft, X } from "lucide-react";
+import { Plus, Clock, Flag, AlignLeft, X, Target } from "lucide-react";
 import type { TaskPriority } from "@repo/types";
 import { useCreateTaskMutation } from "../../src/hooks/mutations/use-task-mutations";
+import { useTodayPlan } from "../../src/hooks/queries/use-plans";
 
 interface TaskQuickAddProps {
   onSuccess?: () => void;
@@ -32,7 +33,10 @@ export function TaskQuickAdd({ onSuccess }: TaskQuickAddProps) {
   const [showNotes, setShowNotes] = useState(false);
   const [priority, setPriority] = useState<TaskPriority>("medium");
   const [plannedDurationMinutes, setPlannedDurationMinutes] = useState<number>(30);
+  const [goalId, setGoalId] = useState<string>("");
 
+  const { data: plan } = useTodayPlan();
+  const goals = plan?.goals ?? [];
   const createTaskMutation = useCreateTaskMutation();
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -46,6 +50,8 @@ export function TaskQuickAdd({ onSuccess }: TaskQuickAddProps) {
         description: description.trim() || null,
         priority,
         plannedDurationMinutes,
+        goalId: goalId ? goalId : null,
+        productiveDate: plan?.date || null,
       },
       {
         onSuccess: () => {
@@ -54,6 +60,7 @@ export function TaskQuickAdd({ onSuccess }: TaskQuickAddProps) {
           setShowNotes(false);
           setPriority("medium");
           setPlannedDurationMinutes(30);
+          setGoalId("");
           setIsOpen(false);
           onSuccess?.();
         },
@@ -65,7 +72,7 @@ export function TaskQuickAdd({ onSuccess }: TaskQuickAddProps) {
     return (
       <button
         onClick={() => setIsOpen(true)}
-        className="w-full py-3 px-4 rounded-[var(--radius-lg)] border border-dashed border-[#262b3a] bg-[#0e1017]/70 hover:bg-[#13151f] hover:border-[#3b435a] text-[#8f96a8] hover:text-[#f4f4f6] text-xs font-medium flex items-center justify-center gap-2 transition-all group shadow-sm"
+        className="w-full py-3 px-4 rounded-[var(--radius-lg)] border border-dashed border-[#262b3a] bg-[#0e1017]/70 hover:bg-[#13151f] hover:border-[#3b435a] text-[#8f96a8] hover:text-[#f4f4f6] text-xs font-medium flex items-center justify-center gap-2 transition-all group shadow-sm cursor-pointer"
       >
         <span className="h-5 w-5 rounded-full bg-[#1b1e2a] border border-[#2d3345] flex items-center justify-center text-[#707df7] group-hover:scale-110 transition-transform">
           <Plus size={13} />
@@ -147,8 +154,34 @@ export function TaskQuickAdd({ onSuccess }: TaskQuickAddProps) {
           })}
         </div>
 
-        {/* Priority and Submit button */}
-        <div className="flex items-center gap-2">
+        {/* Goal, Priority and Submit button */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Goal Selector */}
+          {goals.length > 0 && (
+            <div className="flex items-center gap-1 bg-[#0c0d12] border border-[#222634] px-1.5 py-0.5 rounded-[var(--radius-sm)]">
+              <Target size={10} className="text-[#707df7]" />
+              <select
+                value={goalId}
+                onChange={(e) => setGoalId(e.target.value)}
+                className="bg-transparent border-none text-[10px] font-medium text-[#f4f4f6] outline-none max-w-[150px] truncate cursor-pointer [&>option]:bg-[#141720] [&>option]:text-[#f4f4f6]"
+                title="Link this task to a Daily Goal"
+              >
+                <option value="" style={{ backgroundColor: "#141720", color: "#f4f4f6" }}>
+                  No Goal (Independent)
+                </option>
+                {goals.map((g) => (
+                  <option
+                    key={g.id}
+                    value={g.id}
+                    style={{ backgroundColor: "#141720", color: "#f4f4f6" }}
+                  >
+                    Goal: {g.title}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
           {/* Priority Pill Selector */}
           <div className="flex items-center gap-1 bg-[#0c0d12] border border-[#222634] p-0.5 rounded-[var(--radius-sm)]">
             <span className="px-1.5 text-[10px] text-[#6b7280] uppercase tracking-wider font-semibold">
@@ -178,7 +211,7 @@ export function TaskQuickAdd({ onSuccess }: TaskQuickAddProps) {
           <button
             type="submit"
             disabled={!title.trim() || createTaskMutation.isPending}
-            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-[var(--radius-sm)] bg-[#707df7] hover:bg-[#5f6de6] text-xs font-semibold text-white transition-opacity disabled:opacity-40"
+            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-[var(--radius-sm)] bg-[#707df7] hover:bg-[#5f6de6] text-xs font-semibold text-white transition-opacity disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
           >
             <Plus size={13} />
             {createTaskMutation.isPending ? "Creating..." : "Add Task"}

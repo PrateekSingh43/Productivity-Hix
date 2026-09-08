@@ -22,6 +22,8 @@ model User {
   avatarUrl           String?                @map("avatar_url")
   createdAt           DateTime               @default(now()) @map("created_at")
   updatedAt           DateTime               @updatedAt @map("updated_at")
+  dailyPlans          DailyPlan[]
+  dailyGoals          DailyGoal[]
   accounts            OAuthAccount[]
   tasks               Task[]
   workSessions        WorkSession[]
@@ -35,6 +37,38 @@ model User {
   deviceTokens        DeviceToken[]
 
   @@map("users")
+}
+
+model DailyPlan {
+  id        String      @id @default(uuid()) @db.Uuid
+  userId    String      @map("user_id") @db.Uuid
+  date      String      // "YYYY-MM-DD"
+  createdAt DateTime    @default(now()) @map("created_at")
+  updatedAt DateTime    @updatedAt @map("updated_at")
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  goals     DailyGoal[]
+
+  @@unique([userId, date])
+  @@index([userId, date])
+  @@map("daily_plans")
+}
+
+model DailyGoal {
+  id        String      @id @default(uuid()) @db.Uuid
+  planId    String      @map("plan_id") @db.Uuid
+  userId    String      @map("user_id") @db.Uuid
+  title     String
+  order     Int         @default(0)
+  outcome   String?     // "ACHIEVED" | "PARTIALLY_ACHIEVED" | "NOT_ACHIEVED" | "NOT_ASSESSED"
+  createdAt DateTime    @default(now()) @map("created_at")
+  updatedAt DateTime    @updatedAt @map("updated_at")
+  plan      DailyPlan   @relation(fields: [planId], references: [id], onDelete: Cascade)
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tasks     Task[]
+
+  @@index([planId, order])
+  @@index([userId])
+  @@map("daily_goals")
 }
 
 model OAuthAccount {
@@ -53,6 +87,8 @@ model OAuthAccount {
 model Task {
   id                     String        @id @default(uuid()) @db.Uuid
   userId                 String        @map("user_id") @db.Uuid
+  goalId                 String?       @map("goal_id") @db.Uuid
+  productiveDate         String?       @map("productive_date")
   title                  String
   description            String?
   status                 TaskStatus    @default(todo)
@@ -63,10 +99,13 @@ model Task {
   createdAt              DateTime      @default(now()) @map("created_at")
   updatedAt              DateTime      @updatedAt @map("updated_at")
   user                   User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  goal                   DailyGoal?    @relation(fields: [goalId], references: [id], onDelete: SetNull)
   sessions               WorkSession[]
   checkIns               CheckIn[]
 
   @@index([userId, status])
+  @@index([userId, productiveDate])
+  @@index([goalId])
   @@map("tasks")
 }
 

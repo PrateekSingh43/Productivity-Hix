@@ -13,9 +13,12 @@ export function useCreateTaskMutation() {
       priority?: TaskPriority;
       plannedDurationMinutes?: number;
       dueAt?: string | null;
+      goalId?: string | null;
+      productiveDate?: string | null;
     }) => createTask(input),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      queryClient.invalidateQueries({ queryKey: ["plans"] });
     },
   });
 }
@@ -35,11 +38,14 @@ export function useUpdateTaskMutation() {
         priority?: TaskPriority;
         plannedDurationMinutes?: number;
         dueAt?: string | null;
+        goalId?: string | null;
+        productiveDate?: string | null;
       };
     }) => updateTask(id, input),
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ["tasks"] });
       queryClient.invalidateQueries({ queryKey: ["tasks", variables.id] });
+      queryClient.invalidateQueries({ queryKey: ["plans"] });
     },
   });
 }
@@ -50,6 +56,7 @@ export function useDeleteTaskMutation() {
     mutationFn: (id: string) => deleteTask(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      queryClient.invalidateQueries({ queryKey: ["plans"] });
     },
   });
 }

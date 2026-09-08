@@ -146,7 +146,7 @@ export function TodayTasks({ tasks = [], onToggleTask, onAddTask }: TodayTasksPr
                   <span
                     className={`text-xs font-medium truncate ${
                       isDone
-                        ? "text-[#4b5162] line-through"
+                        ? "text-[#7e8597] opacity-75"
                         : "text-[#f4f4f6]"
                     }`}
                   >

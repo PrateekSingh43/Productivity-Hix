@@ -19,6 +19,8 @@ export function createTask(input: {
   priority?: "none" | "low" | "medium" | "high";
   plannedDurationMinutes?: number;
   dueAt?: string | null;
+  goalId?: string | null;
+  productiveDate?: string | null;
 }) {
   return apiFetch<Task>("/api/tasks", jsonBody(input));
 }
@@ -32,6 +34,8 @@ export function updateTask(
     priority?: "none" | "low" | "medium" | "high";
     plannedDurationMinutes?: number;
     dueAt?: string | null;
+    goalId?: string | null;
+    productiveDate?: string | null;
   },
 ) {
   return apiFetch<Task>(`/api/tasks/${id}`, {

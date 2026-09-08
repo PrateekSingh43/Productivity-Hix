@@ -6,3 +6,4 @@ export * from "./client";
 export * from "./learning";
 export * from "./sessions";
 export * from "./tasks";
+export * from "./plans";

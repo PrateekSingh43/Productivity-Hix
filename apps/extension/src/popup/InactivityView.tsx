@@ -1,15 +1,27 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Coffee, Send } from "lucide-react";
+import { Coffee, Send, ArrowLeft } from "lucide-react";
 import { submitCheckIn } from "../api/client";
 
 export function InactivityView({
   onComplete,
+  onCancel,
+  isStandalone,
 }: {
   onComplete: () => void;
+  onCancel?: () => void;
+  isStandalone?: boolean;
 }) {
   const queryClient = useQueryClient();
   const [reason, setReason] = useState("");
+
+  const handleFinish = () => {
+    if (isStandalone) {
+      window.close();
+    } else {
+      onComplete();
+    }
+  };
 
   const submit = useMutation({
     mutationFn: async () => {
@@ -25,12 +37,32 @@ export function InactivityView({
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["extension-status"] });
-      onComplete();
+      handleFinish();
     },
   });
 
   return (
     <main className="content" style={{ gap: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "2px 0" }}>
+        <button
+          type="button"
+          onClick={onCancel || onComplete}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 4,
+            background: "transparent",
+            border: 0,
+            color: "#90869e",
+            fontSize: 11,
+            cursor: "pointer",
+            padding: 0,
+          }}
+        >
+          <ArrowLeft size={13} /> Back
+        </button>
+      </div>
+
       <div className="section-heading compact">
         <div>
           <span className="section-kicker">INACTIVITY</span>
@@ -85,7 +117,7 @@ export function InactivityView({
             <button
               type="button"
               className="secondary-button"
-              onClick={onComplete}
+              onClick={handleFinish}
               disabled={submit.isPending}
               style={{ flex: 1, marginTop: 0 }}
             >

@@ -6,6 +6,8 @@ export const taskCreateSchema = z.object({
   priority: z.enum(["none", "low", "medium", "high"]).optional().default("medium"),
   plannedDurationMinutes: z.coerce.number().int().nonnegative().optional().default(30),
   dueAt: z.coerce.date().nullable().optional(),
+  goalId: z.string().uuid().nullable().optional(),
+  productiveDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Must be YYYY-MM-DD").nullable().optional(),
 });
 
 export const taskUpdateSchema = taskCreateSchema.partial().extend({

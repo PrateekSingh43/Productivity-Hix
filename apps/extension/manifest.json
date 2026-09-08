@@ -45,7 +45,16 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["icon.png", "icon-128.png", "icon-48.png", "icon-16.png", "popup.html"],
+      "resources": [
+        "icon.png",
+        "icon-128.png",
+        "icon-48.png",
+        "icon-16.png",
+        "popup.html",
+        "*.js",
+        "*.png",
+        "*.css"
+      ],
       "matches": ["<all_urls>"]
     }
   ]

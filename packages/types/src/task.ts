@@ -12,6 +12,9 @@ export type Task = {
   actualDurationSeconds?: number;
   dueAt: string | null;
   completedAt: string | null;
+  goalId?: string | null;
+  goalTitle?: string | null;
+  productiveDate?: string | null;
   createdAt: string;
   updatedAt: string;
   sessionsCount?: number;

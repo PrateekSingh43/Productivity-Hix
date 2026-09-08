@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle2, Circle, Clock, Play, Square, ChevronRight, Flag, Flame } from "lucide-react";
+import { CheckCircle2, Circle, Clock, Play, Square, ChevronRight, Flag, Flame, Edit3, Target } from "lucide-react";
 import type { Task } from "@repo/types";
 import {
   useUpdateTaskMutation,
@@ -8,6 +8,7 @@ import {
   useEndTaskSessionMutation,
 } from "../../src/hooks/mutations/use-task-mutations";
 import { useSessionsList } from "../../src/hooks/queries/use-tasks";
+import { useTodayPlan } from "../../src/hooks/queries/use-plans";
 
 interface TaskItemProps {
   task: Task;
@@ -24,6 +25,9 @@ export function TaskItem({ task, onSelect, isPrioritySection }: TaskItemProps) {
   const isDone = task.status === "done";
   const isInProgress = task.status === "in_progress";
   const hasActiveSession = Boolean(task.hasActiveSession);
+
+  const { data: plan } = useTodayPlan();
+  const linkedGoal = plan?.goals?.find((g) => g.id === task.goalId);
 
   // Find the active session for this task if one exists
   const activeSession = sessions.find((s) => s.taskId === task.id && !s.endedAt);
@@ -96,15 +100,26 @@ export function TaskItem({ task, onSelect, isPrioritySection }: TaskItemProps) {
         </button>
         {/* Title and notes summary */}
         <div className="flex flex-col min-w-0">
-          <span
-            className={`text-xs sm:text-sm font-medium truncate ${
-              isDone
-                ? "text-[#555c70] line-through"
-                : "text-[#f4f4f6] group-hover:text-white"
-            }`}
-          >
-            {task.title}
-          </span>
+          <div className="flex items-center gap-2 flex-wrap min-w-0">
+            <span
+              className={`text-xs sm:text-sm font-medium truncate ${
+                isDone
+                  ? "text-[#7e8597]"
+                  : "text-[#f4f4f6] group-hover:text-white"
+              }`}
+            >
+              {task.title}
+            </span>
+            {linkedGoal && (
+              <span
+                className="inline-flex items-center gap-1 text-[10px] font-medium text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-1.5 py-0.5 rounded shrink-0 max-w-[150px] truncate"
+                title={`Linked to goal: ${linkedGoal.title}`}
+              >
+                <Target size={10} className="shrink-0" />
+                <span className="truncate">{linkedGoal.title}</span>
+              </span>
+            )}
+          </div>
           {task.description && (
             <span className="text-[11px] text-[#6b7280] truncate mt-0.5 font-normal">
               {task.description}
@@ -187,6 +202,19 @@ export function TaskItem({ task, onSelect, isPrioritySection }: TaskItemProps) {
             )}
           </div>
         )}
+
+        {/* Edit Button */}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onSelect(task);
+          }}
+          className="p-1.5 hover:bg-[#1a1c28] text-[#6b7280] hover:text-[#f4f4f6] rounded-[var(--radius-sm)] transition-colors"
+          title="Edit task intention and goal"
+        >
+          <Edit3 size={13} />
+        </button>
 
         {/* More Actions (Chevron) */}
         <div className="p-1.5 hover:bg-[#1a1c28] rounded-[var(--radius-sm)] transition-colors">

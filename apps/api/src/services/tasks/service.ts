@@ -4,6 +4,8 @@ import { getDb } from "../../lib/prisma";
 type TaskWithSessionRows = {
   id: string;
   userId: string;
+  goalId?: string | null;
+  productiveDate?: string | null;
   title: string;
   description: string | null;
   status: Task["status"];
@@ -13,6 +15,10 @@ type TaskWithSessionRows = {
   completedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
+  goal?: {
+    id: string;
+    title: string;
+  } | null;
   sessions?: Array<{
     id: string;
     startedAt: Date;
@@ -22,7 +28,7 @@ type TaskWithSessionRows = {
   }>;
 };
 
-function serializeTask(task: TaskWithSessionRows): Task {
+export function serializeTask(task: TaskWithSessionRows): Task {
   const sessions = task.sessions ?? [];
   const actualDurationSeconds = sessions.reduce((sum, s) => sum + (s.durationSeconds ?? 0), 0);
   const hasActiveSession = sessions.some((s) => !s.endedAt);
@@ -38,6 +44,9 @@ function serializeTask(task: TaskWithSessionRows): Task {
     actualDurationSeconds,
     dueAt: task.dueAt?.toISOString() ?? null,
     completedAt: task.completedAt?.toISOString() ?? null,
+    goalId: task.goalId ?? null,
+    goalTitle: task.goal?.title ?? null,
+    productiveDate: task.productiveDate ?? null,
     createdAt: task.createdAt.toISOString(),
     updatedAt: task.updatedAt.toISOString(),
     sessionsCount: sessions.length,
@@ -49,6 +58,12 @@ export async function listTasks(userId: string): Promise<Task[]> {
   const tasks = await getDb().task.findMany({
     where: { userId },
     include: {
+      goal: {
+        select: {
+          id: true,
+          title: true,
+        },
+      },
       sessions: {
         select: {
           id: true,
@@ -71,6 +86,12 @@ export async function getTask(userId: string, id: string): Promise<TaskWithSessi
   const task = await db.task.findFirst({
     where: { id, userId },
     include: {
+      goal: {
+        select: {
+          id: true,
+          title: true,
+        },
+      },
       sessions: {
         select: {
           id: true,
@@ -167,6 +188,8 @@ export async function createTask(
     dueAt?: Date | null;
     priority?: "none" | "low" | "medium" | "high";
     plannedDurationMinutes?: number;
+    goalId?: string | null;
+    productiveDate?: string | null;
   },
 ) {
   const created = await getDb().task.create({
@@ -177,8 +200,16 @@ export async function createTask(
       dueAt: input.dueAt,
       priority: input.priority ?? "medium",
       plannedDurationMinutes: input.plannedDurationMinutes ?? 30,
+      goalId: input.goalId,
+      productiveDate: input.productiveDate,
     },
     include: {
+      goal: {
+        select: {
+          id: true,
+          title: true,
+        },
+      },
       sessions: true,
     },
   });
@@ -196,6 +227,8 @@ export async function updateTask(
     priority?: "none" | "low" | "medium" | "high";
     plannedDurationMinutes?: number;
     status?: "todo" | "in_progress" | "done" | "cancelled";
+    goalId?: string | null;
+    productiveDate?: string | null;
   },
 ) {
   const updated = await getDb().task.update({
@@ -205,6 +238,12 @@ export async function updateTask(
       completedAt: input.status === "done" ? new Date() : input.status ? null : undefined,
     },
     include: {
+      goal: {
+        select: {
+          id: true,
+          title: true,
+        },
+      },
       sessions: {
         select: {
           id: true,

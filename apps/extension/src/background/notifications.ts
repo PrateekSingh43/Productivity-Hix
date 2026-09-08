@@ -93,44 +93,83 @@ async function handleReflectAction(notificationId: string) {
   }
 
   const isAway = notificationId.includes("-away-");
-  const tab = isAway ? "inactivity" : "reflect";
+  const targetMode = isAway ? "inactivity" : "hourly";
 
   // Set destination in storage for popup to pick up
-  await chrome.storage.local.set({ openToTab: tab });
+  await chrome.storage.local.set({
+    openToTab: "reflect",
+    reflectMode: targetMode,
+  });
 
+  // Broadcast to popup in real-time if it is already open
   try {
-    // Bring normal browser window to focus first so openPopup succeeds
+    if (typeof chrome !== "undefined" && chrome.runtime?.sendMessage) {
+      chrome.runtime.sendMessage({
+        type: "NAVIGATE_POPUP",
+        tab: "reflect",
+        mode: targetMode,
+      }).catch(() => {});
+    }
+  } catch {
+    // Ignore
+  }
+
+  // Bring normal browser window to focus
+  let targetWindowId: number | undefined;
+  try {
     if (typeof chrome !== "undefined" && chrome.windows?.getAll) {
       const windows = await chrome.windows.getAll({ windowTypes: ["normal"] });
       const targetWindow = windows.find((w) => w.focused) || windows[0];
       if (targetWindow?.id) {
-        await chrome.windows.update(targetWindow.id, { focused: true });
+        targetWindowId = targetWindow.id;
+        await chrome.windows.update(targetWindow.id, { focused: true, drawAttention: true });
       }
     }
   } catch {
     // Window focus optional
   }
 
-  // Try opening extension popup
+  // Loom / Grammarly Pattern: Display the reflection popup directly in the active webpage
+  try {
+    if (typeof chrome !== "undefined" && chrome.tabs?.query) {
+      const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      const activeTab = tabs[0] || (targetWindowId ? (await chrome.tabs.query({ active: true, windowId: targetWindowId }))[0] : null);
+      if (activeTab?.id) {
+        const modalUrl = chrome.runtime.getURL(`popup.html?standalone=true&inModal=true&tab=reflect&mode=${targetMode}`);
+        await chrome.tabs.sendMessage(activeTab.id, {
+          type: "SHOW_REFLECTION_MODAL",
+          mode: targetMode,
+          url: modalUrl,
+        });
+      }
+    }
+  } catch (err) {
+    console.warn("[NOTIFICATION] In-page modal trigger skipped (e.g. non-web tab):", err);
+  }
+
+  // Try opening the extension popup directly if supported by browser
   try {
     if (typeof chrome !== "undefined" && typeof chrome.action?.openPopup === "function") {
+      if (targetWindowId) {
+        try {
+          await chrome.action.openPopup({ windowId: targetWindowId });
+          return;
+        } catch {
+          // If windowId option rejected, try without options
+        }
+      }
       await chrome.action.openPopup();
       return;
     }
-  } catch (err) {
-    console.warn("[NOTIFICATION CLICK] chrome.action.openPopup failed, falling back to tab:", err);
+  } catch {
+    // Expected in Chrome service workers: openPopup requires direct toolbar gesture
   }
 
-  // Fallback: Open popup in a small floating window if action.openPopup rejected
+  // Visual prompt on the extension icon indicating reflection is ready
   try {
-    if (typeof chrome !== "undefined" && chrome.windows?.create && chrome.runtime?.getURL) {
-      await chrome.windows.create({ 
-        url: chrome.runtime.getURL(`popup.html?tab=${tab}`),
-        type: "popup",
-        width: 380,
-        height: 600,
-        focused: true
-      });
+    if (typeof chrome !== "undefined" && chrome.action?.setBadgeText) {
+      await chrome.action.setBadgeText({ text: "!" });
+      await chrome.action.setBadgeBackgroundColor({ color: "#8b5cf6" });
     }
   } catch {
     // Ignore

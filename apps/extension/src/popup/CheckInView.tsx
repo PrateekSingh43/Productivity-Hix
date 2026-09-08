@@ -8,6 +8,8 @@ interface CheckInViewProps {
   patterns?: CheckInPatternCandidate[];
   onComplete: () => void;
   onCancel: () => void;
+  onSwitchToInactivity?: () => void;
+  isStandalone?: boolean;
 }
 
 const ASSESSMENTS = [
@@ -58,7 +60,25 @@ const FOCUS_LEVELS = [
   { id: "focused", label: "Focused" },
 ] as const;
 
-export function CheckInView({ currentTask, patterns = [], onComplete, onCancel }: CheckInViewProps) {
+export function CheckInView({
+  currentTask,
+  patterns = [],
+  onComplete,
+  onCancel,
+  onSwitchToInactivity,
+  isStandalone,
+}: CheckInViewProps) {
+  const notifyClose = () => {
+    try {
+      if (typeof window !== "undefined") {
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: "PRODUCTIVEHIX_CLOSE_MODAL" }, "*");
+        }
+        window.close();
+      }
+    } catch {}
+  };
+
   // Wizard steps: 1: Assessment, 2: Alignment, 3: Blockers (conditional), 4: State/Energy, 5: Note, 6: Done
   const [step, setStep] = useState<1 | 2 | 3 | 4 | 5 | 6>(1);
   const [assessment, setAssessment] = useState<string | null>(null);
@@ -168,9 +188,31 @@ export function CheckInView({ currentTask, patterns = [], onComplete, onCancel }
             ? "Your reflection is securely queued locally and will sync when reconnected."
             : "Your intentional reflection has been recorded."}
         </p>
-        <button className="primary-button" style={{ minWidth: 140 }} onClick={onComplete}>
-          Continue to Today
-        </button>
+
+        {isStandalone ? (
+          <div style={{ display: "flex", gap: 8, width: "100%", maxWidth: 280, marginTop: 4 }}>
+            <button
+              type="button"
+              className="secondary-button"
+              style={{ flex: 1, marginTop: 0 }}
+              onClick={onComplete}
+            >
+              View Today
+            </button>
+            <button
+              type="button"
+              className="primary-button"
+              style={{ flex: 1, marginTop: 0 }}
+              onClick={notifyClose}
+            >
+              Done & Close
+            </button>
+          </div>
+        ) : (
+          <button className="primary-button" style={{ minWidth: 140 }} onClick={onComplete}>
+            Continue to Today
+          </button>
+        )}
       </main>
     );
   }
@@ -186,7 +228,10 @@ export function CheckInView({ currentTask, patterns = [], onComplete, onCancel }
         <button
           type="button"
           onClick={() => {
-            if (step === 1) onCancel();
+            if (step === 1) {
+              if (isStandalone) notifyClose();
+              else onCancel();
+            }
             else if (step === 4 && isBreak) setStep(1);
             else if (step === 4 && !shouldAskBlocker) setStep(2);
             else setStep((prev) => Math.max(1, prev - 1) as any);
@@ -202,7 +247,7 @@ export function CheckInView({ currentTask, patterns = [], onComplete, onCancel }
 
         <button
           type="button"
-          onClick={onCancel}
+          onClick={isStandalone ? notifyClose : onCancel}
           style={{ background: "transparent", border: 0, color: "#90869e", padding: 0, cursor: "pointer" }}
           title="Exit check-in"
         >
@@ -248,6 +293,25 @@ export function CheckInView({ currentTask, patterns = [], onComplete, onCancel }
               </button>
             ))}
           </div>
+
+          {onSwitchToInactivity && (
+            <div style={{ textAlign: "center", marginTop: 12 }}>
+              <button
+                type="button"
+                onClick={onSwitchToInactivity}
+                style={{
+                  background: "transparent",
+                  border: 0,
+                  color: "#948ca2",
+                  fontSize: 11,
+                  cursor: "pointer",
+                  textDecoration: "underline",
+                }}
+              >
+                Were you away from the computer? Review inactivity
+              </button>
+            </div>
+          )}
         </section>
       )}
 
