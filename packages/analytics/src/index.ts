@@ -22,3 +22,5 @@ export type {
   CanonicalActivityEvent,
   AggregationOptions,
 } from "./activity/segments";
+export * from "./features";
+
