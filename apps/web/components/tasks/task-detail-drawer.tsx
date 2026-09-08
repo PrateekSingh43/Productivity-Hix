@@ -17,7 +17,6 @@ import {
   Flame,
   FileText,
   Target,
-  Check,
 } from "lucide-react";
 import Link from "next/link";
 import type { Task, TaskPriority, TaskStatus } from "@repo/types";
@@ -54,6 +53,24 @@ const STATUSES: Array<{ label: string; value: TaskStatus }> = [
 
 const DURATION_OPTIONS = [15, 30, 45, 60, 90, 120, 180];
 
+function CheckmarkIcon({ size = 14, className = "" }: { size?: number; className?: string }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
+  );
+}
+
 export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
   const taskId = task?.id ?? null;
   const { data: taskDetail, isLoading: isLoadingDetail } = useTaskDetail(taskId);
@@ -74,16 +91,38 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
   const [goalId, setGoalId] = useState<string>("");
   const [lastLoadedId, setLastLoadedId] = useState<string | null>(null);
   const [isSaved, setIsSaved] = useState(false);
+  const [baseline, setBaseline] = useState({
+    title: "",
+    description: "",
+    priority: "medium" as TaskPriority,
+    status: "todo" as TaskStatus,
+    plannedDuration: 30,
+    goalId: "",
+  });
 
   // Sync state ONLY when opening or switching to a different task
   useEffect(() => {
-    if (task && task.id !== lastLoadedId) {
-      setTitle(task.title || "");
-      setDescription(task.description || "");
-      setPriority(task.priority || "medium");
-      setStatus(task.status || "todo");
-      setPlannedDuration(task.plannedDurationMinutes || 30);
-      setGoalId(task.goalId || "");
+    if (!task) {
+      setLastLoadedId(null);
+      setIsSaved(false);
+      return;
+    }
+    if (task.id !== lastLoadedId) {
+      const initial = {
+        title: task.title || "",
+        description: task.description || "",
+        priority: task.priority || "medium",
+        status: task.status || "todo",
+        plannedDuration: task.plannedDurationMinutes || 30,
+        goalId: task.goalId || "",
+      };
+      setTitle(initial.title);
+      setDescription(initial.description);
+      setPriority(initial.priority);
+      setStatus(initial.status);
+      setPlannedDuration(initial.plannedDuration);
+      setGoalId(initial.goalId);
+      setBaseline(initial);
       setLastLoadedId(task.id);
       setIsSaved(false);
     }
@@ -93,6 +132,7 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
   useEffect(() => {
     if (taskDetail && taskDetail.id === lastLoadedId && !description && taskDetail.description) {
       setDescription(taskDetail.description);
+      setBaseline((prev) => ({ ...prev, description: taskDetail.description || "" }));
     }
   }, [taskDetail, lastLoadedId, description]);
 
@@ -113,31 +153,46 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
 
   const varianceMinutes = actualMinutes - plannedDuration;
 
-  // Check if draft has unsaved changes compared to loaded task
+  // Check if draft has unsaved changes compared to baseline
   const isDirty =
-    title.trim() !== (currentTask.title || "").trim() ||
-    description.trim() !== (currentTask.description || "").trim() ||
-    status !== currentTask.status ||
-    priority !== currentTask.priority ||
-    plannedDuration !== (currentTask.plannedDurationMinutes || 30) ||
-    (goalId || "") !== (currentTask.goalId || "");
+    title.trim() !== baseline.title.trim() ||
+    description.trim() !== baseline.description.trim() ||
+    status !== baseline.status ||
+    priority !== baseline.priority ||
+    plannedDuration !== baseline.plannedDuration ||
+    (goalId || "") !== (baseline.goalId || "");
 
   const handleSaveAll = () => {
     if (!title.trim()) return;
+    const saveTitle = title.trim();
+    const saveDesc = description.trim() || null;
+    const saveGoalId = goalId ? goalId : null;
+    const savePlannedDuration = plannedDuration;
+    const saveStatus = status;
+    const savePriority = priority;
+
     updateTaskMutation.mutate(
       {
         id: currentTask.id,
         input: {
-          title: title.trim(),
-          description: description.trim() || null,
-          status,
-          priority,
-          plannedDurationMinutes: plannedDuration,
-          goalId: goalId ? goalId : null,
+          title: saveTitle,
+          description: saveDesc,
+          status: saveStatus,
+          priority: savePriority,
+          plannedDurationMinutes: savePlannedDuration,
+          goalId: saveGoalId,
         },
       },
       {
         onSuccess: () => {
+          setBaseline({
+            title: saveTitle,
+            description: saveDesc || "",
+            status: saveStatus,
+            priority: savePriority,
+            plannedDuration: savePlannedDuration,
+            goalId: saveGoalId || "",
+          });
           setIsSaved(true);
           setTimeout(() => setIsSaved(false), 2500);
         },
@@ -203,7 +258,7 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
               }`}
               title="Save task changes"
             >
-              <Check size={13} />
+              <CheckmarkIcon size={13} />
               <span>{updateTaskMutation.isPending ? "Saving..." : isSaved ? "Saved!" : "Save"}</span>
             </button>
 
@@ -562,7 +617,7 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
                   : "bg-[#181a24] text-[#6b7280] border border-[#262b3a] cursor-not-allowed opacity-50"
               }`}
             >
-              <Check size={14} />
+              <CheckmarkIcon size={14} />
               <span>{updateTaskMutation.isPending ? "Saving..." : isSaved ? "Saved!" : "Save Changes"}</span>
             </button>
           </div>
