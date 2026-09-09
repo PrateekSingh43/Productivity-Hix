@@ -79,7 +79,7 @@ export function DiagnosticsView({ status, onBack, onRefresh }: DiagnosticsViewPr
             gap: 4,
             background: "transparent",
             border: 0,
-            color: "#90869e",
+            color: "var(--text-muted)",
             fontSize: 11,
             cursor: "pointer",
             padding: "2px 0",
@@ -152,19 +152,19 @@ export function DiagnosticsView({ status, onBack, onRefresh }: DiagnosticsViewPr
         <span className="section-kicker">TELEMETRY INGESTION METRICS</span>
         <div className="diagnostic-grid three-col">
           <div className="metric-card" style={{ padding: "8px 6px" }}>
-            <span style={{ fontSize: "8.5px", color: "#81798d" }}>CREATED</span>
+            <span style={{ fontSize: "8.5px", color: "var(--text-muted)" }}>CREATED</span>
             <strong style={{ fontSize: "13px" }}>{status?.eventsCreated ?? 0}</strong>
           </div>
           <div className="metric-card" style={{ padding: "8px 6px" }}>
-            <span style={{ fontSize: "8.5px", color: "#81798d" }}>QUEUED</span>
+            <span style={{ fontSize: "8.5px", color: "var(--text-muted)" }}>QUEUED</span>
             <strong style={{ fontSize: "13px" }}>{status?.eventsQueued ?? status?.queueSize ?? 0}</strong>
           </div>
           <div className="metric-card" style={{ padding: "8px 6px" }}>
-            <span style={{ fontSize: "8.5px", color: "#81798d" }}>UPLOADED</span>
+            <span style={{ fontSize: "8.5px", color: "var(--text-muted)" }}>UPLOADED</span>
             <strong style={{ fontSize: "13px" }}>{status?.eventsUploaded ?? 0}</strong>
           </div>
         </div>
-        <p style={{ fontSize: 9.5, color: "#81798d", margin: "4px 0 0", lineHeight: 1.3 }}>
+        <p style={{ fontSize: 9.5, color: "var(--text-muted)", margin: "4px 0 0", lineHeight: 1.3 }}>
           * Created = unique events generated locally; Uploaded = unique events acknowledged by API server.
         </p>
 
@@ -249,7 +249,7 @@ export function DiagnosticsView({ status, onBack, onRefresh }: DiagnosticsViewPr
             <Zap size={12} /> {triggering ? "Dispatching..." : "Send Test Notification Now"}
           </button>
           {triggerResult && (
-            <div style={{ marginTop: 6, fontSize: 10, textAlign: "center", color: "#72e0ad" }}>
+            <div style={{ marginTop: 6, fontSize: 10, textAlign: "center", color: "var(--success)" }}>
               {triggerResult}
             </div>
           )}

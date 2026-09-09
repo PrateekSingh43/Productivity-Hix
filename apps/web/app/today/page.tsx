@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import { format } from "date-fns";
 import {
   Sparkles,
   Plus,
@@ -16,6 +17,7 @@ import {
   Target,
   ListTodo,
   Edit3,
+  Calendar,
 } from "lucide-react";
 import Link from "next/link";
 import { PageContainer } from "../../components/layout/page-container";
@@ -23,7 +25,6 @@ import { PageHeader } from "../../components/layout/page-header";
 import { Section } from "../../components/layout/section";
 import { SectionHeader } from "../../components/layout/section-header";
 import { DailyPlanView } from "../../components/primitives/daily-plan-view";
-import { CurrentFocusCard } from "../../components/primitives/current-focus-card";
 import { EmptyState } from "../../components/primitives/empty-state";
 import { PriorityBadge } from "../../components/primitives/data-badge";
 import { TaskDetailDrawer } from "../../components/tasks/task-detail-drawer";
@@ -64,6 +65,7 @@ export default function TodayPage() {
   const [newTaskTitle, setNewNewTaskTitle] = useState("");
   const [newTaskDuration, setNewTaskDuration] = useState(30);
   const [newTaskGoalId, setNewTaskGoalId] = useState<string>("");
+  const [newTaskDueDate, setNewTaskDueDate] = useState<string>("");
 
   const tasks = tasksQuery.data ?? [];
   const plan = planQuery.data;
@@ -87,6 +89,13 @@ export default function TodayPage() {
   const targetDate = plan?.date || resolveProductiveDay();
   const dateFormatted = formatProductiveDateLabel(targetDate);
 
+  // Initialize due date to today's productive date when targetDate is ready
+  useEffect(() => {
+    if (!newTaskDueDate && targetDate) {
+      setNewTaskDueDate(targetDate);
+    }
+  }, [targetDate, newTaskDueDate]);
+
   const totalActiveMinutes = activityQuery.data?.activeTime
     ? Math.round(activityQuery.data.activeTime / 60)
     : 0;
@@ -109,6 +118,7 @@ export default function TodayPage() {
       const session = await createSession({
         taskId: selectedTask.id,
         notes: `Focus on ${selectedTask.title}`,
+        startedAt: new Date().toISOString(),
       });
       setActiveSessionId(session.id);
       setSessionActive(true);
@@ -150,6 +160,7 @@ export default function TodayPage() {
       plannedDurationMinutes: newTaskDuration,
       goalId: newTaskGoalId ? newTaskGoalId : null,
       productiveDate: targetDate,
+      dueAt: newTaskDueDate ? new Date(`${newTaskDueDate}T23:59:59`).toISOString() : undefined,
     });
 
     setNewNewTaskTitle("");
@@ -194,26 +205,7 @@ export default function TodayPage() {
         />
       </Section>
 
-      {/* 3. CURRENT FOCUS / NOW (Active execution, selected task, contextual observed telemetry) */}
-      <Section>
-        <CurrentFocusCard
-          isActive={sessionActive}
-          selectedTask={selectedTask}
-          availableTasks={tasks}
-          elapsedSeconds={elapsedSeconds}
-          observedApplication={telemetry.activeApp || undefined}
-          observedDomain={telemetry.activeDomain || undefined}
-          observedTitle={telemetry.windowTitle || undefined}
-          onSelectTask={(task) => setSelectedTask(task)}
-          onStartFocus={handleStartFocus}
-          onPause={() => setSessionActive(false)}
-          onResume={() => setSessionActive(true)}
-          onComplete={handleCompleteFocus}
-          onAddTask={() => setIsAddingTask(true)}
-        />
-      </Section>
-
-      {/* 4. TODAY'S TASKS (Actionable task list grouped by Goal + Independent Tasks) */}
+      {/* 3. TODAY'S TASKS (Actionable task list grouped by Goal + Independent Tasks) */}
       <Section id="tasks-section">
         <div className="flex items-center justify-between mb-3">
           <SectionHeader
@@ -234,7 +226,7 @@ export default function TodayPage() {
         {isAddingTask && (
           <form
             onSubmit={handleCreateTaskForToday}
-            className="p-3 mb-4 rounded-lg border border-indigo-500/30 bg-[var(--background-card)] space-y-3"
+            className="p-3 mb-4 rounded-lg border border-border-subtle bg-bg-card space-y-3 shadow-xs"
           >
             <div className="flex flex-col sm:flex-row gap-2">
               <input
@@ -242,51 +234,64 @@ export default function TodayPage() {
                 placeholder="What task needs to be done today?"
                 value={newTaskTitle}
                 onChange={(e) => setNewNewTaskTitle(e.target.value)}
-                className="flex-1 text-xs sm:text-sm bg-[var(--background-subtle)] border border-[var(--border-subtle)] rounded-md px-3 py-2 text-[var(--foreground-primary)] placeholder:text-[var(--foreground-muted)] focus-visible:outline-none focus-visible:border-[var(--foreground-primary)]"
+                className="flex-1 text-xs sm:text-sm bg-bg-secondary border border-border-subtle rounded-md px-3 py-2 text-text-primary placeholder:text-text-muted focus-visible:outline-none focus-visible:border-border-hover"
                 autoFocus
               />
-              <div className="flex gap-2">
+              <div className="flex flex-wrap sm:flex-nowrap gap-2 items-center">
                 <select
                   value={newTaskGoalId}
                   onChange={(e) => setNewTaskGoalId(e.target.value)}
-                  className="text-xs bg-[#141720] border border-[#262b3a] rounded-md px-2.5 py-1.5 text-[#f4f4f6] outline-none focus:border-[#707df7] [&>option]:bg-[#141720] [&>option]:text-[#f4f4f6] cursor-pointer"
+                  className="text-xs bg-bg-secondary border border-border-subtle rounded-md px-2.5 py-1.5 text-text-primary outline-none focus:border-border-hover [&>option]:bg-bg-card [&>option]:text-text-primary cursor-pointer"
                 >
-                  <option value="" style={{ backgroundColor: "#141720", color: "#f4f4f6" }}>
+                  <option value="">
                     Independent Task (No Goal)
                   </option>
                   {goals.map((g) => (
                     <option
                       key={g.id}
                       value={g.id}
-                      style={{ backgroundColor: "#141720", color: "#f4f4f6" }}
                     >
                       Goal: {g.title}
                     </option>
                   ))}
                 </select>
-                <input
-                  type="number"
-                  min="5"
-                  max="480"
-                  step="5"
-                  value={newTaskDuration}
-                  onChange={(e) => setNewTaskDuration(parseInt(e.target.value, 10) || 30)}
-                  className="w-16 text-xs bg-[var(--background-subtle)] border border-[var(--border-subtle)] rounded-md px-2 py-1.5 text-[var(--foreground-primary)]"
-                  title="Estimated duration in minutes"
-                />
+                <div className="flex items-center gap-1 bg-bg-secondary border border-border-subtle rounded-md px-2 py-1">
+                  <Calendar size={12} className="text-text-muted shrink-0" />
+                  <input
+                    type="date"
+                    value={newTaskDueDate}
+                    onChange={(e) => setNewTaskDueDate(e.target.value)}
+                    className="text-xs bg-transparent text-text-primary border-0 outline-none cursor-pointer"
+                    title="Due date"
+                  />
+                </div>
+                <div className="flex items-center gap-1 bg-bg-secondary border border-border-subtle rounded-md px-2 py-1">
+                  <Clock size={12} className="text-text-muted shrink-0" />
+                  <input
+                    type="number"
+                    min="5"
+                    max="480"
+                    step="5"
+                    value={newTaskDuration}
+                    onChange={(e) => setNewTaskDuration(parseInt(e.target.value, 10) || 30)}
+                    className="w-12 text-xs bg-transparent text-text-primary border-0 outline-none"
+                    title="Estimated duration in minutes"
+                  />
+                  <span className="text-[11px] text-text-muted">m</span>
+                </div>
               </div>
             </div>
             <div className="flex justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setIsAddingTask(false)}
-                className="text-xs text-[var(--foreground-muted)] hover:text-[var(--foreground-primary)] px-3 py-1 rounded cursor-pointer"
+                className="text-xs text-text-muted hover:text-text-primary px-3 py-1 rounded cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="text-xs font-semibold bg-[var(--foreground-primary)] text-[var(--background-primary)] px-3 py-1 rounded hover:opacity-90 cursor-pointer"
+                className="text-xs font-semibold bg-text-primary text-bg-primary px-3 py-1.5 rounded hover:opacity-90 cursor-pointer transition-opacity"
               >
                 Save Task
               </button>
@@ -318,17 +323,17 @@ export default function TodayPage() {
                       return (
                         <div
                           key={task.id}
-                          className="group flex items-center justify-between p-2.5 rounded-md border border-[var(--border-subtle)] bg-[var(--background-card)] hover:border-[var(--border-hover)] transition-colors"
+                          className="group flex items-center justify-between p-2.5 rounded-md border border-border-subtle bg-bg-card hover:border-border-hover transition-colors shadow-2xs"
                         >
                           <div className="flex items-center gap-3 min-w-0 flex-1">
                             <button
                               type="button"
                               onClick={() => handleToggleTask(task)}
                               aria-label={isDone ? `Mark incomplete: ${task.title}` : `Mark complete: ${task.title}`}
-                              className="text-[var(--foreground-muted)] hover:text-emerald-400 transition-colors shrink-0"
+                              className="text-text-muted hover:text-emerald-500 transition-colors shrink-0"
                             >
                               {isDone ? (
-                                <CheckCircle2 className="w-4 h-4 text-emerald-400 fill-emerald-500/20" />
+                                <CheckCircle2 className="w-4 h-4 text-emerald-500 fill-emerald-500/20" />
                               ) : (
                                 <Circle className="w-4 h-4" />
                               )}
@@ -337,8 +342,8 @@ export default function TodayPage() {
                               onClick={() => setEditingTask(task)}
                               className={`text-xs truncate cursor-pointer transition-colors ${
                                 isDone
-                                  ? "text-[#7e8597] opacity-75"
-                                  : "text-[var(--foreground-primary)] hover:text-white"
+                                  ? "text-text-muted opacity-75"
+                                  : "text-text-primary hover:text-text-secondary"
                               }`}
                               title="Click to edit task"
                             >
@@ -347,8 +352,14 @@ export default function TodayPage() {
                           </div>
 
                           <div className="flex items-center gap-2 shrink-0 ml-2">
+                            {task.dueAt && (
+                              <span className={`inline-flex items-center gap-1 text-[11px] text-text-muted ${isDone ? "opacity-60" : ""}`}>
+                                <Calendar size={11} />
+                                {format(new Date(task.dueAt), "MMM d")}
+                              </span>
+                            )}
                             {task.plannedDurationMinutes && (
-                              <span className={`text-[11px] text-[var(--foreground-muted)] ${isDone ? "opacity-60" : ""}`}>
+                              <span className={`text-[11px] text-text-muted ${isDone ? "opacity-60" : ""}`}>
                                 {task.plannedDurationMinutes}m
                               </span>
                             )}
@@ -358,7 +369,7 @@ export default function TodayPage() {
                             <button
                               type="button"
                               onClick={() => setEditingTask(task)}
-                              className="p-1 hover:bg-[var(--background-subtle)] text-[var(--foreground-muted)] hover:text-[var(--foreground-primary)] rounded transition-colors"
+                              className="p-1 hover:bg-bg-secondary text-text-muted hover:text-text-primary rounded transition-colors cursor-pointer"
                               title="Edit task"
                             >
                               <Edit3 size={12} />
@@ -370,7 +381,7 @@ export default function TodayPage() {
                                   setSelectedTask(task);
                                   setSessionActive(true);
                                 }}
-                                className="inline-flex items-center gap-1 text-[11px] text-[var(--foreground-primary)] hover:opacity-90 px-2 py-0.5 rounded bg-[var(--background-subtle)] border border-[var(--border-subtle)]"
+                                className="inline-flex items-center gap-1 text-[11px] text-text-primary hover:opacity-90 px-2 py-0.5 rounded bg-bg-secondary border border-border-subtle cursor-pointer transition-opacity"
                               >
                                 <Play size={10} className="fill-current" />
                                 <span>Focus</span>
@@ -392,31 +403,31 @@ export default function TodayPage() {
 
               return (
                 <div className="space-y-1.5">
-                  <div className="flex items-center gap-2 text-xs font-semibold text-[var(--foreground-muted)]">
+                  <div className="flex items-center gap-2 text-xs font-semibold text-text-muted">
                     <ListTodo size={12} />
                     <span>Independent Tasks</span>
-                    <span className="text-[11px] text-[var(--foreground-muted)] font-normal">
+                    <span className="text-[11px] text-text-muted font-normal">
                       ({indep.length})
                     </span>
                   </div>
 
-                  <div className="space-y-1.5 pl-2 border-l border-white/10">
+                  <div className="space-y-1.5 pl-2 border-l border-border-subtle">
                     {indep.map((task) => {
                       const isDone = task.status === "done";
                       return (
                         <div
                           key={task.id}
-                          className="group flex items-center justify-between p-2.5 rounded-md border border-[var(--border-subtle)] bg-[var(--background-card)] hover:border-[var(--border-hover)] transition-colors"
+                          className="group flex items-center justify-between p-2.5 rounded-md border border-border-subtle bg-bg-card hover:border-border-hover transition-colors shadow-2xs"
                         >
                           <div className="flex items-center gap-3 min-w-0 flex-1">
                             <button
                               type="button"
                               onClick={() => handleToggleTask(task)}
                               aria-label={isDone ? `Mark incomplete: ${task.title}` : `Mark complete: ${task.title}`}
-                              className="text-[var(--foreground-muted)] hover:text-emerald-400 transition-colors shrink-0"
+                              className="text-text-muted hover:text-emerald-500 transition-colors shrink-0 cursor-pointer"
                             >
                               {isDone ? (
-                                <CheckCircle2 className="w-4 h-4 text-emerald-400 fill-emerald-500/20" />
+                                <CheckCircle2 className="w-4 h-4 text-emerald-500 fill-emerald-500/20" />
                               ) : (
                                 <Circle className="w-4 h-4" />
                               )}
@@ -425,8 +436,8 @@ export default function TodayPage() {
                               onClick={() => setEditingTask(task)}
                               className={`text-xs truncate cursor-pointer transition-colors ${
                                 isDone
-                                  ? "text-[#7e8597] opacity-75"
-                                  : "text-[var(--foreground-primary)] hover:text-white"
+                                  ? "text-text-muted opacity-75"
+                                  : "text-text-primary hover:text-text-secondary"
                               }`}
                               title="Click to edit task"
                             >
@@ -435,8 +446,14 @@ export default function TodayPage() {
                           </div>
 
                           <div className="flex items-center gap-2 shrink-0 ml-2">
+                            {task.dueAt && (
+                              <span className={`inline-flex items-center gap-1 text-[11px] text-text-muted ${isDone ? "opacity-60" : ""}`}>
+                                <Calendar size={11} />
+                                {format(new Date(task.dueAt), "MMM d")}
+                              </span>
+                            )}
                             {task.plannedDurationMinutes && (
-                              <span className={`text-[11px] text-[var(--foreground-muted)] ${isDone ? "opacity-60" : ""}`}>
+                              <span className={`text-[11px] text-text-muted ${isDone ? "opacity-60" : ""}`}>
                                 {task.plannedDurationMinutes}m
                               </span>
                             )}
@@ -446,7 +463,7 @@ export default function TodayPage() {
                             <button
                               type="button"
                               onClick={() => setEditingTask(task)}
-                              className="p-1 hover:bg-[var(--background-subtle)] text-[var(--foreground-muted)] hover:text-[var(--foreground-primary)] rounded transition-colors"
+                              className="p-1 hover:bg-bg-secondary text-text-muted hover:text-text-primary rounded transition-colors cursor-pointer"
                               title="Edit task"
                             >
                               <Edit3 size={12} />

@@ -71,6 +71,18 @@ export class InactivityEngine {
     }
   }
 
+  public async handleWakeupGap(gapMs: number, now: number) {
+    if (!this.loaded) await this.loadState();
+    const thresholdMs = this.config.devMode ? 15000 : 15 * 60 * 1000;
+    if (gapMs >= thresholdMs) {
+      console.log(`[InactivityEngine] Wake-up gap detected: ${gapMs}ms. Triggering away review.`);
+      await this.triggerAwayReviewNotification(gapMs);
+    }
+    this.state.lastActiveMs = now;
+    this.previousActivityState = "ACTIVE";
+    await this.saveState();
+  }
+
   private async handleTick(activityState: ActivityState, now: number) {
     if (!this.loaded) return;
 
@@ -78,26 +90,11 @@ export class InactivityEngine {
       // Transition from IDLE to ACTIVE
       if (this.previousActivityState === "IDLE") {
         const gapMs = now - this.state.lastActiveMs;
-        
-        // Threshold: 1 hour in prod, 15s in dev mode
-        const thresholdMs = this.config.devMode ? 15000 : 60 * 60 * 1000;
+        const thresholdMs = this.config.devMode ? 15000 : 15 * 60 * 1000;
         
         if (gapMs >= thresholdMs) {
-          // Determine if they were asleep.
-          // If the gap started or ended in their sleep schedule, we assume they were sleeping.
-          // Or if the gap is very long (e.g., > 4 hours) we might assume sleep, 
-          // but for now we'll check if either the start of the gap or the end of the gap
-          // fell within the sleep schedule.
-          const asleepAtStart = this.isWithinSleepSchedule(this.state.lastActiveMs);
-          const asleepAtEnd = this.isWithinSleepSchedule(now);
-          const massiveGap = gapMs > 8 * 60 * 60 * 1000; // > 8 hours
-
-          if (asleepAtStart || asleepAtEnd || massiveGap) {
-            console.log(`[InactivityEngine] Huge gap (${gapMs}ms) detected, but fell within sleep constraints. Silently resuming.`);
-          } else {
-            console.log(`[InactivityEngine] Away review triggered for gap: ${gapMs}ms`);
-            await this.triggerAwayReviewNotification(gapMs);
-          }
+          console.log(`[InactivityEngine] Away review triggered for gap: ${gapMs}ms`);
+          await this.triggerAwayReviewNotification(gapMs);
         }
       }
       
@@ -114,10 +111,14 @@ export class InactivityEngine {
     if (this.isTriggering) return;
     this.isTriggering = true;
     try {
-      const gapHours = (gapMs / (1000 * 60 * 60)).toFixed(1);
-      const gapMinutes = Math.round(gapMs / (1000 * 60));
-      
-      const timeStr = this.config.devMode ? `${gapMinutes} minutes` : `${gapHours} hours`;
+      const gapTotalMinutes = Math.max(1, Math.round(gapMs / (1000 * 60)));
+      let timeStr: string;
+      if (gapTotalMinutes >= 60) {
+        const hours = (gapTotalMinutes / 60).toFixed(1).replace(/\.0$/, "");
+        timeStr = `${hours} hour${hours === "1" ? "" : "s"}`;
+      } else {
+        timeStr = `${gapTotalMinutes} minute${gapTotalMinutes === 1 ? "" : "s"}`;
+      }
 
       await showCheckInNotification({
         isAwayReview: true,

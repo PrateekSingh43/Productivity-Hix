@@ -11,6 +11,7 @@ import { activityEngine } from "./activity-engine";
 import { reflectionEngine } from "./reflection-engine";
 import { inactivityEngine } from "./inactivity-engine";
 import { checkInQueue } from "./checkin-queue";
+import { showFocusEndedNotification } from "./notifications";
 // Initialize engines so their constructors run
 import "./availability-manager";
 
@@ -238,6 +239,15 @@ chrome.runtime.onMessage.addListener(
     }
     if (message.type === "submit-checkin" && message.payload) {
       void handleSubmitCheckIn(message.payload).then(sendResponse);
+      return true;
+    }
+    if (message.type === "trigger-focus-ended-notification") {
+      void showFocusEndedNotification({
+        taskTitle: message.taskTitle,
+        durationMinutes: message.durationMinutes,
+      }).then(() => {
+        sendResponse({ success: true });
+      });
       return true;
     }
     return false;

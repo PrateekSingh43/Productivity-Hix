@@ -83,8 +83,8 @@ export function Sidebar() {
       {/* Brand Header */}
       <div className="h-14 px-4 flex items-center justify-between border-b border-border-subtle">
         <Link href="/" className="flex items-center gap-2.5 group">
-          <div className="h-6 w-6 rounded-[var(--radius-sm)] bg-accent-default/15 text-accent-default border border-accent-default/30 flex items-center justify-center transition-colors group-hover:bg-accent-default/25">
-            <Zap size={13} className="fill-current" />
+          <div className="h-6 w-6 rounded-[var(--radius-sm)] overflow-hidden flex items-center justify-center transition-transform group-hover:scale-105">
+            <img src="/icon.png" alt="ProductiveHix" className="w-5 h-5 rounded-[var(--radius-sm)] object-contain" />
           </div>
           <span className="text-sm font-semibold tracking-tight text-text-primary">
             ProductiveHix

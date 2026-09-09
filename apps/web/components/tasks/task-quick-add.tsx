@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Clock, Flag, AlignLeft, X, Target } from "lucide-react";
+import { Plus, Clock, Flag, AlignLeft, X, Target, Calendar } from "lucide-react";
+import { format, addDays } from "date-fns";
 import type { TaskPriority } from "@repo/types";
 import { useCreateTaskMutation } from "../../src/hooks/mutations/use-task-mutations";
 import { useTodayPlan } from "../../src/hooks/queries/use-plans";
@@ -20,10 +21,10 @@ const DURATION_PRESETS = [
 ];
 
 const PRIORITIES: Array<{ label: string; value: TaskPriority; color: string }> = [
-  { label: "High", value: "high", color: "text-rose-400 bg-rose-500/10 border-rose-500/20" },
-  { label: "Medium", value: "medium", color: "text-amber-400 bg-amber-500/10 border-amber-500/20" },
-  { label: "Low", value: "low", color: "text-blue-400 bg-blue-500/10 border-blue-500/20" },
-  { label: "None", value: "none", color: "text-[#8f96a8] bg-[#1a1c24] border-[#292d3a]" },
+  { label: "High", value: "high", color: "text-rose-500 bg-rose-500/10 border-rose-500/20" },
+  { label: "Medium", value: "medium", color: "text-amber-500 bg-amber-500/10 border-amber-500/20" },
+  { label: "Low", value: "low", color: "text-blue-500 bg-blue-500/10 border-blue-500/20" },
+  { label: "None", value: "none", color: "text-text-muted bg-bg-secondary border-border-subtle" },
 ];
 
 export function TaskQuickAdd({ onSuccess }: TaskQuickAddProps) {
@@ -34,6 +35,7 @@ export function TaskQuickAdd({ onSuccess }: TaskQuickAddProps) {
   const [priority, setPriority] = useState<TaskPriority>("medium");
   const [plannedDurationMinutes, setPlannedDurationMinutes] = useState<number>(30);
   const [goalId, setGoalId] = useState<string>("");
+  const [dueDate, setDueDate] = useState<string>(() => format(new Date(), "yyyy-MM-dd"));
 
   const { data: plan } = useTodayPlan();
   const goals = plan?.goals ?? [];
@@ -50,6 +52,7 @@ export function TaskQuickAdd({ onSuccess }: TaskQuickAddProps) {
         description: description.trim() || null,
         priority,
         plannedDurationMinutes,
+        dueAt: dueDate ? new Date(`${dueDate}T23:59:59`).toISOString() : null,
         goalId: goalId ? goalId : null,
         productiveDate: plan?.date || null,
       },
@@ -68,17 +71,20 @@ export function TaskQuickAdd({ onSuccess }: TaskQuickAddProps) {
     );
   };
 
+  const todayStr = format(new Date(), "yyyy-MM-dd");
+  const tomorrowStr = format(addDays(new Date(), 1), "yyyy-MM-dd");
+
   if (!isOpen) {
     return (
       <button
         onClick={() => setIsOpen(true)}
-        className="w-full py-3 px-4 rounded-[var(--radius-lg)] border border-dashed border-[#262b3a] bg-[#0e1017]/70 hover:bg-[#13151f] hover:border-[#3b435a] text-[#8f96a8] hover:text-[#f4f4f6] text-xs font-medium flex items-center justify-center gap-2 transition-all group shadow-sm cursor-pointer"
+        className="w-full py-3 px-4 rounded-[var(--radius-lg)] border border-dashed border-border-subtle bg-bg-card/70 hover:bg-bg-secondary hover:border-border-hover text-text-secondary hover:text-text-primary text-xs font-medium flex items-center justify-center gap-2 transition-all group shadow-2xs cursor-pointer"
       >
-        <span className="h-5 w-5 rounded-full bg-[#1b1e2a] border border-[#2d3345] flex items-center justify-center text-[#707df7] group-hover:scale-110 transition-transform">
+        <span className="h-5 w-5 rounded-full bg-bg-secondary border border-border-subtle flex items-center justify-center text-text-primary group-hover:scale-110 transition-transform">
           <Plus size={13} />
         </span>
-        <span>+ Add task or intention for today...</span>
-        <span className="text-[10px] text-[#52596d] font-mono ml-1">(quick add)</span>
+        <span>+ Add task or intention...</span>
+        <span className="text-[10px] text-text-muted font-mono ml-1">(quick add)</span>
       </button>
     );
   }
@@ -86,7 +92,7 @@ export function TaskQuickAdd({ onSuccess }: TaskQuickAddProps) {
   return (
     <form
       onSubmit={handleSubmit}
-      className="rounded-[var(--radius-lg)] border border-[#2b3142] bg-[#111319] p-4 shadow-lg space-y-3.5 transition-all"
+      className="rounded-[var(--radius-lg)] border border-border-subtle bg-bg-card p-4 shadow-sm space-y-3.5 transition-all"
     >
       {/* Title input with close button */}
       <div className="flex items-center gap-2">
@@ -95,13 +101,13 @@ export function TaskQuickAdd({ onSuccess }: TaskQuickAddProps) {
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder="What do you intend to get done? (e.g. Finish timeline aggregation)"
-          className="flex-1 bg-transparent border-none text-sm font-medium text-[#f4f4f6] placeholder-[#555c70] outline-none"
+          className="flex-1 bg-transparent border-none text-sm font-medium text-text-primary placeholder:text-text-muted outline-none"
           autoFocus
         />
         <button
           type="button"
           onClick={() => setIsOpen(false)}
-          className="text-[#6b7280] hover:text-[#f4f4f6] p-1 rounded transition-colors"
+          className="text-text-muted hover:text-text-primary p-1 rounded transition-colors cursor-pointer"
         >
           <X size={15} />
         </button>
@@ -114,24 +120,24 @@ export function TaskQuickAdd({ onSuccess }: TaskQuickAddProps) {
           onChange={(e) => setDescription(e.target.value)}
           placeholder="Add context, acceptance criteria, or intention notes..."
           rows={2}
-          className="w-full rounded-[var(--radius-sm)] border border-[#232733] bg-[#0c0d12] p-2.5 text-xs text-[#f4f4f6] placeholder-[#4f566a] outline-none focus:border-[#707df7] transition-colors resize-none"
+          className="w-full rounded-[var(--radius-sm)] border border-border-subtle bg-bg-secondary p-2.5 text-xs text-text-primary placeholder:text-text-muted outline-none focus:border-border-hover transition-colors resize-none"
         />
       ) : (
         <button
           type="button"
           onClick={() => setShowNotes(true)}
-          className="inline-flex items-center gap-1.5 text-[11px] text-[#6b7280] hover:text-[#9ca3af] transition-colors"
+          className="inline-flex items-center gap-1.5 text-[11px] text-text-muted hover:text-text-secondary transition-colors cursor-pointer"
         >
           <AlignLeft size={12} />
           + Add notes / context
         </button>
       )}
 
-      {/* Controls Bar: Duration Pills & Priority Selector & Submit */}
-      <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-[#1a1d27]">
+      {/* Controls Bar: Duration Pills & Priority Selector & Due Date & Submit */}
+      <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-border-subtle">
         {/* Planned Duration Selection */}
         <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="text-[11px] text-[#6b7280] flex items-center gap-1 mr-1">
+          <span className="text-[11px] text-text-muted flex items-center gap-1 mr-1">
             <Clock size={11} />
             Planned:
           </span>
@@ -142,10 +148,10 @@ export function TaskQuickAdd({ onSuccess }: TaskQuickAddProps) {
                 key={preset.value}
                 type="button"
                 onClick={() => setPlannedDurationMinutes(preset.value)}
-                className={`px-2 py-1 rounded-[var(--radius-sm)] text-[11px] font-mono transition-colors ${
+                className={`px-2 py-1 rounded-[var(--radius-sm)] text-[11px] font-mono transition-colors cursor-pointer ${
                   isSelected
-                    ? "bg-[#707df7] text-white font-medium"
-                    : "bg-[#161822] text-[#8f96a8] border border-[#222634] hover:text-[#f4f4f6]"
+                    ? "bg-text-primary text-bg-primary font-medium"
+                    : "bg-bg-secondary text-text-muted border border-border-subtle hover:text-text-primary hover:border-border-hover"
                 }`}
               >
                 {preset.label}
@@ -154,26 +160,62 @@ export function TaskQuickAdd({ onSuccess }: TaskQuickAddProps) {
           })}
         </div>
 
+        {/* Due Date Presets & Custom Picker */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-[11px] text-text-muted flex items-center gap-1 mr-1">
+            <Calendar size={11} />
+            Due:
+          </span>
+          <button
+            type="button"
+            onClick={() => setDueDate(todayStr)}
+            className={`px-2 py-0.5 rounded-[var(--radius-sm)] text-[10px] font-semibold transition-colors cursor-pointer ${
+              dueDate === todayStr
+                ? "bg-text-primary text-bg-primary"
+                : "bg-bg-secondary text-text-muted border border-border-subtle hover:text-text-primary"
+            }`}
+          >
+            Today
+          </button>
+          <button
+            type="button"
+            onClick={() => setDueDate(tomorrowStr)}
+            className={`px-2 py-0.5 rounded-[var(--radius-sm)] text-[10px] font-semibold transition-colors cursor-pointer ${
+              dueDate === tomorrowStr
+                ? "bg-text-primary text-bg-primary"
+                : "bg-bg-secondary text-text-muted border border-border-subtle hover:text-text-primary"
+            }`}
+          >
+            Tomorrow
+          </button>
+          <input
+            type="date"
+            value={dueDate}
+            onChange={(e) => setDueDate(e.target.value)}
+            className="text-[11px] bg-bg-secondary border border-border-subtle rounded-[var(--radius-sm)] px-2 py-0.5 text-text-primary outline-none cursor-pointer"
+            title="Custom due date"
+          />
+        </div>
+
         {/* Goal, Priority and Submit button */}
         <div className="flex items-center gap-2 flex-wrap">
           {/* Goal Selector */}
           {goals.length > 0 && (
-            <div className="flex items-center gap-1 bg-[#0c0d12] border border-[#222634] px-1.5 py-0.5 rounded-[var(--radius-sm)]">
-              <Target size={10} className="text-[#707df7]" />
+            <div className="flex items-center gap-1 bg-bg-secondary border border-border-subtle px-2 py-1 rounded-[var(--radius-sm)]">
+              <Target size={11} className="text-text-muted" />
               <select
                 value={goalId}
                 onChange={(e) => setGoalId(e.target.value)}
-                className="bg-transparent border-none text-[10px] font-medium text-[#f4f4f6] outline-none max-w-[150px] truncate cursor-pointer [&>option]:bg-[#141720] [&>option]:text-[#f4f4f6]"
+                className="bg-transparent border-none text-[11px] font-medium text-text-primary outline-none max-w-[150px] truncate cursor-pointer [&>option]:bg-bg-card [&>option]:text-text-primary"
                 title="Link this task to a Daily Goal"
               >
-                <option value="" style={{ backgroundColor: "#141720", color: "#f4f4f6" }}>
+                <option value="">
                   No Goal (Independent)
                 </option>
                 {goals.map((g) => (
                   <option
                     key={g.id}
                     value={g.id}
-                    style={{ backgroundColor: "#141720", color: "#f4f4f6" }}
                   >
                     Goal: {g.title}
                   </option>
@@ -183,8 +225,8 @@ export function TaskQuickAdd({ onSuccess }: TaskQuickAddProps) {
           )}
 
           {/* Priority Pill Selector */}
-          <div className="flex items-center gap-1 bg-[#0c0d12] border border-[#222634] p-0.5 rounded-[var(--radius-sm)]">
-            <span className="px-1.5 text-[10px] text-[#6b7280] uppercase tracking-wider font-semibold">
+          <div className="flex items-center gap-1 bg-bg-secondary border border-border-subtle p-0.5 rounded-[var(--radius-sm)]">
+            <span className="px-1.5 text-[10px] text-text-muted uppercase tracking-wider font-semibold">
               <Flag size={10} className="inline mr-1" />
               Priority
             </span>
@@ -195,10 +237,10 @@ export function TaskQuickAdd({ onSuccess }: TaskQuickAddProps) {
                   key={p.value}
                   type="button"
                   onClick={() => setPriority(p.value)}
-                  className={`px-2 py-0.5 rounded-[var(--radius-sm)] text-[10px] font-semibold tracking-wide transition-colors ${
+                  className={`px-2 py-0.5 rounded-[var(--radius-sm)] text-[10px] font-semibold tracking-wide transition-colors cursor-pointer ${
                     isSelected
                       ? `${p.color} border`
-                      : "text-[#6b7280] hover:text-[#9ca3af]"
+                      : "text-text-muted hover:text-text-primary"
                   }`}
                 >
                   {p.label}
@@ -211,7 +253,7 @@ export function TaskQuickAdd({ onSuccess }: TaskQuickAddProps) {
           <button
             type="submit"
             disabled={!title.trim() || createTaskMutation.isPending}
-            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-[var(--radius-sm)] bg-[#707df7] hover:bg-[#5f6de6] text-xs font-semibold text-white transition-opacity disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-[var(--radius-sm)] bg-text-primary text-bg-primary text-xs font-semibold hover:opacity-90 transition-opacity disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
           >
             <Plus size={13} />
             {createTaskMutation.isPending ? "Creating..." : "Add Task"}

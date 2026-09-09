@@ -15,10 +15,12 @@ export const emotionalStateSchema = z.enum([
   "calm",
   "neutral",
   "happy",
+  "motivated",
+  "sleepy",
   "stressed",
   "anxious",
   "frustrated",
-  "motivated",
+  "angry",
 ]);
 
 export const energyLevelSchema = z.enum(["low", "medium", "high"]);
@@ -37,8 +39,8 @@ export const checkInCreateSchema = z.object({
   state: emotionalStateSchema.or(z.string()).nullable().optional(),
   energy: energyLevelSchema.or(z.string()).nullable().optional(),
   focus: focusLevelSchema.or(z.string()).nullable().optional(),
-  // Requirement 11: Free-text reflection max 350 characters
-  note: z.string().trim().max(350, "Reflection note must be at most 350 characters").nullable().optional(),
+  // Free-text reflection max 500 characters
+  note: z.string().trim().max(500, "Reflection note must be at most 500 characters").nullable().optional(),
   questionVersion: z.string().trim().min(1).max(50).default("v1"),
   source: z.string().trim().min(1).max(50).default("extension_hourly"),
   deeperAnswers: z.record(z.string(), z.string()).nullable().optional(),

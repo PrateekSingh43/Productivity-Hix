@@ -131,6 +131,22 @@ export class ReflectionEngine {
     };
   }
 
+  public async handleWakeupGap(gapMs: number, now: number) {
+    if (!this.loaded) await this.loadState();
+    const thresholdMs = this.config.devMode ? 15000 : 15 * 60 * 1000;
+    if (gapMs >= thresholdMs) {
+      console.log(`[ReflectionEngine] Wakeup gap (${gapMs}ms) detected. Clearing active work accumulator.`);
+      this.state.activeTimeMs = 0;
+      this.state.cooldownUntil = now + (this.config.devMode ? 5000 : 2 * 60 * 1000);
+      await this.saveState();
+    }
+  }
+
+  public async notifyFocusEnded(taskTitle?: string) {
+    const { showFocusEndedNotification } = await import("./notifications");
+    await showFocusEndedNotification({ taskTitle });
+  }
+
   public async forceReset() {
     this.state.activeTimeMs = 0;
     this.state.cooldownUntil = null;
@@ -212,7 +228,6 @@ export class ReflectionEngine {
   }
 
   private async isFocusSessionActive(): Promise<boolean> {
-    if (this.config.devMode) return false;
     try {
       const { apiClient } = await import("../api/client");
       const sessions = await apiClient.getSessions();

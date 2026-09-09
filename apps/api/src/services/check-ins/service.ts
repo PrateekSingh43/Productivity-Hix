@@ -148,7 +148,7 @@ export async function createCheckIn(
     state: input.state || null,
     energy: input.energy || null,
     focus: input.focus || null,
-    note: input.note ? input.note.slice(0, 350) : null,
+    note: input.note ? input.note.slice(0, 500) : null,
     questionVersion: input.questionVersion || "v1",
     source: input.source || "extension_hourly",
     deeperAnswers: input.deeperAnswers ? (input.deeperAnswers as any) : null,

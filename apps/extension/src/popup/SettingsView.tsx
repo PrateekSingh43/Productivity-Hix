@@ -1,8 +1,19 @@
 import { useState, useEffect, useRef } from "react";
-import { ArrowLeft, Clock, Bell, Timer, ShieldCheck, Zap, Play, Check } from "lucide-react";
+import {
+  ArrowLeft,
+  Clock,
+  Bell,
+  Timer,
+  ShieldCheck,
+  Zap,
+  Play,
+  Check,
+  Sun,
+  Moon,
+  Monitor,
+} from "lucide-react";
 import {
   updateSchedulerConfig,
-  resetSchedulerTimer,
   triggerCheckInNotification,
   type ExtensionStatus,
 } from "../api/client";
@@ -13,8 +24,34 @@ interface SettingsViewProps {
   onRefresh: () => void;
 }
 
+type ThemeMode = "dark" | "light" | "system";
+
 export function SettingsView({ status, onBack, onRefresh }: SettingsViewProps) {
   const scheduler = status?.scheduler;
+
+  // Theme settings
+  const [theme, setTheme] = useState<ThemeMode>("dark");
+
+  useEffect(() => {
+    if (typeof chrome !== "undefined" && chrome.storage?.local) {
+      chrome.storage.local.get(["theme"], (res) => {
+        if (res.theme === "light" || res.theme === "dark" || res.theme === "system") {
+          setTheme(res.theme);
+          document.documentElement.setAttribute("data-theme", res.theme);
+        } else {
+          document.documentElement.setAttribute("data-theme", "dark");
+        }
+      });
+    }
+  }, []);
+
+  const handleThemeChange = (newTheme: ThemeMode) => {
+    setTheme(newTheme);
+    document.documentElement.setAttribute("data-theme", newTheme);
+    if (typeof chrome !== "undefined" && chrome.storage?.local) {
+      void chrome.storage.local.set({ theme: newTheme });
+    }
+  };
 
   // Check-in settings
   const [checkInsPaused, setCheckInsPaused] = useState(scheduler?.checkInsPaused ?? false);
@@ -123,15 +160,8 @@ export function SettingsView({ status, onBack, onRefresh }: SettingsViewProps) {
       <button
         type="button"
         onClick={onBack}
+        className="text-button"
         style={{
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 4,
-          background: "transparent",
-          border: 0,
-          color: "#90869e",
-          fontSize: 11,
-          cursor: "pointer",
           padding: "2px 0",
           alignSelf: "flex-start",
         }}
@@ -146,12 +176,104 @@ export function SettingsView({ status, onBack, onRefresh }: SettingsViewProps) {
         </div>
       </div>
 
-      {/* NOTIFICATION TRIGGER & CADENCE TESTING */}
-      <section className="settings-card" style={{ borderColor: "rgba(251,191,36,0.3)" }}>
+      {/* 1. APPEARANCE / THEME SWITCHER */}
+      <section className="settings-card">
+        <div style={{ padding: "8px 0 4px", display: "flex", alignItems: "center", gap: 6 }}>
+          <Sun size={13} color="var(--accent-primary)" />
+          <span className="section-kicker" style={{ color: "var(--accent-primary)" }}>
+            APPEARANCE & THEME
+          </span>
+        </div>
+
+        <div className="setting-row" style={{ flexDirection: "column", alignItems: "stretch", padding: "8px 0", minHeight: "auto", gap: 8 }}>
+          <div className="setting-copy">
+            <strong>Interface Theme</strong>
+            <span>Choose light, dark, or automatic system appearance</span>
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(3, 1fr)",
+              gap: 4,
+              padding: 3,
+              background: "var(--bg-subtle)",
+              border: "1px solid var(--border-default)",
+              borderRadius: 8,
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => handleThemeChange("dark")}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 5,
+                padding: "6px 8px",
+                borderRadius: 6,
+                fontSize: 11,
+                fontWeight: theme === "dark" ? 600 : 500,
+                color: theme === "dark" ? "var(--text-primary)" : "var(--text-secondary)",
+                background: theme === "dark" ? "var(--bg-active)" : "transparent",
+                boxShadow: theme === "dark" ? "0 1px 2px rgba(0,0,0,0.15)" : "none",
+                transition: "all 150ms cubic-bezier(0.16, 1, 0.3, 1)",
+              }}
+            >
+              <Moon size={12} /> Dark
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleThemeChange("light")}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 5,
+                padding: "6px 8px",
+                borderRadius: 6,
+                fontSize: 11,
+                fontWeight: theme === "light" ? 600 : 500,
+                color: theme === "light" ? "var(--text-primary)" : "var(--text-secondary)",
+                background: theme === "light" ? "var(--bg-surface-elevated)" : "transparent",
+                boxShadow: theme === "light" ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
+                transition: "all 150ms cubic-bezier(0.16, 1, 0.3, 1)",
+              }}
+            >
+              <Sun size={12} /> Light
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleThemeChange("system")}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 5,
+                padding: "6px 8px",
+                borderRadius: 6,
+                fontSize: 11,
+                fontWeight: theme === "system" ? 600 : 500,
+                color: theme === "system" ? "var(--text-primary)" : "var(--text-secondary)",
+                background: theme === "system" ? "var(--bg-active)" : "transparent",
+                boxShadow: theme === "system" ? "0 1px 2px rgba(0,0,0,0.15)" : "none",
+                transition: "all 150ms cubic-bezier(0.16, 1, 0.3, 1)",
+              }}
+            >
+              <Monitor size={12} /> System
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {/* 2. NOTIFICATION TRIGGER & CADENCE TESTING */}
+      <section className="settings-card" style={{ borderColor: "var(--border-default)" }}>
         <div style={{ padding: "8px 0 4px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <Zap size={13} color="#fbbf24" />
-            <span className="section-kicker" style={{ color: "#fbbf24" }}>NOTIFICATION TRIGGER & TIMER</span>
+            <Zap size={13} color="var(--warning)" />
+            <span className="section-kicker" style={{ color: "var(--warning)" }}>NOTIFICATION TRIGGER & TIMER</span>
           </div>
           <button
             type="button"
@@ -160,13 +282,13 @@ export function SettingsView({ status, onBack, onRefresh }: SettingsViewProps) {
               display: "inline-flex",
               alignItems: "center",
               gap: 4,
-              padding: "3px 8px",
-              background: "linear-gradient(135deg, #fbbf24, #d97706)",
+              padding: "4px 8px",
+              background: "var(--warning)",
               border: 0,
-              borderRadius: 6,
+              borderRadius: 5,
               color: "#000",
               fontSize: 10,
-              fontWeight: 700,
+              fontWeight: 650,
               cursor: "pointer",
             }}
           >
@@ -201,10 +323,10 @@ export function SettingsView({ status, onBack, onRefresh }: SettingsViewProps) {
                     marginTop: 0,
                     padding: "6px 2px",
                     fontSize: 10,
-                    fontWeight: isSelected ? 700 : 500,
-                    background: isSelected ? "rgba(251,191,36,0.22)" : undefined,
-                    borderColor: isSelected ? "#fbbf24" : undefined,
-                    color: isSelected ? "#fef3c7" : undefined,
+                    fontWeight: isSelected ? 650 : 500,
+                    background: isSelected ? "var(--warning-subtle)" : undefined,
+                    borderColor: isSelected ? "var(--warning)" : undefined,
+                    color: isSelected ? "var(--text-primary)" : undefined,
                   }}
                 >
                   {preset.label}
@@ -219,9 +341,9 @@ export function SettingsView({ status, onBack, onRefresh }: SettingsViewProps) {
                 padding: "6px 8px",
                 fontSize: 10,
                 marginTop: 0,
-                background: isCustom ? "rgba(167,139,250,0.22)" : undefined,
-                borderColor: isCustom ? "#a78bfa" : undefined,
-                color: isCustom ? "#e5dcfa" : undefined,
+                background: isCustom ? "var(--accent-subtle)" : undefined,
+                borderColor: isCustom ? "var(--accent-primary)" : undefined,
+                color: isCustom ? "var(--text-primary)" : undefined,
               }}
             >
               Custom
@@ -230,8 +352,8 @@ export function SettingsView({ status, onBack, onRefresh }: SettingsViewProps) {
 
           {/* CUSTOM TIME INPUT */}
           {isCustom && (
-            <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6, padding: "6px 8px", background: "rgba(255,255,255,0.03)", borderRadius: 7, border: "1px solid rgba(255,255,255,0.08)" }}>
-              <span style={{ fontSize: 10, color: "#9ca3af" }}>Custom:</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6, padding: "6px 8px", background: "var(--bg-subtle)", borderRadius: 7, border: "1px solid var(--border-default)" }}>
+              <span style={{ fontSize: 10, color: "var(--text-muted)" }}>Custom:</span>
               <input
                 type="number"
                 min="5"
@@ -240,9 +362,9 @@ export function SettingsView({ status, onBack, onRefresh }: SettingsViewProps) {
                 onChange={(e) => setCustomValue(Math.max(1, Number(e.target.value)))}
                 style={{
                   width: 54,
-                  background: "#161320",
-                  border: "1px solid rgba(255,255,255,0.14)",
-                  color: "#fff",
+                  background: "var(--bg-surface)",
+                  border: "1px solid var(--border-default)",
+                  color: "var(--text-primary)",
                   borderRadius: 6,
                   padding: "3px 6px",
                   fontSize: 11,
@@ -257,9 +379,9 @@ export function SettingsView({ status, onBack, onRefresh }: SettingsViewProps) {
                     padding: "3px 6px",
                     fontSize: 9.5,
                     borderRadius: 4,
-                    background: customUnit === "sec" ? "rgba(167,139,250,0.3)" : "transparent",
-                    color: customUnit === "sec" ? "#fff" : "#9ca3af",
-                    border: "1px solid rgba(255,255,255,0.08)",
+                    background: customUnit === "sec" ? "var(--accent-subtle)" : "transparent",
+                    color: customUnit === "sec" ? "var(--text-primary)" : "var(--text-muted)",
+                    border: "1px solid var(--border-subtle)",
                   }}
                 >
                   Sec
@@ -271,9 +393,9 @@ export function SettingsView({ status, onBack, onRefresh }: SettingsViewProps) {
                     padding: "3px 6px",
                     fontSize: 9.5,
                     borderRadius: 4,
-                    background: customUnit === "min" ? "rgba(167,139,250,0.3)" : "transparent",
-                    color: customUnit === "min" ? "#fff" : "#9ca3af",
-                    border: "1px solid rgba(255,255,255,0.08)",
+                    background: customUnit === "min" ? "var(--accent-subtle)" : "transparent",
+                    color: customUnit === "min" ? "var(--text-primary)" : "var(--text-muted)",
+                    border: "1px solid var(--border-subtle)",
                   }}
                 >
                   Min
@@ -291,7 +413,7 @@ export function SettingsView({ status, onBack, onRefresh }: SettingsViewProps) {
                   height: "auto",
                 }}
               >
-                <Check size={11} /> Start Timer
+                <Check size={11} /> Apply
               </button>
             </div>
           )}
@@ -301,9 +423,9 @@ export function SettingsView({ status, onBack, onRefresh }: SettingsViewProps) {
             style={{
               marginTop: 6,
               padding: "8px 10px",
-              borderRadius: 8,
-              background: "linear-gradient(135deg, rgba(139,92,246,0.12), rgba(251,191,36,0.08))",
-              border: "1px solid rgba(139,92,246,0.25)",
+              borderRadius: 7,
+              background: "var(--bg-subtle)",
+              border: "1px solid var(--border-default)",
             }}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -311,22 +433,22 @@ export function SettingsView({ status, onBack, onRefresh }: SettingsViewProps) {
                 <span
                   className="live-dot"
                   style={{
-                    background: countdown !== null && countdown <= 3 ? "#ef4444" : "#fbbf24",
-                    boxShadow: `0 0 8px ${countdown !== null && countdown <= 3 ? "#ef4444" : "#fbbf24"}`,
+                    background: countdown !== null && countdown <= 3 ? "var(--danger)" : "var(--warning)",
+                    boxShadow: `0 0 8px ${countdown !== null && countdown <= 3 ? "var(--danger)" : "var(--warning)"}`,
                   }}
                 />
-                <span style={{ fontSize: 11, color: "#fef3c7", fontWeight: 600 }}>
+                <span style={{ fontSize: 11, color: "var(--text-primary)", fontWeight: 550 }}>
                   Next notification in:{" "}
-                  <strong style={{ color: "#fff", fontSize: 12 }}>
+                  <strong style={{ fontSize: 12 }}>
                     {countdown !== null ? `${countdown}s` : "Calculating..."}
                   </strong>
                 </span>
               </div>
-              <span style={{ fontSize: 9.5, color: "#a59cb6" }}>
+              <span style={{ fontSize: 9.5, color: "var(--text-muted)" }}>
                 Cadence: {devMode ? `${devIntervalSeconds}s` : "50m"}
               </span>
             </div>
-            <p style={{ margin: "5px 0 0", fontSize: 9.5, color: "#9ca3af", lineHeight: 1.35 }}>
+            <p style={{ margin: "5px 0 0", fontSize: 9.5, color: "var(--text-muted)", lineHeight: 1.35 }}>
               A notification toast will appear at the <strong>bottom-right corner</strong> of your screen.
               Clicking it immediately opens the <strong>Reflect</strong> wizard.
             </p>
@@ -334,11 +456,11 @@ export function SettingsView({ status, onBack, onRefresh }: SettingsViewProps) {
         </div>
       </section>
 
-      {/* CHECK-IN PREFERENCES */}
+      {/* 3. CHECK-IN PREFERENCES */}
       <section className="settings-card">
         <div style={{ padding: "8px 0 4px", display: "flex", alignItems: "center", gap: 6 }}>
-          <Bell size={13} color="#a78bfa" />
-          <span className="section-kicker" style={{ color: "#a78bfa" }}>HOURLY REFLECTION</span>
+          <Bell size={13} color="var(--accent-primary)" />
+          <span className="section-kicker" style={{ color: "var(--accent-primary)" }}>HOURLY REFLECTION</span>
         </div>
 
         <div className="setting-row">
@@ -348,7 +470,15 @@ export function SettingsView({ status, onBack, onRefresh }: SettingsViewProps) {
           </div>
           <button
             type="button"
-            className={`toggle ${!checkInsPaused ? "on" : "off"}`}
+            className={`secondary-button ${!checkInsPaused ? "is-active" : ""}`}
+            style={{
+              padding: "3px 8px",
+              fontSize: 10,
+              fontWeight: 600,
+              background: !checkInsPaused ? "var(--success-subtle)" : "var(--bg-subtle)",
+              borderColor: !checkInsPaused ? "var(--success)" : "var(--border-default)",
+              color: !checkInsPaused ? "var(--success)" : "var(--text-muted)",
+            }}
             onClick={() => {
               const newVal = !checkInsPaused;
               setCheckInsPaused(newVal);
@@ -356,7 +486,7 @@ export function SettingsView({ status, onBack, onRefresh }: SettingsViewProps) {
             }}
             aria-label="Toggle hourly reflection"
           >
-            <span />
+            {!checkInsPaused ? "Enabled" : "Paused"}
           </button>
         </div>
 
@@ -367,7 +497,15 @@ export function SettingsView({ status, onBack, onRefresh }: SettingsViewProps) {
           </div>
           <button
             type="button"
-            className={`toggle ${afterFocusReflection ? "on" : "off"}`}
+            className={`secondary-button ${afterFocusReflection ? "is-active" : ""}`}
+            style={{
+              padding: "3px 8px",
+              fontSize: 10,
+              fontWeight: 600,
+              background: afterFocusReflection ? "var(--success-subtle)" : "var(--bg-subtle)",
+              borderColor: afterFocusReflection ? "var(--success)" : "var(--border-default)",
+              color: afterFocusReflection ? "var(--success)" : "var(--text-muted)",
+            }}
             onClick={() => {
               const newVal = !afterFocusReflection;
               setAfterFocusReflection(newVal);
@@ -375,7 +513,7 @@ export function SettingsView({ status, onBack, onRefresh }: SettingsViewProps) {
             }}
             aria-label="Toggle after focus reflection"
           >
-            <span />
+            {afterFocusReflection ? "Enabled" : "Disabled"}
           </button>
         </div>
 
@@ -387,7 +525,15 @@ export function SettingsView({ status, onBack, onRefresh }: SettingsViewProps) {
             </div>
             <button
               type="button"
-              className={`toggle ${quietHoursEnabled ? "on" : "off"}`}
+              className="secondary-button"
+              style={{
+                padding: "3px 8px",
+                fontSize: 10,
+                fontWeight: 600,
+                background: quietHoursEnabled ? "var(--accent-subtle)" : "var(--bg-subtle)",
+                borderColor: quietHoursEnabled ? "var(--accent-primary)" : "var(--border-default)",
+                color: quietHoursEnabled ? "var(--accent-primary)" : "var(--text-muted)",
+              }}
               onClick={() => {
                 const newVal = !quietHoursEnabled;
                 setQuietHoursEnabled(newVal);
@@ -395,13 +541,13 @@ export function SettingsView({ status, onBack, onRefresh }: SettingsViewProps) {
               }}
               aria-label="Toggle quiet hours"
             >
-              <span />
+              {quietHoursEnabled ? "Active" : "Off"}
             </button>
           </div>
 
           {quietHoursEnabled && (
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
-              <Clock size={12} color="#8a8298" />
+              <Clock size={12} color="var(--text-muted)" />
               <input
                 type="time"
                 value={quietHoursStart}
@@ -410,15 +556,15 @@ export function SettingsView({ status, onBack, onRefresh }: SettingsViewProps) {
                   void saveSchedulerSetting({ quietHoursStart: e.target.value });
                 }}
                 style={{
-                  background: "#161320",
-                  border: "1px solid rgba(255,255,255,0.12)",
-                  color: "#eee8f8",
+                  background: "var(--bg-subtle)",
+                  border: "1px solid var(--border-default)",
+                  color: "var(--text-primary)",
                   padding: "3px 6px",
-                  borderRadius: 6,
-                  fontSize: 10,
+                  borderRadius: 5,
+                  fontSize: 10.5,
                 }}
               />
-              <span style={{ fontSize: 10, color: "#8a8298" }}>to</span>
+              <span style={{ fontSize: 10, color: "var(--text-muted)" }}>to</span>
               <input
                 type="time"
                 value={quietHoursEnd}
@@ -427,12 +573,12 @@ export function SettingsView({ status, onBack, onRefresh }: SettingsViewProps) {
                   void saveSchedulerSetting({ quietHoursEnd: e.target.value });
                 }}
                 style={{
-                  background: "#161320",
-                  border: "1px solid rgba(255,255,255,0.12)",
-                  color: "#eee8f8",
+                  background: "var(--bg-subtle)",
+                  border: "1px solid var(--border-default)",
+                  color: "var(--text-primary)",
                   padding: "3px 6px",
-                  borderRadius: 6,
-                  fontSize: 10,
+                  borderRadius: 5,
+                  fontSize: 10.5,
                 }}
               />
             </div>
@@ -440,19 +586,21 @@ export function SettingsView({ status, onBack, onRefresh }: SettingsViewProps) {
         </div>
       </section>
 
-      {/* FOCUS SETTINGS */}
+      {/* 4. FOCUS SETTINGS */}
       <section className="settings-card">
         <div style={{ padding: "8px 0 4px", display: "flex", alignItems: "center", gap: 6 }}>
-          <Timer size={13} color="#a78bfa" />
-          <span className="section-kicker" style={{ color: "#a78bfa" }}>FOCUS MODE</span>
+          <Timer size={13} color="var(--accent-primary)" />
+          <span className="section-kicker" style={{ color: "var(--accent-primary)" }}>FOCUS MODE</span>
         </div>
 
         <div className="setting-row">
           <div className="setting-copy">
             <strong>Duration Presets</strong>
-            <span>Standard blocks</span>
+            <span>Standard intentional execution blocks</span>
           </div>
-          <span className="muted-label" style={{ color: "#d8c6ff", fontWeight: 600 }}>25m • 50m • Custom</span>
+          <span style={{ fontSize: 10.5, color: "var(--text-secondary)", fontWeight: 550 }}>
+            25m • 50m • Custom
+          </span>
         </div>
 
         <div className="setting-row">
@@ -460,15 +608,15 @@ export function SettingsView({ status, onBack, onRefresh }: SettingsViewProps) {
             <strong>Custom Duration Limits</strong>
             <span>Bounded block duration</span>
           </div>
-          <span className="muted-label">5 to 180 min</span>
+          <span style={{ fontSize: 10.5, color: "var(--text-muted)" }}>5 to 180 min</span>
         </div>
       </section>
 
-      {/* PRIVACY SETTINGS */}
+      {/* 5. PRIVACY SETTINGS */}
       <section className="settings-card">
         <div style={{ padding: "8px 0 4px", display: "flex", alignItems: "center", gap: 6 }}>
-          <ShieldCheck size={13} color="#a78bfa" />
-          <span className="section-kicker" style={{ color: "#a78bfa" }}>PRIVACY & TRACKING</span>
+          <ShieldCheck size={13} color="var(--success)" />
+          <span className="section-kicker" style={{ color: "var(--success)" }}>PRIVACY & TRACKING</span>
         </div>
 
         <div className="setting-row">
@@ -476,7 +624,7 @@ export function SettingsView({ status, onBack, onRefresh }: SettingsViewProps) {
             <strong>Private by Default</strong>
             <span>No page content, passwords, or keystrokes</span>
           </div>
-          <span className="good-text">Protected</span>
+          <span className="status-pill good">Protected</span>
         </div>
       </section>
     </main>

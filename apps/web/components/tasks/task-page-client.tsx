@@ -6,11 +6,8 @@ import {
   PlayCircle,
   ListTodo,
   CheckCircle2,
-  Filter,
-  Layers,
   ChevronDown,
   ChevronRight,
-  Sparkles,
   Calendar,
 } from "lucide-react";
 import type { Task } from "@repo/types";
@@ -21,7 +18,7 @@ import { TaskQuickAdd } from "./task-quick-add";
 import { TaskItem } from "./task-item";
 import { TaskDetailDrawer } from "./task-detail-drawer";
 
-type FilterTab = "today" | "all" | "in_progress" | "completed";
+type FilterTab = "today" | "incomplete" | "in_progress" | "completed" | "all";
 
 export function TaskPageClient() {
   const { data: tasks = [], isLoading: isLoadingTasks } = useTasksList();
@@ -59,34 +56,34 @@ export function TaskPageClient() {
   };
 
   // Categorize tasks logically
-  const { priorities, inProgress, upNext, completed } = useMemo(() => {
-    const todoTasks = tasks.filter((t) => t.status === "todo" || t.status === "in_progress");
+  const { todoTasks, priorities, inProgress, upNext, completed } = useMemo(() => {
+    const todos = tasks.filter((t) => t.status === "todo" || t.status === "in_progress");
     const completedTasks = tasks.filter((t) => t.status === "done");
 
-    // 1. TODAY'S PRIORITIES: High priority tasks (capped at 3-5 to maintain focus!)
-    const highTasks = todoTasks.filter((t) => t.priority === "high");
-    // If fewer than 3 high tasks, take the first few medium tasks to form top 3
+    // 1. TODAY'S PRIORITIES: High priority tasks (capped at 3 to maintain focus!)
+    const highTasks = todos.filter((t) => t.priority === "high");
     const topPriorities = highTasks.length >= 3
       ? highTasks.slice(0, 3)
       : [
           ...highTasks,
-          ...todoTasks.filter((t) => t.priority !== "high").slice(0, 3 - highTasks.length),
+          ...todos.filter((t) => t.priority !== "high").slice(0, 3 - highTasks.length),
         ];
 
     const priorityIds = new Set(topPriorities.map((t) => t.id));
 
     // 2. IN PROGRESS: Tasks with active sessions or in_progress status that aren't in priorities
-    const inProg = todoTasks.filter(
+    const inProg = todos.filter(
       (t) => (t.hasActiveSession || t.status === "in_progress") && !priorityIds.has(t.id),
     );
     const inProgIds = new Set(inProg.map((t) => t.id));
 
-    // 3. UP NEXT: Remaining todo tasks
-    const next = todoTasks.filter(
+    // 3. UP NEXT: Remaining todo tasks (including all rollover / past incomplete tasks)
+    const next = todos.filter(
       (t) => !priorityIds.has(t.id) && !inProgIds.has(t.id),
     );
 
     return {
+      todoTasks: todos,
       priorities: topPriorities,
       inProgress: inProg,
       upNext: next,
@@ -94,29 +91,31 @@ export function TaskPageClient() {
     };
   }, [tasks]);
 
+  const inProgressTotalCount = inProgress.length + (priorities.some((p) => p.hasActiveSession || p.status === "in_progress") ? 1 : 0);
+
   return (
     <div className="w-full max-w-[1600px] mx-auto px-6 sm:px-8 py-8 space-y-6">
       {/* 1. Header & Workload Summary */}
       <div className="space-y-4">
         <div>
-          <h1 className="text-2xl font-bold text-[#f4f4f6] tracking-tight">Tasks</h1>
-          <p className="text-sm text-[#8f96a8]">Your intentions for today</p>
+          <h1 className="text-2xl font-bold text-text-primary tracking-tight">Tasks</h1>
+          <p className="text-sm text-text-muted">Your deliberate intentions and todos</p>
         </div>
 
-        <div className="flex flex-col sm:flex-row sm:items-center gap-4 text-xs font-medium bg-[#111319] border border-[#232733] p-3 rounded-[var(--radius-md)]">
-          <div className="flex items-center gap-2 text-[#f4f4f6]">
-            <Calendar size={14} className="text-[#707df7]" />
+        <div className="flex flex-col sm:flex-row sm:items-center gap-4 text-xs font-medium bg-bg-card border border-border-subtle p-3.5 rounded-[var(--radius-md)] shadow-2xs">
+          <div className="flex items-center gap-2 text-text-primary">
+            <Calendar size={14} className="text-text-muted" />
             <span>{format(new Date(), "EEEE, MMMM d")}</span>
           </div>
-          <div className="hidden sm:block text-[#2b3042]">|</div>
+          <div className="hidden sm:block text-border-subtle">|</div>
           <div className="flex items-center gap-4">
-            <div className="flex items-center gap-1.5 text-[#8f96a8]">
-              <span className="text-[#f4f4f6]">{formatHoursMinutes(plannedMinutes)}</span>
+            <div className="flex items-center gap-1.5 text-text-muted">
+              <span className="text-text-primary font-mono font-semibold">{formatHoursMinutes(plannedMinutes)}</span>
               <span>planned</span>
             </div>
-            <div className="flex items-center gap-1.5 text-[#8f96a8]">
-              <span className="text-emerald-400">{formatHoursMinutes(actualMinutes)}</span>
-              <span>actual</span>
+            <div className="flex items-center gap-1.5 text-text-muted">
+              <span className="text-emerald-500 font-mono font-semibold">{formatHoursMinutes(actualMinutes)}</span>
+              <span>actual focus</span>
             </div>
           </div>
         </div>
@@ -126,8 +125,8 @@ export function TaskPageClient() {
           <div className="flex items-start gap-3 p-3 rounded-[var(--radius-md)] bg-amber-500/10 border border-amber-500/20 text-amber-500 text-xs">
             <Flame size={14} className="shrink-0 mt-0.5" />
             <div>
-              <p className="font-semibold text-amber-400 mb-0.5">Your plan is heavy today</p>
-              <p className="text-amber-500/80">
+              <p className="font-semibold text-amber-500 mb-0.5">Your plan is heavy today</p>
+              <p className="text-amber-600/80 dark:text-amber-400/80">
                 {formatHoursMinutes(plannedMinutes)} planned. You may want to defer one task.
               </p>
             </div>
@@ -146,90 +145,101 @@ export function TaskPageClient() {
       <TaskQuickAdd />
 
       {/* 4. Filter Tabs Navigation */}
-      <div className="flex items-center justify-between border-b border-[#1f2330] pb-3 pt-2">
-        <div className="flex items-center gap-1">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border-subtle pb-3 pt-2">
+        <div className="flex items-center gap-1.5 flex-wrap">
           <button
             type="button"
             onClick={() => setFilterTab("today")}
-            className={`px-3 py-1.5 rounded-[var(--radius-sm)] text-xs font-medium transition-colors ${
+            className={`px-3 py-1.5 rounded-[var(--radius-sm)] text-xs font-medium transition-colors cursor-pointer ${
               filterTab === "today"
-                ? "bg-[#181a24] text-[#f4f4f6] border border-[#2b3042]"
-                : "text-[#8f96a8] hover:text-[#f4f4f6]"
+                ? "bg-text-primary text-bg-primary shadow-2xs font-semibold"
+                : "text-text-muted hover:text-text-primary hover:bg-bg-secondary"
             }`}
           >
             Today's Focus
           </button>
           <button
             type="button"
-            onClick={() => setFilterTab("all")}
-            className={`px-3 py-1.5 rounded-[var(--radius-sm)] text-xs font-medium transition-colors ${
-              filterTab === "all"
-                ? "bg-[#181a24] text-[#f4f4f6] border border-[#2b3042]"
-                : "text-[#8f96a8] hover:text-[#f4f4f6]"
+            onClick={() => setFilterTab("incomplete")}
+            className={`px-3 py-1.5 rounded-[var(--radius-sm)] text-xs font-medium transition-colors cursor-pointer ${
+              filterTab === "incomplete"
+                ? "bg-text-primary text-bg-primary shadow-2xs font-semibold"
+                : "text-text-muted hover:text-text-primary hover:bg-bg-secondary"
             }`}
           >
-            All Tasks ({tasks.length})
+            Incomplete ({todoTasks.length})
           </button>
           <button
             type="button"
             onClick={() => setFilterTab("in_progress")}
-            className={`px-3 py-1.5 rounded-[var(--radius-sm)] text-xs font-medium transition-colors ${
+            className={`px-3 py-1.5 rounded-[var(--radius-sm)] text-xs font-medium transition-colors cursor-pointer ${
               filterTab === "in_progress"
-                ? "bg-[#181a24] text-[#f4f4f6] border border-[#2b3042]"
-                : "text-[#8f96a8] hover:text-[#f4f4f6]"
+                ? "bg-text-primary text-bg-primary shadow-2xs font-semibold"
+                : "text-text-muted hover:text-text-primary hover:bg-bg-secondary"
             }`}
           >
-            In Progress ({inProgress.length + (priorities.some((p) => p.hasActiveSession) ? 1 : 0)})
+            In Progress ({inProgressTotalCount})
           </button>
           <button
             type="button"
             onClick={() => setFilterTab("completed")}
-            className={`px-3 py-1.5 rounded-[var(--radius-sm)] text-xs font-medium transition-colors ${
+            className={`px-3 py-1.5 rounded-[var(--radius-sm)] text-xs font-medium transition-colors cursor-pointer ${
               filterTab === "completed"
-                ? "bg-[#181a24] text-[#f4f4f6] border border-[#2b3042]"
-                : "text-[#8f96a8] hover:text-[#f4f4f6]"
+                ? "bg-text-primary text-bg-primary shadow-2xs font-semibold"
+                : "text-text-muted hover:text-text-primary hover:bg-bg-secondary"
             }`}
           >
             Completed ({completed.length})
           </button>
+          <button
+            type="button"
+            onClick={() => setFilterTab("all")}
+            className={`px-3 py-1.5 rounded-[var(--radius-sm)] text-xs font-medium transition-colors cursor-pointer ${
+              filterTab === "all"
+                ? "bg-text-primary text-bg-primary shadow-2xs font-semibold"
+                : "text-text-muted hover:text-text-primary hover:bg-bg-secondary"
+            }`}
+          >
+            All Tasks ({tasks.length})
+          </button>
         </div>
 
-        <span className="text-[11px] text-[#6b7280]">
+        <span className="text-[11px] text-text-muted">
           Click any task to inspect focus sessions & telemetry
         </span>
       </div>
 
       {/* 5. Main Task Sections */}
       {isLoadingTasks ? (
-        <div className="p-12 text-center text-[#6b7280] text-sm">
+        <div className="p-12 text-center text-text-muted text-sm">
           Loading tasks and focus records...
         </div>
       ) : tasks.length === 0 ? (
-        <div className="rounded-[var(--radius-lg)] border border-dashed border-[#262b3a] bg-[#0c0e14] p-12 text-center space-y-4">
-          <h3 className="text-lg font-semibold text-[#f4f4f6]">TODAY</h3>
-          <p className="text-sm text-[#8f96a8] max-w-sm mx-auto">
+        <div className="rounded-[var(--radius-lg)] border border-dashed border-border-subtle bg-bg-card p-12 text-center space-y-4 shadow-2xs">
+          <h3 className="text-lg font-semibold text-text-primary">NO TASKS</h3>
+          <p className="text-sm text-text-muted max-w-sm mx-auto">
             No tasks yet.<br/><br/>
-            What do you want to accomplish today?
+            Use the quick add bar above to plan your intentions.
           </p>
         </div>
       ) : (
         <div className="space-y-8">
-          {/* SECTION A: TODAY'S PRIORITIES (Show if today or all) */}
-          {(filterTab === "today" || filterTab === "all") && priorities.length > 0 && (
+          {/* SECTION A: TODAY'S PRIORITIES (Show if today, incomplete, or all) */}
+          {(filterTab === "today" || filterTab === "incomplete" || filterTab === "all") && priorities.length > 0 && (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <div className="h-5 w-5 rounded-full bg-amber-500/10 border border-amber-500/25 flex items-center justify-center text-amber-400">
+                  <div className="h-5 w-5 rounded-full bg-amber-500/10 border border-amber-500/25 flex items-center justify-center text-amber-500">
                     <Flame size={12} />
                   </div>
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-[#f4f4f6]">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-text-primary">
                     Today's Priorities
                   </h3>
-                  <span className="text-[10px] font-mono text-amber-400 bg-amber-500/10 border border-amber-500/25 px-1.5 py-0.5 rounded">
+                  <span className="text-[10px] font-mono text-amber-500 bg-amber-500/10 border border-amber-500/25 px-1.5 py-0.5 rounded">
                     Top {priorities.length}
                   </span>
                 </div>
-                <span className="text-[11px] text-[#6b7280]">
+                <span className="text-[11px] text-text-muted">
                   Focus strictly on these {priorities.length} items before taking on new work
                 </span>
               </div>
@@ -248,18 +258,18 @@ export function TaskPageClient() {
           )}
 
           {/* SECTION B: IN PROGRESS */}
-          {(filterTab === "today" || filterTab === "all" || filterTab === "in_progress") &&
+          {(filterTab === "today" || filterTab === "incomplete" || filterTab === "all" || filterTab === "in_progress") &&
             inProgress.length > 0 && (
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <div className="h-5 w-5 rounded-full bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-center text-emerald-400">
+                    <div className="h-5 w-5 rounded-full bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-center text-emerald-500">
                       <PlayCircle size={12} />
                     </div>
-                    <h3 className="text-xs font-bold uppercase tracking-wider text-[#f4f4f6]">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-text-primary">
                       In Progress
                     </h3>
-                    <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/25 px-1.5 py-0.5 rounded">
+                    <span className="text-[10px] font-mono text-emerald-500 bg-emerald-500/10 border border-emerald-500/25 px-1.5 py-0.5 rounded">
                       {inProgress.length}
                     </span>
                   </div>
@@ -277,21 +287,24 @@ export function TaskPageClient() {
               </div>
             )}
 
-          {/* SECTION C: UP NEXT */}
-          {(filterTab === "today" || filterTab === "all") && upNext.length > 0 && (
+          {/* SECTION C: INCOMPLETE / UP NEXT (Shows all remaining incomplete tasks including rollover tasks) */}
+          {(filterTab === "today" || filterTab === "incomplete" || filterTab === "all") && upNext.length > 0 && (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <div className="h-5 w-5 rounded-full bg-[#1b1e2a] border border-[#2b3144] flex items-center justify-center text-[#8f96a8]">
+                  <div className="h-5 w-5 rounded-full bg-bg-secondary border border-border-subtle flex items-center justify-center text-text-muted">
                     <ListTodo size={12} />
                   </div>
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-[#8f96a8]">
-                    Up Next
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-text-secondary">
+                    {filterTab === "incomplete" ? "All Incomplete Tasks" : "Up Next & Backlog"}
                   </h3>
-                  <span className="text-[10px] font-mono text-[#8f96a8] bg-[#161822] border border-[#262b3a] px-1.5 py-0.5 rounded">
+                  <span className="text-[10px] font-mono text-text-muted bg-bg-secondary border border-border-subtle px-1.5 py-0.5 rounded">
                     {upNext.length}
                   </span>
                 </div>
+                <span className="text-[11px] text-text-muted">
+                  Includes tasks rolled over with due dates and linked goals
+                </span>
               </div>
 
               <div className="space-y-2">
@@ -315,17 +328,17 @@ export function TaskPageClient() {
                   onClick={() => setShowCompleted(!showCompleted)}
                 >
                   <div className="flex items-center gap-2">
-                    <div className="h-5 w-5 rounded-full bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-center text-emerald-400">
+                    <div className="h-5 w-5 rounded-full bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-center text-emerald-500">
                       <CheckCircle2 size={12} />
                     </div>
-                    <h3 className="text-xs font-bold uppercase tracking-wider text-[#6b7280] hover:text-[#8f96a8] transition-colors">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-text-muted hover:text-text-primary transition-colors">
                       Completed ({completed.length})
                     </h3>
                   </div>
 
                   <button
                     type="button"
-                    className="text-xs text-[#6b7280] hover:text-[#8f96a8] flex items-center gap-1"
+                    className="text-xs text-text-muted hover:text-text-primary flex items-center gap-1 cursor-pointer"
                   >
                     {showCompleted ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                   </button>

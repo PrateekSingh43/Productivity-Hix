@@ -68,28 +68,28 @@ export function CurrentFocusCard({
 
     return (
       <div
-        className={`rounded-lg border border-indigo-500/40 bg-[var(--background-card)] p-5 space-y-4 ${className}`}
+        className={`rounded-lg border border-accent-default/40 bg-bg-card p-5 space-y-4 shadow-xs ${className}`}
       >
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-xs font-semibold uppercase tracking-wider text-emerald-400">
+            <span className="h-2 w-2 rounded-full bg-emerald-500 dark:bg-emerald-400 animate-pulse" />
+            <span className="text-xs font-semibold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
               ACTIVE SESSION
             </span>
           </div>
-          <div className="text-sm font-mono text-[var(--foreground-muted)]">
-            <span className="text-[var(--foreground-primary)] font-semibold text-base">
+          <div className="text-sm font-mono text-text-secondary">
+            <span className="text-text-primary font-semibold text-base">
               {formatElapsed(elapsedSeconds)}
             </span>
           </div>
         </div>
 
         <div className="space-y-1">
-          <h2 className="text-lg sm:text-xl font-bold text-[var(--foreground-primary)] tracking-tight">
+          <h2 className="text-lg sm:text-xl font-bold text-text-primary tracking-tight">
             {selectedTask.title}
           </h2>
           {selectedTask.goalTitle && (
-            <div className="flex items-center gap-1 text-xs text-indigo-400">
+            <div className="flex items-center gap-1 text-xs text-accent-default">
               <Target size={12} />
               <span>Goal: {selectedTask.goalTitle}</span>
             </div>
@@ -98,20 +98,20 @@ export function CurrentFocusCard({
 
         {/* Contextual Observed Telemetry */}
         {observedContext && (
-          <div className="flex items-center gap-2 text-xs text-[var(--foreground-muted)] bg-[var(--background-subtle)] border border-[var(--border-subtle)] px-3 py-1.5 rounded-md">
-            <Radio size={12} className="text-indigo-400 shrink-0" />
+          <div className="flex items-center gap-2 text-xs text-text-secondary bg-bg-secondary border border-border-subtle px-3 py-1.5 rounded-md">
+            <Radio size={12} className="text-accent-default shrink-0" />
             <span className="truncate">
-              Observed: <strong className="text-[var(--foreground-primary)] font-medium">{observedContext}</strong>
+              Observed: <strong className="text-text-primary font-medium">{observedContext}</strong>
             </span>
           </div>
         )}
 
-        <div className="flex items-center justify-end gap-2 pt-2 border-t border-[var(--border-subtle)]">
+        <div className="flex items-center justify-end gap-2 pt-2 border-t border-border-subtle">
           {onPause && (
             <button
               type="button"
               onClick={onPause}
-              className="inline-flex items-center gap-1.5 text-xs text-[var(--foreground-muted)] hover:text-[var(--foreground-primary)] bg-[var(--background-subtle)] border border-[var(--border-subtle)] hover:bg-white/[0.04] px-3 py-1.5 rounded-md transition-colors"
+              className="inline-flex items-center gap-1.5 text-xs text-text-secondary hover:text-text-primary bg-bg-secondary border border-border-default hover:bg-bg-tertiary px-3 py-1.5 rounded-md transition-colors"
             >
               <Pause size={12} />
               <span>Pause</span>
@@ -121,7 +121,7 @@ export function CurrentFocusCard({
             <button
               type="button"
               onClick={onComplete}
-              className="inline-flex items-center gap-1.5 text-xs font-semibold bg-emerald-500 hover:bg-emerald-400 text-black px-4 py-1.5 rounded-md transition-colors"
+              className="inline-flex items-center gap-1.5 text-xs font-semibold bg-emerald-500 hover:bg-emerald-400 text-white dark:text-black px-4 py-1.5 rounded-md transition-colors shadow-xs"
             >
               <CheckCircle2 size={13} />
               <span>Complete Focus</span>
@@ -136,31 +136,31 @@ export function CurrentFocusCard({
   if (selectedTask) {
     return (
       <div
-        className={`rounded-lg border border-[var(--border-subtle)] bg-[var(--background-card)] p-5 space-y-4 ${className}`}
+        className={`rounded-lg border border-border-subtle bg-bg-card p-5 space-y-4 shadow-xs ${className}`}
       >
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-indigo-400" />
-            <span className="text-xs font-semibold uppercase tracking-wider text-[var(--foreground-muted)]">
+            <span className="h-2 w-2 rounded-full bg-accent-default" />
+            <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
               CURRENT FOCUS
             </span>
           </div>
           <button
             type="button"
             onClick={() => setIsChoosing(true)}
-            className="text-xs text-[var(--foreground-muted)] hover:text-[var(--foreground-primary)] transition-colors"
+            className="text-xs text-text-secondary hover:text-text-primary transition-colors"
           >
             Switch Task
           </button>
         </div>
 
         <div className="space-y-1.5">
-          <h2 className="text-base sm:text-lg font-bold text-[var(--foreground-primary)]">
+          <h2 className="text-base sm:text-lg font-bold text-text-primary">
             {selectedTask.title}
           </h2>
-          <div className="flex items-center gap-3 text-xs text-[var(--foreground-muted)]">
+          <div className="flex items-center gap-3 text-xs text-text-secondary">
             {selectedTask.goalTitle ? (
-              <span className="flex items-center gap-1 text-indigo-400">
+              <span className="flex items-center gap-1 text-accent-default">
                 <Target size={12} />
                 <span>Goal: {selectedTask.goalTitle}</span>
               </span>
@@ -175,14 +175,14 @@ export function CurrentFocusCard({
           </div>
         </div>
 
-        <div className="pt-2 border-t border-[var(--border-subtle)] flex items-center justify-between">
-          <span className="text-xs text-[var(--foreground-muted)]">
+        <div className="pt-2 border-t border-border-subtle flex items-center justify-between">
+          <span className="text-xs text-text-secondary">
             Ready to begin intentional execution
           </span>
           <button
             type="button"
             onClick={onStartFocus}
-            className="inline-flex items-center justify-center gap-1.5 rounded-md bg-[var(--foreground-primary)] hover:opacity-90 text-[var(--background-primary)] text-xs font-semibold px-4 py-2 transition-opacity"
+            className="inline-flex items-center justify-center gap-1.5 rounded-md bg-text-primary hover:opacity-90 text-bg-default text-xs font-semibold px-4 py-2 transition-opacity shadow-xs"
           >
             <Play size={13} className="fill-current" />
             <span>Start Focus</span>
@@ -200,20 +200,20 @@ export function CurrentFocusCard({
   if (incompleteTasks.length > 0) {
     return (
       <div
-        className={`rounded-lg border border-[var(--border-subtle)] bg-[var(--background-card)] p-5 space-y-3 ${className}`}
+        className={`rounded-lg border border-border-subtle bg-bg-card p-5 space-y-3 shadow-xs ${className}`}
       >
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold uppercase tracking-wider text-[var(--foreground-muted)]">
+            <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
               CURRENT FOCUS
             </span>
-            <span className="text-xs text-[var(--foreground-muted)]">· Select task to focus</span>
+            <span className="text-xs text-text-tertiary">· Select task to focus</span>
           </div>
           {onAddTask && (
             <button
               type="button"
               onClick={onAddTask}
-              className="inline-flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300"
+              className="inline-flex items-center gap-1 text-xs text-accent-default hover:underline"
             >
               <Plus size={12} />
               <span>Add Task</span>
@@ -221,7 +221,7 @@ export function CurrentFocusCard({
           )}
         </div>
 
-        <p className="text-xs text-[var(--foreground-muted)]">
+        <p className="text-xs text-text-secondary">
           Choose a task from today&apos;s work to begin an intentional session:
         </p>
 
@@ -230,20 +230,20 @@ export function CurrentFocusCard({
             <div
               key={task.id}
               onClick={() => onSelectTask?.(task)}
-              className="flex items-center justify-between p-2.5 rounded-md border border-[var(--border-subtle)] bg-[var(--background-subtle)] hover:border-indigo-400/50 hover:bg-white/[0.04] cursor-pointer transition-colors"
+              className="flex items-center justify-between p-2.5 rounded-md border border-border-subtle bg-bg-secondary hover:border-accent-default/50 hover:bg-bg-tertiary cursor-pointer transition-colors"
             >
               <div className="flex items-center gap-2 min-w-0">
-                <span className="text-xs font-medium text-[var(--foreground-primary)] truncate">
+                <span className="text-xs font-medium text-text-primary truncate">
                   {task.title}
                 </span>
                 {task.goalTitle && (
-                  <span className="text-[10px] text-indigo-400 bg-indigo-500/10 px-1.5 py-0.5 rounded truncate">
+                  <span className="text-[10px] text-accent-default bg-accent-subtle px-1.5 py-0.5 rounded truncate border border-accent-default/20">
                     {task.goalTitle}
                   </span>
                 )}
               </div>
               <div className="flex items-center gap-2 shrink-0">
-                <span className="text-[11px] text-[var(--foreground-muted)]">
+                <span className="text-[11px] text-text-secondary">
                   {task.plannedDurationMinutes ?? 30}m
                 </span>
                 <PriorityBadge priority={task.priority} />
@@ -258,19 +258,19 @@ export function CurrentFocusCard({
   // 4. NO TASK AVAILABLE STATE
   return (
     <div
-      className={`rounded-lg border border-[var(--border-subtle)] bg-[var(--background-card)] p-5 space-y-3 ${className}`}
+      className={`rounded-lg border border-border-subtle bg-bg-card p-5 space-y-3 shadow-xs ${className}`}
     >
       <div className="flex items-center gap-2">
-        <span className="text-xs font-semibold uppercase tracking-wider text-[var(--foreground-muted)]">
+        <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
           CURRENT FOCUS
         </span>
       </div>
 
       <div className="space-y-1">
-        <h3 className="text-sm font-semibold text-[var(--foreground-primary)]">
+        <h3 className="text-sm font-semibold text-text-primary">
           Nothing ready to focus on.
         </h3>
-        <p className="text-xs text-[var(--foreground-muted)] leading-relaxed">
+        <p className="text-xs text-text-secondary leading-relaxed">
           Create or select a task to begin an intentional focus session.
         </p>
       </div>
@@ -280,7 +280,7 @@ export function CurrentFocusCard({
           <button
             type="button"
             onClick={onAddTask}
-            className="inline-flex items-center gap-1.5 rounded-md bg-[var(--foreground-primary)] hover:opacity-90 text-[var(--background-primary)] text-xs font-medium px-3.5 py-1.5 transition-opacity"
+            className="inline-flex items-center gap-1.5 rounded-md bg-text-primary hover:opacity-90 text-bg-default text-xs font-medium px-3.5 py-1.5 transition-opacity"
           >
             <Plus size={13} />
             <span>Add Task</span>
@@ -288,7 +288,7 @@ export function CurrentFocusCard({
         )}
         <Link
           href="/tasks"
-          className="inline-flex items-center gap-1.5 rounded-md bg-[var(--background-subtle)] hover:bg-white/[0.04] border border-[var(--border-subtle)] text-[var(--foreground-primary)] text-xs font-medium px-3 py-1.5 transition-colors"
+          className="inline-flex items-center gap-1.5 rounded-md bg-bg-secondary hover:bg-bg-tertiary border border-border-default text-text-primary text-xs font-medium px-3 py-1.5 transition-colors"
         >
           <ListTodo size={13} />
           <span>View Tasks</span>

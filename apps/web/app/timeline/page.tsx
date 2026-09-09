@@ -250,37 +250,37 @@ export default function TimelinePage() {
       {/* 1. Header & Date Navigation */}
       <motion.div
         variants={itemVariants}
-        className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-2 border-b border-white/[0.06]"
+        className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-2 border-b border-border-subtle"
       >
         <div>
           <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold tracking-tight text-white">Timeline</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-text-primary">Timeline</h1>
             {isToday && (
-              <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-500 dark:text-emerald-400 border border-emerald-500/20">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 dark:bg-emerald-400 animate-pulse" />
                 Live Today
               </span>
             )}
           </div>
-          <p className="text-xs text-slate-400 mt-1 font-mono tracking-wide">
+          <p className="text-xs text-text-secondary mt-1 font-mono tracking-wide">
             What actually happened &bull; {formatDateLong(selectedDate)}
           </p>
         </div>
 
         {/* Date Controls */}
         <div className="flex items-center gap-2">
-          <div className="flex items-center bg-[#111111] border border-white/[0.08] rounded-xl p-1 shadow-sm">
+          <div className="flex items-center bg-bg-card border border-border-default rounded-xl p-1 shadow-xs">
             <button
               onClick={handlePrevDay}
               title="Previous Day"
-              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/[0.06] transition-colors"
+              className="p-1.5 rounded-lg text-text-secondary hover:text-text-primary hover:bg-bg-secondary transition-colors"
             >
               <ChevronLeft className="w-4 h-4" />
             </button>
 
             <label className="relative flex items-center gap-2 px-3 py-1 cursor-pointer group">
-              <Calendar className="w-3.5 h-3.5 text-indigo-400 group-hover:text-indigo-300 transition-colors" />
-              <span className="text-xs font-medium text-slate-200 group-hover:text-white font-mono">
+              <Calendar className="w-3.5 h-3.5 text-accent-default group-hover:opacity-80 transition-opacity" />
+              <span className="text-xs font-medium text-text-primary font-mono">
                 {selectedDate}
               </span>
               <input
@@ -298,8 +298,8 @@ export default function TimelinePage() {
               title="Next Day"
               className={`p-1.5 rounded-lg transition-colors ${
                 isToday
-                  ? "text-slate-600 cursor-not-allowed"
-                  : "text-slate-400 hover:text-white hover:bg-white/[0.06]"
+                  ? "text-text-tertiary cursor-not-allowed opacity-40"
+                  : "text-text-secondary hover:text-text-primary hover:bg-bg-secondary"
               }`}
             >
               <ChevronRight className="w-4 h-4" />
@@ -309,7 +309,7 @@ export default function TimelinePage() {
           {!isToday && (
             <button
               onClick={handleGoToday}
-              className="px-3 py-1.5 rounded-xl text-xs font-medium text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 hover:bg-indigo-500/20 transition-all"
+              className="px-3 py-1.5 rounded-xl text-xs font-medium text-accent-default bg-accent-subtle border border-accent-default/30 hover:bg-accent-default/20 transition-all"
             >
               Jump to Today
             </button>
@@ -319,9 +319,9 @@ export default function TimelinePage() {
             onClick={() => refetch()}
             disabled={isFetching}
             title="Refresh Timeline"
-            className="p-2 rounded-xl text-slate-400 hover:text-white bg-[#111111] border border-white/[0.08] hover:bg-white/[0.06] transition-all"
+            className="p-2 rounded-xl text-text-secondary hover:text-text-primary bg-bg-card border border-border-default hover:bg-bg-secondary transition-all shadow-xs"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${isFetching ? "animate-spin text-indigo-400" : ""}`} />
+            <RefreshCw className={`w-3.5 h-3.5 ${isFetching ? "animate-spin text-accent-default" : ""}`} />
           </button>
         </div>
       </motion.div>
@@ -330,31 +330,31 @@ export default function TimelinePage() {
       {isToday && currentActivity && (
         <motion.div
           variants={itemVariants}
-          className="relative overflow-hidden bg-gradient-to-r from-indigo-950/30 via-[#111111] to-[#111111] border border-indigo-500/20 rounded-2xl p-4 shadow-lg backdrop-blur-md"
+          className="relative overflow-hidden bg-bg-card border border-accent-default/30 rounded-2xl p-4 shadow-sm"
         >
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-center gap-3.5">
               <div className="relative">
                 <div
                   className={`w-3 h-3 rounded-full ${
-                    currentActivity.isActive ? "bg-emerald-400" : "bg-amber-400"
+                    currentActivity.isActive ? "bg-emerald-500 dark:bg-emerald-400" : "bg-amber-500 dark:bg-amber-400"
                   }`}
                 />
                 {currentActivity.isActive && (
-                  <div className="absolute inset-0 w-3 h-3 rounded-full bg-emerald-400 animate-ping opacity-75" />
+                  <div className="absolute inset-0 w-3 h-3 rounded-full bg-emerald-500 dark:bg-emerald-400 animate-ping opacity-75" />
                 )}
               </div>
 
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="text-[11px] font-mono tracking-wider uppercase text-slate-400">
+                  <span className="text-[11px] font-mono tracking-wider uppercase text-text-tertiary">
                     CURRENT ACTIVITY
                   </span>
                   <span
                     className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
                       currentActivity.isActive
-                        ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
-                        : "bg-amber-500/15 text-amber-300 border-amber-500/30"
+                        ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-300 border-emerald-500/30"
+                        : "bg-amber-500/15 text-amber-600 dark:text-amber-300 border-amber-500/30"
                     }`}
                   >
                     {currentActivity.isActive ? "ACTIVE" : "AFK / AWAY"}
@@ -362,11 +362,11 @@ export default function TimelinePage() {
                 </div>
 
                 <div className="flex items-baseline gap-2 mt-0.5">
-                  <h3 className="text-sm font-semibold text-white">
+                  <h3 className="text-sm font-semibold text-text-primary">
                     {currentActivity.application || "Idle"}
                   </h3>
                   {currentActivity.title && currentActivity.title !== currentActivity.application && (
-                    <span className="text-xs text-slate-400 truncate max-w-[360px] sm:max-w-[480px]">
+                    <span className="text-xs text-text-secondary truncate max-w-[360px] sm:max-w-[480px]">
                       &bull; {currentActivity.title}
                     </span>
                   )}
@@ -375,10 +375,10 @@ export default function TimelinePage() {
             </div>
 
             {currentActivity.runningForSeconds !== null && (
-              <div className="flex items-center gap-2 self-start sm:self-auto bg-white/[0.04] border border-white/[0.06] rounded-xl px-3 py-1.5">
-                <Clock className="w-3.5 h-3.5 text-indigo-400" />
-                <span className="text-xs text-slate-400">Running for:</span>
-                <span className="text-xs font-mono font-semibold text-white">
+              <div className="flex items-center gap-2 self-start sm:self-auto bg-bg-secondary border border-border-subtle rounded-xl px-3 py-1.5">
+                <Clock className="w-3.5 h-3.5 text-accent-default" />
+                <span className="text-xs text-text-secondary">Running for:</span>
+                <span className="text-xs font-mono font-semibold text-text-primary">
                   {formatDuration(currentActivity.runningForSeconds)}
                 </span>
               </div>
@@ -390,57 +390,57 @@ export default function TimelinePage() {
       {/* 3. Top Summary KPI Cards (Requirement 12) */}
       <motion.div variants={itemVariants} className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {/* Total Tracked */}
-        <div className="bg-[#111111] border border-white/[0.06] rounded-2xl p-4 shadow-sm">
+        <div className="bg-bg-card border border-border-subtle rounded-2xl p-4 shadow-xs">
           <div className="flex items-center justify-between mb-1.5">
-            <span className="text-xs font-medium text-slate-400">Total Tracked</span>
-            <Clock className="w-4 h-4 text-slate-500" />
+            <span className="text-xs font-medium text-text-secondary">Total Tracked</span>
+            <Clock className="w-4 h-4 text-text-tertiary" />
           </div>
-          <p className="text-2xl font-bold tracking-tight text-white">
+          <p className="text-2xl font-bold tracking-tight text-text-primary">
             {summary ? formatDuration(summary.totalTrackedMs / 1000) : "0m"}
           </p>
-          <p className="text-[11px] text-slate-500 mt-1 font-mono">
+          <p className="text-[11px] text-text-tertiary mt-1 font-mono">
             {segments.length} continuous blocks
           </p>
         </div>
 
         {/* Focused Work */}
-        <div className="bg-[#111111] border border-white/[0.06] rounded-2xl p-4 shadow-sm">
+        <div className="bg-bg-card border border-border-subtle rounded-2xl p-4 shadow-xs">
           <div className="flex items-center justify-between mb-1.5">
-            <span className="text-xs font-medium text-indigo-400">Focused Work</span>
-            <Code className="w-4 h-4 text-indigo-400" />
+            <span className="text-xs font-medium text-accent-default">Focused Work</span>
+            <Code className="w-4 h-4 text-accent-default" />
           </div>
-          <p className="text-2xl font-bold tracking-tight text-white">
+          <p className="text-2xl font-bold tracking-tight text-text-primary">
             {summary ? formatDuration(summary.focusedMs / 1000) : "0m"}
           </p>
-          <p className="text-[11px] text-slate-500 mt-1 font-mono">
+          <p className="text-[11px] text-text-tertiary mt-1 font-mono">
             IDEs, Terminal, Editors
           </p>
         </div>
 
         {/* Browser & Research */}
-        <div className="bg-[#111111] border border-white/[0.06] rounded-2xl p-4 shadow-sm">
+        <div className="bg-bg-card border border-border-subtle rounded-2xl p-4 shadow-xs">
           <div className="flex items-center justify-between mb-1.5">
-            <span className="text-xs font-medium text-violet-400">Browser / Research</span>
-            <Globe className="w-4 h-4 text-violet-400" />
+            <span className="text-xs font-medium text-violet-500 dark:text-violet-400">Browser / Research</span>
+            <Globe className="w-4 h-4 text-violet-500 dark:text-violet-400" />
           </div>
-          <p className="text-2xl font-bold tracking-tight text-white">
+          <p className="text-2xl font-bold tracking-tight text-text-primary">
             {summary ? formatDuration(summary.browserMs / 1000) : "0m"}
           </p>
-          <p className="text-[11px] text-slate-500 mt-1 font-mono">
+          <p className="text-[11px] text-text-tertiary mt-1 font-mono">
             Web tabs & docs
           </p>
         </div>
 
         {/* Breaks / AFK */}
-        <div className="bg-[#111111] border border-white/[0.06] rounded-2xl p-4 shadow-sm">
+        <div className="bg-bg-card border border-border-subtle rounded-2xl p-4 shadow-xs">
           <div className="flex items-center justify-between mb-1.5">
-            <span className="text-xs font-medium text-amber-400">Breaks & AFK</span>
-            <Coffee className="w-4 h-4 text-amber-400" />
+            <span className="text-xs font-medium text-amber-500 dark:text-amber-400">Breaks & AFK</span>
+            <Coffee className="w-4 h-4 text-amber-500 dark:text-amber-400" />
           </div>
-          <p className="text-2xl font-bold tracking-tight text-white">
+          <p className="text-2xl font-bold tracking-tight text-text-primary">
             {summary ? formatDuration(summary.breakMs / 1000) : "0m"}
           </p>
-          <p className="text-[11px] text-slate-500 mt-1 font-mono">
+          <p className="text-[11px] text-text-tertiary mt-1 font-mono">
             Away from keyboard
           </p>
         </div>
@@ -450,17 +450,17 @@ export default function TimelinePage() {
       {segments.length > 0 && totalTrackedMs > 0 && (
         <motion.div
           variants={itemVariants}
-          className="bg-[#111111] border border-white/[0.06] rounded-2xl p-5 shadow-sm space-y-3"
+          className="bg-bg-card border border-border-subtle rounded-2xl p-5 shadow-xs space-y-3"
         >
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Layers className="w-4 h-4 text-slate-400" />
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-300">
+              <Layers className="w-4 h-4 text-text-secondary" />
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
                 Daily Flow
               </h3>
             </div>
             {segments.length > 0 && (
-              <span className="text-xs font-mono text-slate-400">
+              <span className="text-xs font-mono text-text-secondary">
                 {formatClockTime(segments[0]?.start ?? "")} &rarr;{" "}
                 {formatClockTime(segments[segments.length - 1]?.end ?? "")}
               </span>
@@ -469,7 +469,7 @@ export default function TimelinePage() {
 
           {/* Proportional Segmented Bar */}
           <div className="relative">
-            <div className="flex h-9 w-full rounded-xl overflow-hidden bg-white/[0.04] p-0.5 gap-0.5">
+            <div className="flex h-9 w-full rounded-xl overflow-hidden bg-bg-secondary p-0.5 gap-0.5">
               {segments.map((segment) => {
                 const widthPercent = (segment.durationMs / totalTrackedMs) * 100;
                 const config = categoryConfig[segment.category] || categoryConfig.general;
@@ -496,14 +496,14 @@ export default function TimelinePage() {
 
             {/* Floating Tooltip when hovering over a segment */}
             {hoveredSegment && (
-              <div className="absolute -top-12 left-1/2 -translate-x-1/2 z-30 pointer-events-none bg-[#1a1a1a] border border-white/[0.12] rounded-lg px-3 py-1.5 shadow-2xl flex items-center gap-2 whitespace-nowrap text-xs">
-                <span className="font-semibold text-white">{hoveredSegment.application}</span>
-                <span className="text-slate-400">&bull;</span>
-                <span className="text-slate-300 font-mono">
+              <div className="absolute -top-12 left-1/2 -translate-x-1/2 z-30 pointer-events-none bg-bg-default border border-border-strong rounded-lg px-3 py-1.5 shadow-2xl flex items-center gap-2 whitespace-nowrap text-xs">
+                <span className="font-semibold text-text-primary">{hoveredSegment.application}</span>
+                <span className="text-text-tertiary">&bull;</span>
+                <span className="text-text-secondary font-mono">
                   {formatClockTime(hoveredSegment.start)}–{formatClockTime(hoveredSegment.end)}
                 </span>
-                <span className="text-slate-400">&bull;</span>
-                <span className="font-mono text-indigo-400">
+                <span className="text-text-tertiary">&bull;</span>
+                <span className="font-mono text-accent-default">
                   {formatDuration(hoveredSegment.durationSeconds)}
                 </span>
               </div>
@@ -515,8 +515,8 @@ export default function TimelinePage() {
             {summary && summary.focusedMs > 0 && (
               <div className="flex items-center gap-1.5">
                 <div className="w-2.5 h-2.5 rounded-sm bg-indigo-500" />
-                <span className="text-slate-400">Focused:</span>
-                <span className="font-mono font-medium text-slate-200">
+                <span className="text-text-secondary">Focused:</span>
+                <span className="font-mono font-medium text-text-primary">
                   {formatDuration(summary.focusedMs / 1000)}
                 </span>
               </div>
@@ -524,8 +524,8 @@ export default function TimelinePage() {
             {summary && summary.browserMs > 0 && (
               <div className="flex items-center gap-1.5">
                 <div className="w-2.5 h-2.5 rounded-sm bg-violet-500" />
-                <span className="text-slate-400">Browser:</span>
-                <span className="font-mono font-medium text-slate-200">
+                <span className="text-text-secondary">Browser:</span>
+                <span className="font-mono font-medium text-text-primary">
                   {formatDuration(summary.browserMs / 1000)}
                 </span>
               </div>
@@ -533,8 +533,8 @@ export default function TimelinePage() {
             {summary && summary.breakMs > 0 && (
               <div className="flex items-center gap-1.5">
                 <div className="w-2.5 h-2.5 rounded-sm bg-amber-500" />
-                <span className="text-slate-400">Breaks:</span>
-                <span className="font-mono font-medium text-slate-200">
+                <span className="text-text-secondary">Breaks:</span>
+                <span className="font-mono font-medium text-text-primary">
                   {formatDuration(summary.breakMs / 1000)}
                 </span>
               </div>
@@ -542,8 +542,8 @@ export default function TimelinePage() {
             {summary && summary.communicationMs > 0 && (
               <div className="flex items-center gap-1.5">
                 <div className="w-2.5 h-2.5 rounded-sm bg-emerald-500" />
-                <span className="text-slate-400">Communication:</span>
-                <span className="font-mono font-medium text-slate-200">
+                <span className="text-text-secondary">Communication:</span>
+                <span className="font-mono font-medium text-text-primary">
                   {formatDuration(summary.communicationMs / 1000)}
                 </span>
               </div>
@@ -551,8 +551,8 @@ export default function TimelinePage() {
             {summary && summary.generalMs > 0 && (
               <div className="flex items-center gap-1.5">
                 <div className="w-2.5 h-2.5 rounded-sm bg-slate-600" />
-                <span className="text-slate-400">General:</span>
-                <span className="font-mono font-medium text-slate-200">
+                <span className="text-text-secondary">General:</span>
+                <span className="font-mono font-medium text-text-primary">
                   {formatDuration(summary.generalMs / 1000)}
                 </span>
               </div>
@@ -563,9 +563,9 @@ export default function TimelinePage() {
 
       {/* 5. Filter Tabs (Requirement 14) */}
       <motion.div variants={itemVariants} className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-1.5 bg-[#111111] border border-white/[0.06] rounded-xl p-1">
-          <div className="flex items-center px-2.5 text-xs text-slate-500">
-            <Filter className="w-3.5 h-3.5 mr-1.5" />
+        <div className="flex flex-wrap items-center gap-1.5 bg-bg-card border border-border-subtle rounded-xl p-1 shadow-xs">
+          <div className="flex items-center px-2.5 text-xs text-text-secondary">
+            <Filter className="w-3.5 h-3.5 mr-1.5 text-text-tertiary" />
             <span>Filter:</span>
           </div>
 
@@ -584,16 +584,16 @@ export default function TimelinePage() {
                 onClick={() => setFilterCategory(tab.id)}
                 className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
                   isActive
-                    ? "bg-white/[0.1] text-white shadow-sm"
-                    : "text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]"
+                    ? "bg-bg-secondary border border-border-default text-text-primary shadow-xs"
+                    : "text-text-secondary hover:text-text-primary hover:bg-bg-secondary/60"
                 }`}
               >
                 <span>{tab.label}</span>
                 <span
                   className={`text-[10px] font-mono px-1.5 py-0.2 rounded-md ${
                     isActive
-                      ? "bg-indigo-500/30 text-indigo-200"
-                      : "bg-white/[0.04] text-slate-500"
+                      ? "bg-accent-subtle text-accent-default"
+                      : "bg-bg-secondary text-text-tertiary"
                   }`}
                 >
                   {tab.count}
@@ -603,8 +603,8 @@ export default function TimelinePage() {
           })}
         </div>
 
-        <div className="text-xs font-mono text-slate-400">
-          Showing <span className="text-white font-semibold">{filteredSegments.length}</span>{" "}
+        <div className="text-xs font-mono text-text-secondary">
+          Showing <span className="text-text-primary font-semibold">{filteredSegments.length}</span>{" "}
           of {segments.length} continuous blocks
         </div>
       </motion.div>
@@ -616,45 +616,45 @@ export default function TimelinePage() {
           {[...Array(6)].map((_, i) => (
             <div
               key={i}
-              className="h-16 bg-[#111111] border border-white/[0.04] rounded-xl animate-pulse"
+              className="h-16 bg-bg-card border border-border-subtle rounded-xl animate-pulse"
             />
           ))}
         </div>
       ) : isError ? (
         // Error State (Requirement 23)
-        <div className="bg-[#111111] border border-red-500/20 rounded-2xl p-8 text-center space-y-4">
-          <div className="w-12 h-12 rounded-full bg-red-500/10 border border-red-500/20 text-red-400 flex items-center justify-center mx-auto">
+        <div className="bg-bg-card border border-error/20 rounded-2xl p-8 text-center space-y-4 shadow-xs">
+          <div className="w-12 h-12 rounded-full bg-error/10 border border-error/20 text-error flex items-center justify-center mx-auto">
             <AlertCircle className="w-6 h-6" />
           </div>
           <div>
-            <h3 className="text-base font-semibold text-white">Unable to load timeline</h3>
-            <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
+            <h3 className="text-base font-semibold text-text-primary">Unable to load timeline</h3>
+            <p className="text-xs text-text-secondary mt-1 max-w-sm mx-auto">
               We couldn't retrieve telemetry activity for this day. Please check backend connectivity.
             </p>
           </div>
           <button
             onClick={() => refetch()}
-            className="px-4 py-2 rounded-xl text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-500 transition-colors shadow-sm"
+            className="px-4 py-2 rounded-xl text-xs font-medium text-white bg-accent-default hover:bg-accent-hover transition-colors shadow-xs"
           >
             Retry Loading
           </button>
         </div>
       ) : filteredSegments.length === 0 ? (
         // Empty State (Requirement 21)
-        <div className="bg-[#111111] border border-white/[0.06] rounded-2xl p-12 text-center space-y-4">
-          <div className="w-12 h-12 rounded-full bg-white/[0.04] border border-white/[0.08] text-slate-400 flex items-center justify-center mx-auto">
+        <div className="bg-bg-card border border-border-subtle rounded-2xl p-12 text-center space-y-4 shadow-xs">
+          <div className="w-12 h-12 rounded-full bg-bg-secondary border border-border-default text-text-secondary flex items-center justify-center mx-auto">
             <Clock className="w-6 h-6" />
           </div>
           <div>
-            <h3 className="text-base font-semibold text-white">No activity recorded</h3>
-            <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
+            <h3 className="text-base font-semibold text-text-primary">No activity recorded</h3>
+            <p className="text-xs text-text-secondary mt-1 max-w-sm mx-auto">
               There isn't enough activity recorded for this day yet.
             </p>
           </div>
           {!isToday && (
             <button
               onClick={handleGoToday}
-              className="px-4 py-2 rounded-xl text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-500 transition-colors shadow-sm"
+              className="px-4 py-2 rounded-xl text-xs font-medium text-white bg-accent-default hover:bg-accent-hover transition-colors shadow-xs"
             >
               Go to Today
             </button>
@@ -664,7 +664,7 @@ export default function TimelinePage() {
         // Main Chronological List (Requirement 16)
         <motion.div
           variants={containerVariants}
-          className="bg-[#111111] border border-white/[0.06] rounded-2xl p-4 sm:p-6 shadow-sm divide-y divide-white/[0.04]"
+          className="bg-bg-card border border-border-subtle rounded-2xl p-4 sm:p-6 shadow-xs divide-y divide-border-subtle"
         >
           {filteredSegments.map((segment, index) => {
             const config = categoryConfig[segment.category] || categoryConfig.general;
@@ -677,14 +677,14 @@ export default function TimelinePage() {
                   onClick={() =>
                     setExpandedSegmentId(isExpanded ? null : segment.id)
                   }
-                  className="group flex items-start gap-3 sm:gap-4 p-2.5 sm:p-3 rounded-xl hover:bg-white/[0.03] transition-all cursor-pointer"
+                  className="group flex items-start gap-3 sm:gap-4 p-2.5 sm:p-3 rounded-xl hover:bg-bg-secondary/60 transition-all cursor-pointer"
                 >
                   {/* Time Range Column */}
                   <div className="w-24 sm:w-28 shrink-0 pt-0.5">
-                    <div className="text-xs font-mono font-semibold text-slate-200 group-hover:text-white">
+                    <div className="text-xs font-mono font-semibold text-text-primary">
                       {formatTimeInterval(segment.start, segment.end)}
                     </div>
-                    <div className="text-[11px] font-mono text-slate-500 mt-0.5">
+                    <div className="text-[11px] font-mono text-text-tertiary mt-0.5">
                       {formatDuration(segment.durationSeconds)}
                     </div>
                   </div>
@@ -695,7 +695,7 @@ export default function TimelinePage() {
                       className={`w-2.5 h-2.5 rounded-full ${config.bar} ring-4 ${config.dot}`}
                     />
                     {index < filteredSegments.length - 1 && (
-                      <div className="w-px flex-1 bg-white/[0.06] mt-2 group-hover:bg-white/[0.12] transition-colors" />
+                      <div className="w-px flex-1 bg-border-subtle mt-2 group-hover:bg-border-default transition-colors" />
                     )}
                   </div>
 
@@ -703,7 +703,7 @@ export default function TimelinePage() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap mb-1">
                       <Icon className={`w-3.5 h-3.5 ${config.color} shrink-0`} />
-                      <span className="text-xs sm:text-sm font-semibold text-white tracking-tight truncate">
+                      <span className="text-xs sm:text-sm font-semibold text-text-primary tracking-tight truncate">
                         {segment.application}
                       </span>
                       <span
@@ -713,20 +713,20 @@ export default function TimelinePage() {
                       </span>
 
                       {segment.rawEventCount && segment.rawEventCount > 1 && (
-                        <span className="text-[10px] font-mono text-slate-500 bg-white/[0.04] px-1.5 py-0.5 rounded">
+                        <span className="text-[10px] font-mono text-text-tertiary bg-bg-secondary px-1.5 py-0.5 rounded border border-border-subtle">
                           {segment.rawEventCount} events
                         </span>
                       )}
                     </div>
 
                     {/* Window Title or Context */}
-                    <p className="text-xs text-slate-400 truncate group-hover:text-slate-300 transition-colors">
+                    <p className="text-xs text-text-secondary truncate group-hover:text-text-primary transition-colors">
                       {segment.title || (segment.category === "break" ? "Away from keyboard" : "Active session")}
                     </p>
                   </div>
 
                   {/* Toggle Arrow */}
-                  <div className="shrink-0 pt-1 text-slate-600 group-hover:text-slate-400 transition-colors">
+                  <div className="shrink-0 pt-1 text-text-tertiary group-hover:text-text-secondary transition-colors">
                     {isExpanded ? (
                       <ChevronUp className="w-4 h-4" />
                     ) : (
@@ -745,18 +745,18 @@ export default function TimelinePage() {
                       transition={{ duration: 0.2 }}
                       className="overflow-hidden"
                     >
-                      <div className="mt-2 mb-3 ml-28 sm:ml-32 p-4 rounded-xl bg-[#161616] border border-white/[0.08] shadow-inner space-y-3.5 text-xs">
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pb-3 border-b border-white/[0.06]">
+                      <div className="mt-2 mb-3 ml-28 sm:ml-32 p-4 rounded-xl bg-bg-secondary border border-border-subtle shadow-xs space-y-3.5 text-xs">
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pb-3 border-b border-border-subtle">
                           <div>
-                            <span className="text-[11px] text-slate-500 uppercase font-mono">
+                            <span className="text-[11px] text-text-tertiary uppercase font-mono">
                               Application
                             </span>
-                            <p className="font-semibold text-white mt-0.5 truncate">
+                            <p className="font-semibold text-text-primary mt-0.5 truncate">
                               {segment.application}
                             </p>
                           </div>
                           <div>
-                            <span className="text-[11px] text-slate-500 uppercase font-mono">
+                            <span className="text-[11px] text-text-tertiary uppercase font-mono">
                               Category
                             </span>
                             <p className={`font-semibold capitalize mt-0.5 ${config.color}`}>
@@ -764,18 +764,18 @@ export default function TimelinePage() {
                             </p>
                           </div>
                           <div>
-                            <span className="text-[11px] text-slate-500 uppercase font-mono">
+                            <span className="text-[11px] text-text-tertiary uppercase font-mono">
                               Duration
                             </span>
-                            <p className="font-mono font-semibold text-white mt-0.5">
+                            <p className="font-mono font-semibold text-text-primary mt-0.5">
                               {formatDuration(segment.durationSeconds)} ({segment.durationSeconds}s)
                             </p>
                           </div>
                           <div>
-                            <span className="text-[11px] text-slate-500 uppercase font-mono">
+                            <span className="text-[11px] text-text-tertiary uppercase font-mono">
                               Consolidation
                             </span>
-                            <p className="font-mono text-slate-300 mt-0.5">
+                            <p className="font-mono text-text-secondary mt-0.5">
                               {segment.rawEventCount && segment.rawEventCount > 1
                                 ? `${segment.rawEventCount} events (${segment.source})`
                                 : `1 event (${segment.source})`}
@@ -786,13 +786,13 @@ export default function TimelinePage() {
                         {/* Context History Rollup */}
                         <div>
                           <div className="flex items-center justify-between mb-1.5">
-                            <span className="text-[11px] text-slate-500 uppercase font-mono">
+                            <span className="text-[11px] text-text-tertiary uppercase font-mono">
                               {segment.contexts && segment.contexts.length > 1
                                 ? `Session Context History (${segment.contexts.length} titles / files)`
                                 : "Window / Document Context"}
                             </span>
                             {segment.domain && (
-                              <span className="text-[11px] font-mono text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded border border-indigo-500/20">
+                              <span className="text-[11px] font-mono text-accent-default bg-accent-subtle px-2 py-0.5 rounded border border-accent-default/30">
                                 {segment.domain}
                               </span>
                             )}
@@ -803,9 +803,9 @@ export default function TimelinePage() {
                               {segment.contexts.map((ctx, idx) => (
                                 <div
                                   key={idx}
-                                  className="text-slate-200 break-all font-mono text-[11px] bg-black/30 px-2.5 py-1.5 rounded-lg border border-white/[0.04] flex items-start gap-2"
+                                  className="text-text-primary break-all font-mono text-[11px] bg-bg-card px-2.5 py-1.5 rounded-lg border border-border-subtle flex items-start gap-2"
                                 >
-                                  <span className="text-slate-500 select-none text-[10px] mt-0.5 shrink-0">
+                                  <span className="text-text-tertiary select-none text-[10px] mt-0.5 shrink-0">
                                     #{idx + 1}
                                   </span>
                                   <span className="flex-1">{ctx}</span>
@@ -813,19 +813,19 @@ export default function TimelinePage() {
                               ))}
                             </div>
                           ) : (
-                            <p className="text-slate-200 break-all font-mono text-[11px] bg-black/30 p-2 rounded-lg border border-white/[0.04]">
+                            <p className="text-text-primary break-all font-mono text-[11px] bg-bg-card p-2.5 rounded-lg border border-border-subtle">
                               {segment.title || (segment.category === "break" ? "Away from keyboard" : "No window title recorded")}
                             </p>
                           )}
                         </div>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1 text-slate-400 font-mono text-[11px] border-t border-white/[0.04]">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1 text-text-secondary font-mono text-[11px] border-t border-border-subtle">
                           <div>
-                            <span className="text-slate-500">Start:</span>{" "}
+                            <span className="text-text-tertiary">Start:</span>{" "}
                             {new Date(segment.start).toLocaleTimeString()} ({segment.start})
                           </div>
                           <div>
-                            <span className="text-slate-500">End:</span>{" "}
+                            <span className="text-text-tertiary">End:</span>{" "}
                             {new Date(segment.end).toLocaleTimeString()} ({segment.end})
                           </div>
                         </div>

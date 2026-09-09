@@ -44,8 +44,8 @@ import { SettingsView } from "./SettingsView";
 import { DiagnosticsView } from "./DiagnosticsView";
 import { InactivityView } from "./InactivityView";
 
-// Locked v1.3 five-view navigation
-type Tab = "today" | "focus" | "reflect" | "review" | "more";
+// Linear v1.3 persistent navigation (Reflect is triggered exclusively via notification / check-in events)
+type Tab = "today" | "focus" | "review" | "more";
 type MoreSubView = "menu" | "settings" | "diagnostics";
 
 function formatDuration(seconds: number) {
@@ -74,8 +74,6 @@ function Skeleton({ className = "" }: { className?: string }) {
 }
 
 function Header({
-  status,
-  onPillClick,
   isStandalone,
   onClose,
 }: {
@@ -84,55 +82,25 @@ function Header({
   isStandalone?: boolean;
   onClose?: () => void;
 }) {
-  const active = status ? !status.trackingPaused : true;
   return (
     <header className="header">
-      <div className="brand-mark">
-        <Activity size={15} strokeWidth={2.6} />
-      </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div className="brand-mark">
+          <img src="icon.png" alt="ProductiveHix" style={{ width: 16, height: 16, objectFit: "contain" }} />
+        </div>
         <div className="brand">ProductiveHix</div>
-        {status?.desktop?.connected ? (
-          <span
-            title="Desktop tracking active"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 3,
-              fontSize: 9.5,
-              color: "#34d399",
-              background: "rgba(52,211,153,0.1)",
-              padding: "1px 5px",
-              borderRadius: 4,
-            }}
-          >
-            <span style={{ width: 4.5, height: 4.5, borderRadius: "50%", background: "#34d399" }} />
-            Desktop
-          </span>
-        ) : null}
       </div>
-      <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
+      {isStandalone ? (
         <button
           type="button"
-          className={`tracking-pill ${active ? "is-active" : "is-paused"}`}
-          onClick={onPillClick}
-          title="Tracking status (Click to view controls)"
+          className="icon-button"
+          onClick={onClose || (() => window.close())}
+          title="Close window"
+          aria-label="Close window"
         >
-          <span className="status-dot" />
-          {active ? "Tracking" : "Paused"}
+          <X size={15} />
         </button>
-        {isStandalone ? (
-          <button
-            type="button"
-            className="icon-button"
-            onClick={onClose || (() => window.close())}
-            title="Close reflection window"
-            style={{ color: "#a59cb5", padding: "4px" }}
-          >
-            <X size={15} />
-          </button>
-        ) : null}
-      </div>
+      ) : null}
     </header>
   );
 }
@@ -141,7 +109,6 @@ function TopNav({ tab, setTab }: { tab: Tab; setTab: (t: Tab) => void }) {
   const items: Array<[Tab, string, typeof Sun]> = [
     ["today", "Today", Sun],
     ["focus", "Focus", Timer],
-    ["reflect", "Reflect", Sparkles],
     ["review", "Review", Brain],
     ["more", "More", MoreHorizontal],
   ];
@@ -245,7 +212,8 @@ function PlanWorkflowSheet({
         left: 0,
         right: 0,
         bottom: 0,
-        background: "rgba(0,0,0,0.75)",
+        background: "rgba(0,0,0,0.65)",
+        backdropFilter: "blur(2px)",
         zIndex: 100,
         display: "flex",
         flexDirection: "column",
@@ -262,6 +230,8 @@ function PlanWorkflowSheet({
           padding: 14,
           maxHeight: "92%",
           overflowY: "auto",
+          background: "var(--bg-surface-elevated)",
+          border: "1px solid var(--border-default)",
         }}
       >
         <div
@@ -279,30 +249,30 @@ function PlanWorkflowSheet({
               style={{
                 fontSize: 14,
                 fontWeight: 650,
-                color: "#faf7ff",
+                color: "var(--text-primary)",
                 margin: "2px 0 0",
               }}
             >
-              {title} {formattedDate && <span style={{ fontSize: 11, color: "#9d91b7", fontWeight: 400 }}>({formattedDate})</span>}
+              {title} {formattedDate && <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 400 }}>({formattedDate})</span>}
             </h2>
           </div>
           <button
             type="button"
-            className="text-button"
+            className="icon-button"
             onClick={onClose}
             aria-label="Close"
           >
-            <X size={16} />
+            <X size={15} />
           </button>
         </div>
 
         <form onSubmit={handleSave} style={{ display: "grid", gap: 10 }}>
           <div>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-              <label style={{ fontSize: 10.5, color: "#9d91b7" }}>
+              <label style={{ fontSize: 10.5, color: "var(--text-secondary)", fontWeight: 500 }}>
                 Daily Goals (0..N objectives)
               </label>
-              <span style={{ fontSize: 9.5, color: "#a78bfa" }}>
+              <span style={{ fontSize: 9.5, color: "var(--accent-primary)", fontWeight: 500 }}>
                 1–3 recommended
               </span>
             </div>
@@ -313,11 +283,12 @@ function PlanWorkflowSheet({
                   <span
                     style={{
                       fontSize: 10,
-                      fontFamily: "monospace",
-                      color: "#a78bfa",
-                      background: "rgba(167,139,250,0.1)",
+                      fontFamily: "ui-monospace, monospace",
+                      color: "var(--accent-primary)",
+                      background: "var(--accent-subtle)",
                       padding: "4px 6px",
                       borderRadius: 4,
+                      fontWeight: 600,
                     }}
                   >
                     {(idx + 1).toString().padStart(2, "0")}
@@ -332,10 +303,11 @@ function PlanWorkflowSheet({
                       flex: 1,
                       padding: "6px 8px",
                       borderRadius: 6,
-                      background: "rgba(255,255,255,0.05)",
-                      border: "1px solid rgba(255,255,255,0.12)",
-                      color: "#faf7ff",
+                      background: "var(--bg-subtle)",
+                      border: "1px solid var(--border-default)",
+                      color: "var(--text-primary)",
                       fontSize: 11.5,
+                      outline: "none",
                     }}
                     autoFocus={idx === draftGoals.length - 1}
                   />
@@ -346,11 +318,14 @@ function PlanWorkflowSheet({
                       style={{
                         background: "none",
                         border: "none",
-                        color: "#9d91b7",
+                        color: "var(--text-muted)",
                         cursor: "pointer",
                         padding: 3,
+                        display: "flex",
+                        alignItems: "center",
                       }}
                       title="Remove goal"
+                      aria-label="Remove goal"
                     >
                       <Trash2 size={13} />
                     </button>
@@ -367,12 +342,13 @@ function PlanWorkflowSheet({
                 alignItems: "center",
                 gap: 4,
                 fontSize: 11,
-                color: "#a78bfa",
+                color: "var(--accent-primary)",
                 background: "none",
                 border: "none",
                 cursor: "pointer",
                 padding: "6px 2px",
                 marginTop: 4,
+                fontWeight: 500,
               }}
             >
               <Plus size={12} />
@@ -444,7 +420,8 @@ function OutcomeWorkflowSheet({
         left: 0,
         right: 0,
         bottom: 0,
-        background: "rgba(0,0,0,0.75)",
+        background: "rgba(0,0,0,0.65)",
+        backdropFilter: "blur(2px)",
         zIndex: 100,
         display: "flex",
         flexDirection: "column",
@@ -455,7 +432,7 @@ function OutcomeWorkflowSheet({
       aria-modal="true"
       aria-labelledby="outcome-sheet-title"
     >
-      <div className="hero-card" style={{ padding: 14, maxHeight: "92%", overflowY: "auto" }}>
+      <div className="hero-card" style={{ padding: 14, maxHeight: "92%", overflowY: "auto", background: "var(--bg-surface-elevated)", border: "1px solid var(--border-default)" }}>
         <div
           style={{
             display: "flex",
@@ -471,7 +448,7 @@ function OutcomeWorkflowSheet({
               style={{
                 fontSize: 14,
                 fontWeight: 650,
-                color: "#faf7ff",
+                color: "var(--text-primary)",
                 margin: "2px 0 0",
               }}
             >
@@ -480,11 +457,11 @@ function OutcomeWorkflowSheet({
           </div>
           <button
             type="button"
-            className="text-button"
+            className="icon-button"
             onClick={onClose}
             aria-label="Close"
           >
-            <X size={16} />
+            <X size={15} />
           </button>
         </div>
 
@@ -499,11 +476,12 @@ function OutcomeWorkflowSheet({
                   fontSize: 10.5,
                   padding: "4px 8px",
                   borderRadius: 4,
-                  border: g.id === (currentGoal?.id ?? "") ? "1px solid #a78bfa" : "1px solid rgba(255,255,255,0.1)",
-                  background: g.id === (currentGoal?.id ?? "") ? "rgba(167,139,250,0.15)" : "transparent",
-                  color: g.id === (currentGoal?.id ?? "") ? "#faf7ff" : "#9d91b7",
+                  border: g.id === (currentGoal?.id ?? "") ? "1px solid var(--accent-primary)" : "1px solid var(--border-subtle)",
+                  background: g.id === (currentGoal?.id ?? "") ? "var(--accent-subtle)" : "transparent",
+                  color: g.id === (currentGoal?.id ?? "") ? "var(--accent-primary)" : "var(--text-secondary)",
                   cursor: "pointer",
                   whiteSpace: "nowrap",
+                  fontWeight: g.id === (currentGoal?.id ?? "") ? 600 : 500,
                 }}
               >
                 Goal {idx + 1}
@@ -512,36 +490,35 @@ function OutcomeWorkflowSheet({
           </div>
         )}
 
-        <p style={{ fontSize: 11, color: "#948ca2", margin: "0 0 10px" }}>
-          Assessing: <strong style={{ color: "#f7f3fc" }}>{currentGoal?.title || "Goal"}</strong>
+        <p style={{ fontSize: 11, color: "var(--text-secondary)", margin: "0 0 10px" }}>
+          Assessing: <strong style={{ color: "var(--text-primary)" }}>{currentGoal?.title || "Goal"}</strong>
         </p>
 
         <div style={{ display: "grid", gap: 6, marginBottom: 12 }}>
-          {outcomes.map((o) => (
-            <button
-              key={o.id}
-              type="button"
-              disabled={saving}
-              onClick={() => handleSelectOutcome(o.id)}
-              className="secondary-button"
-              style={{
-                textAlign: "left",
-                display: "block",
-                padding: "8px 10px",
-                background:
-                  currentGoal?.outcome === o.id
-                    ? "rgba(139,92,246,0.25)"
-                    : undefined,
-                borderColor:
-                  currentGoal?.outcome === o.id ? "#a78bfa" : undefined,
-              }}
-            >
-              <strong style={{ fontSize: 11.5, color: "#faf7ff", display: "block" }}>
-                {o.label}
-              </strong>
-              <span style={{ fontSize: 10, color: "#948ca2" }}>{o.desc}</span>
-            </button>
-          ))}
+          {outcomes.map((o) => {
+            const isSel = currentGoal?.outcome === o.id;
+            return (
+              <button
+                key={o.id}
+                type="button"
+                disabled={saving}
+                onClick={() => handleSelectOutcome(o.id)}
+                className="secondary-button"
+                style={{
+                  textAlign: "left",
+                  display: "block",
+                  padding: "8px 10px",
+                  background: isSel ? "var(--accent-subtle)" : undefined,
+                  borderColor: isSel ? "var(--accent-primary)" : undefined,
+                }}
+              >
+                <strong style={{ fontSize: 11.5, color: isSel ? "var(--accent-primary)" : "var(--text-primary)", display: "block" }}>
+                  {o.label}
+                </strong>
+                <span style={{ fontSize: 10, color: "var(--text-secondary)" }}>{o.desc}</span>
+              </button>
+            );
+          })}
         </div>
 
         <button
@@ -595,8 +572,7 @@ function TodayView({
     refetchOnWindowFocus: true,
   });
 
-  // Local selection & sheet state
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  // Sheet state
   const [activeWorkflow, setActiveWorkflow] = useState<
     "none" | "planToday" | "planTomorrow" | "outcome"
   >("none");
@@ -605,14 +581,6 @@ function TodayView({
   const goals = plan?.goals ?? [];
   const independentTasks = plan?.independentTasks ?? [];
   const allTasks = tasks.data ?? [];
-
-  // Active focus session detection
-  const activeSession = sessions.data?.find((s) => !s.endedAt);
-  const activeTask = activeSession
-    ? allTasks.find((t) => t.id === activeSession.taskId)
-    : selectedTaskId
-    ? allTasks.find((t) => t.id === selectedTaskId)
-    : null;
 
   // Incomplete tasks filter
   const incompleteTasks = allTasks.filter(
@@ -642,27 +610,6 @@ function TodayView({
 
   const current = status?.currentActivity;
   const isEligibleForCheckIn = status?.scheduler?.eligibility?.eligible ?? false;
-
-  // Session execution handlers
-  const handleStartFocus = async (taskId?: string) => {
-    const tid = taskId || activeTask?.id;
-    if (!tid) return;
-    await apiClient.startSession(tid);
-    await apiClient.updateTask(tid, { status: "in_progress" });
-    queryClient.invalidateQueries({ queryKey: ["sessions"] });
-    queryClient.invalidateQueries({ queryKey: ["tasks"] });
-  };
-
-  const handleFinishFocus = async () => {
-    if (!activeSession) return;
-    await apiClient.finishSession(activeSession.id);
-    if (activeSession.taskId) {
-      await apiClient.updateTask(activeSession.taskId, { status: "done" });
-    }
-    queryClient.invalidateQueries({ queryKey: ["sessions"] });
-    queryClient.invalidateQueries({ queryKey: ["tasks"] });
-    queryClient.invalidateQueries({ queryKey: ["activity-summary"] });
-  };
 
   // Plan workflow handlers (authoritative backend mutation)
   const handleSavePlan = async (updatedGoals: Array<{ id?: string; title: string; order: number }>) => {
@@ -699,8 +646,8 @@ function TodayView({
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-            <Target size={13} color="#a78bfa" />
-            <span className="section-kicker" style={{ color: "#a78bfa" }}>
+            <Target size={13} color="var(--accent-primary)" />
+            <span className="section-kicker" style={{ color: "var(--accent-primary)" }}>
               TODAY&apos;S PLAN
             </span>
           </div>
@@ -708,10 +655,11 @@ function TodayView({
             <span
               style={{
                 fontSize: 9.5,
-                color: "#a78bfa",
-                background: "rgba(167,139,250,0.12)",
+                color: "var(--accent-primary)",
+                background: "var(--accent-subtle)",
                 padding: "2px 6px",
                 borderRadius: 4,
+                fontWeight: 600,
               }}
             >
               {goals.length} {goals.length === 1 ? "Goal" : "Goals"}
@@ -729,13 +677,13 @@ function TodayView({
             {goals.map((goal, idx) => {
               const goalTasks = goal.tasks ?? [];
               return (
-                <div key={goal.id} style={{ borderBottom: idx === goals.length - 1 ? "none" : "1px solid rgba(255,255,255,0.06)", paddingBottom: 6 }}>
+                <div key={goal.id} style={{ borderBottom: idx === goals.length - 1 ? "none" : "1px solid var(--border-subtle)", paddingBottom: 6 }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4 }}>
                     <h2
                       style={{
                         fontSize: 12,
                         fontWeight: 650,
-                        color: "#faf7ff",
+                        color: "var(--text-primary)",
                         margin: 0,
                         lineHeight: 1.3,
                         overflow: "hidden",
@@ -743,7 +691,7 @@ function TodayView({
                         whiteSpace: "nowrap",
                       }}
                     >
-                      <span style={{ color: "#a78bfa", marginRight: 4, fontFamily: "monospace" }}>
+                      <span style={{ color: "var(--accent-primary)", marginRight: 4, fontFamily: "ui-monospace, monospace", fontWeight: 600 }}>
                         {(idx + 1).toString().padStart(2, "0")}
                       </span>
                       {goal.title}
@@ -752,11 +700,12 @@ function TodayView({
                       <span
                         style={{
                           fontSize: 9,
-                          color: "#34d399",
-                          background: "rgba(52,211,153,0.1)",
+                          color: "var(--success)",
+                          background: "var(--success-subtle)",
                           padding: "1px 5px",
                           borderRadius: 3,
                           flexShrink: 0,
+                          fontWeight: 600,
                         }}
                       >
                         {goal.outcome.replace("_", " ")}
@@ -771,14 +720,14 @@ function TodayView({
                           key={t.id}
                           style={{
                             fontSize: 10,
-                            color: t.status === "done" ? "#8e84a5" : "#c6b5ef",
+                            color: t.status === "done" ? "var(--text-muted)" : "var(--text-secondary)",
                             opacity: t.status === "done" ? 0.75 : 1,
                             overflow: "hidden",
                             textOverflow: "ellipsis",
                             whiteSpace: "nowrap",
                           }}
                         >
-                          <span style={{ color: "#7c6f96", marginRight: 3, fontFamily: "monospace" }}>
+                          <span style={{ color: "var(--text-muted)", marginRight: 3, fontFamily: "ui-monospace, monospace" }}>
                             {tIdx === goalTasks.length - 1 ? "└──" : "├──"}
                           </span>
                           {t.title}
@@ -792,10 +741,10 @@ function TodayView({
           </div>
         ) : (
           <div style={{ padding: "6px 0 10px" }}>
-            <p style={{ fontSize: 11.5, color: "#faf7ff", fontWeight: 600, margin: "0 0 2px" }}>
+            <p style={{ fontSize: 11.5, color: "var(--text-primary)", fontWeight: 600, margin: "0 0 2px" }}>
               Your day hasn&apos;t been planned yet
             </p>
-            <p style={{ fontSize: 10.5, color: "#948ca2", margin: 0 }}>
+            <p style={{ fontSize: 10.5, color: "var(--text-secondary)", margin: 0 }}>
               Define today&apos;s primary objectives in 30 seconds.
             </p>
           </div>
@@ -832,137 +781,7 @@ function TodayView({
         </div>
       </section>
 
-      {/* 2. CURRENT FOCUS (Contextual NOW Layer with observed telemetry) */}
-      <section className="task-card">
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-          <div className="section-kicker" style={{ margin: 0 }}>
-            {activeSession ? (
-              <span style={{ color: "#34d399", display: "flex", alignItems: "center", gap: 4 }}>
-                <span className="live-dot" /> ACTIVE SESSION
-              </span>
-            ) : (
-              "CURRENT FOCUS"
-            )}
-          </div>
-          {activeTask && !activeSession && (
-            <button
-              type="button"
-              className="text-button"
-              style={{ fontSize: 10, color: "#9d91b7" }}
-              onClick={() => setSelectedTaskId(null)}
-            >
-              Switch
-            </button>
-          )}
-        </div>
-
-        {activeSession && activeTask ? (
-          <div>
-            <h2 style={{ fontSize: 13, fontWeight: 650, color: "#faf7ff", margin: "0 0 2px" }}>
-              {activeTask.title}
-            </h2>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10.5, color: "#c6b5ef", marginBottom: 6 }}>
-              {activeTask.goalTitle && <span>Goal: {activeTask.goalTitle}</span>}
-              {current && (
-                <span style={{ color: "#a78bfa" }}>
-                  Observed: {current.domain}
-                </span>
-              )}
-            </div>
-
-            <div style={{ display: "flex", gap: 4 }}>
-              <button
-                type="button"
-                className="secondary-button"
-                style={{ flex: 1, padding: "6px", fontSize: 10.5 }}
-                onClick={() => setTab("focus")}
-              >
-                <Timer size={12} /> Open Timer
-              </button>
-              <button
-                type="button"
-                className="primary-button"
-                style={{ flex: 1, padding: "6px", fontSize: 10.5, background: "#34d399", color: "#000" }}
-                onClick={handleFinishFocus}
-              >
-                <CheckCircle2 size={12} /> Complete
-              </button>
-            </div>
-          </div>
-        ) : activeTask ? (
-          <div>
-            <h2 style={{ fontSize: 13, fontWeight: 650, color: "#faf7ff", margin: "0 0 2px" }}>
-              {activeTask.title}
-            </h2>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10.5, color: "#9d91b7", marginBottom: 8 }}>
-              {activeTask.goalTitle && <span>Goal: {activeTask.goalTitle}</span>}
-              <span>Estimate: {activeTask.plannedDurationMinutes ?? 30}m</span>
-            </div>
-
-            <button
-              className="primary-button full"
-              onClick={() => handleStartFocus(activeTask.id)}
-              type="button"
-              style={{ marginTop: 0 }}
-            >
-              <Play size={13} fill="currentColor" />
-              Start Focus
-            </button>
-          </div>
-        ) : incompleteTasks.length > 0 ? (
-          <div>
-            <p style={{ fontSize: 11, color: "#948ca2", margin: "0 0 6px" }}>
-              Select a task to begin an intentional session:
-            </p>
-            <div style={{ display: "grid", gap: 4, marginBottom: 4 }}>
-              {incompleteTasks.slice(0, 3).map((t) => (
-                <div
-                  key={t.id}
-                  onClick={() => setSelectedTaskId(t.id)}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    padding: "6px 8px",
-                    background: "rgba(255,255,255,0.03)",
-                    border: "1px solid rgba(255,255,255,0.08)",
-                    borderRadius: 6,
-                    cursor: "pointer",
-                  }}
-                >
-                  <span style={{ fontSize: 11, color: "#faf7ff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {t.title}
-                  </span>
-                  <span style={{ fontSize: 9.5, color: "#9d91b7", flexShrink: 0, marginLeft: 6 }}>
-                    {t.plannedDurationMinutes ?? 30}m
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <div>
-            <h2 style={{ fontSize: 12.5, fontWeight: 650, color: "#faf7ff", margin: "0 0 2px" }}>
-              Nothing ready to focus on.
-            </h2>
-            <p style={{ fontSize: 10.5, color: "#948ca2", margin: "0 0 8px" }}>
-              Create or select a task to begin an intentional focus session.
-            </p>
-            <div style={{ display: "flex", gap: 4 }}>
-              <button
-                className="secondary-button full"
-                onClick={() => openDashboard("/tasks")}
-                type="button"
-                style={{ marginTop: 0 }}
-              >
-                <ListTodo size={12} /> View Tasks
-              </button>
-            </div>
-          </div>
-        )}
-      </section>
-
-      {/* 3. NEXT UP (2–3 Deterministic Tasks) */}
+      {/* 2. NEXT UP (2–3 Deterministic Tasks) */}
       <section className="hero-card" style={{ padding: "10px 12px" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
           <div className="section-kicker" style={{ margin: 0 }}>
@@ -971,7 +790,7 @@ function TodayView({
           <button
             type="button"
             className="text-button"
-            style={{ fontSize: 10, color: "#a78bfa", display: "flex", alignItems: "center", gap: 3 }}
+            style={{ fontSize: 10, color: "var(--accent-primary)", display: "flex", alignItems: "center", gap: 3 }}
             onClick={() => openDashboard("/tasks")}
           >
             <span>View all</span>
@@ -989,15 +808,16 @@ function TodayView({
             {nextUpTasks.map((t) => (
               <div
                 key={t.id}
-                onClick={() => setSelectedTaskId(t.id)}
+                onClick={() => setTab("focus")}
+                title="Click to focus on this task"
                 style={{
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "space-between",
-                  padding: "5px 8px",
-                  background: "rgba(255,255,255,0.02)",
-                  border: "1px solid rgba(255,255,255,0.06)",
-                  borderRadius: 5,
+                  padding: "6px 8px",
+                  background: "var(--bg-subtle)",
+                  border: "1px solid var(--border-subtle)",
+                  borderRadius: 6,
                   cursor: "pointer",
                 }}
               >
@@ -1005,7 +825,7 @@ function TodayView({
                   <div
                     style={{
                       fontSize: 11,
-                      color: "#faf7ff",
+                      color: "var(--text-primary)",
                       overflow: "hidden",
                       textOverflow: "ellipsis",
                       whiteSpace: "nowrap",
@@ -1013,7 +833,7 @@ function TodayView({
                   >
                     {t.title}
                   </div>
-                  <div style={{ fontSize: 9.5, color: "#9d91b7" }}>
+                  <div style={{ fontSize: 9.5, color: "var(--text-muted)" }}>
                     {t.plannedDurationMinutes ?? 30}m · {t.goalTitle || "Independent"}
                   </div>
                 </div>
@@ -1023,9 +843,9 @@ function TodayView({
                     textTransform: "uppercase",
                     padding: "1px 4px",
                     borderRadius: 3,
-                    background: "rgba(255,255,255,0.06)",
-                    color: t.priority === "high" ? "#f87171" : "#9d91b7",
-                    fontFamily: "monospace",
+                    background: "var(--bg-active)",
+                    color: t.priority === "high" ? "var(--danger)" : "var(--text-muted)",
+                    fontFamily: "ui-monospace, monospace",
                     flexShrink: 0,
                   }}
                 >
@@ -1035,7 +855,7 @@ function TodayView({
             ))}
           </div>
         ) : (
-          <p style={{ fontSize: 10.5, color: "#948ca2", margin: "2px 0" }}>
+          <p style={{ fontSize: 10.5, color: "var(--text-secondary)", margin: "2px 0" }}>
             No remaining tasks for today.
           </p>
         )}
@@ -1084,18 +904,18 @@ function TodayView({
             alignItems: "center",
             justifyContent: "space-between",
             padding: "9px 12px",
-            background: "rgba(139,92,246,0.14)",
-            border: "1px solid rgba(167,139,250,0.3)",
-            borderRadius: 10,
+            background: "var(--accent-subtle)",
+            border: "1px solid var(--accent-border)",
+            borderRadius: 8,
           }}
         >
           <div>
             <strong
-              style={{ fontSize: 11, color: "#faf7ff", display: "block" }}
+              style={{ fontSize: 11, color: "var(--text-primary)", display: "block" }}
             >
               Hourly check-in ready
             </strong>
-            <span style={{ fontSize: 10, color: "#c6b5ef" }}>
+            <span style={{ fontSize: 10, color: "var(--text-secondary)" }}>
               Take 45 seconds to reflect on this block
             </span>
           </div>
@@ -1158,19 +978,38 @@ function FocusView({
   const tasks = useQuery({
     queryKey: ["tasks"],
     queryFn: apiClient.getTasks.bind(apiClient),
+    refetchOnWindowFocus: true,
   });
   const sessions = useQuery({
     queryKey: ["sessions"],
     queryFn: apiClient.getSessions.bind(apiClient),
+    refetchOnWindowFocus: true,
   });
+
   const activeSession = sessions.data?.find((session) => !session.endedAt);
-  const task =
-    tasks.data?.find((item) => item.id === activeSession?.taskId) ??
-    tasks.data?.find((item) => item.status !== "done");
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+
+  const incompleteTasks = useMemo(() => {
+    return (tasks.data ?? []).filter((t) => t.status !== "done" && t.status !== "cancelled");
+  }, [tasks.data]);
+
+  const task = useMemo(() => {
+    if (activeSession?.taskId) {
+      return tasks.data?.find((item) => item.id === activeSession.taskId) ?? null;
+    }
+    if (selectedTaskId) {
+      return tasks.data?.find((item) => item.id === selectedTaskId) ?? null;
+    }
+    return (
+      incompleteTasks.find((t) => t.status === "in_progress") ||
+      incompleteTasks[0] ||
+      null
+    );
+  }, [activeSession, selectedTaskId, tasks.data, incompleteTasks]);
 
   const [preset, setPreset] = useState<25 | 50 | "custom">(25);
   const [customMins, setCustomMins] = useState(30);
-  const [showReflection, setShowReflection] = useState(false);
+  const [showEndDialog, setShowEndDialog] = useState(false);
   const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
@@ -1179,23 +1018,33 @@ function FocusView({
   }, []);
 
   const start = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       const duration = preset === "custom" ? customMins : preset;
-      return apiClient.startSession(task?.id, duration);
+      const tid = task?.id;
+      const session = await apiClient.startSession(tid, duration);
+      if (tid) {
+        await apiClient.updateTask(tid, { status: "in_progress" });
+      }
+      return session;
     },
-    onSuccess: () =>
-      void queryClient.invalidateQueries({ queryKey: ["sessions"] }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+    },
   });
 
   const finish = useMutation({
     mutationFn: async ({
       markDone,
-      openCheckIn,
+      openCheckIn = true,
     }: {
       markDone: boolean;
       openCheckIn?: boolean;
     }) => {
       if (!activeSession) return;
+      const currentTaskTitle = task?.title;
+      const elapsedMins = Math.max(1, Math.round((Date.now() - Date.parse(activeSession.startedAt)) / 60000));
+
       if (markDone && task) {
         try {
           await apiClient.updateTask(task.id, { status: "done" });
@@ -1206,7 +1055,19 @@ function FocusView({
       }
       await apiClient.finishSession(activeSession.id);
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });
-      setShowReflection(false);
+      setShowEndDialog(false);
+
+      // Trigger curated focus-ended notification via background
+      try {
+        if (typeof chrome !== "undefined" && chrome.runtime?.sendMessage) {
+          void chrome.runtime.sendMessage({
+            type: "trigger-focus-ended-notification",
+            taskTitle: currentTaskTitle,
+            durationMinutes: elapsedMins,
+          });
+        }
+      } catch {}
+
       if (openCheckIn) {
         onStartReflect();
       }
@@ -1220,23 +1081,20 @@ function FocusView({
     preset === "custom" ? customMins * 60 : preset * 60;
   const remainingSec = Math.max(0, targetDurationSec - elapsedSec);
 
-  if (showReflection && activeSession) {
+  if (showEndDialog && activeSession) {
     return (
       <main className="content" style={{ gap: 10 }}>
         <div className="section-heading compact">
           <div>
             <span className="section-kicker">FOCUS COMPLETE</span>
-            <h1 style={{ fontSize: 15 }}>What happened?</h1>
+            <h1 style={{ fontSize: 15 }}>Session Wrap-Up</h1>
           </div>
         </div>
 
         <section className="focus-card">
-          <p style={{ margin: "0 0 6px", fontSize: 11.5, color: "#948ca2" }}>
-            Reflect on this focus session for{" "}
-            <strong style={{ color: "#f7f3fc" }}>
-              {task?.title ?? "your task"}
-            </strong>
-            :
+          <p style={{ margin: "0 0 10px", fontSize: 11.5, color: "var(--text-secondary)" }}>
+            Reflect on this focus block for{" "}
+            <strong style={{ color: "var(--text-primary)" }}>{task?.title ?? "your session"}</strong>:
           </p>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -1245,9 +1103,9 @@ function FocusView({
               className="primary-button full"
               style={{ marginTop: 0 }}
               disabled={finish.isPending}
-              onClick={() => finish.mutate({ markDone: true })}
+              onClick={() => finish.mutate({ markDone: true, openCheckIn: true })}
             >
-              <CheckCircle2 size={14} /> Completed the task
+              <CheckCircle2 size={14} /> Completed the task & Reflect
             </button>
 
             <button
@@ -1255,9 +1113,9 @@ function FocusView({
               className="secondary-button full"
               style={{ marginTop: 0 }}
               disabled={finish.isPending}
-              onClick={() => finish.mutate({ markDone: false })}
+              onClick={() => finish.mutate({ markDone: false, openCheckIn: true })}
             >
-              Made progress
+              Made progress & Reflect
             </button>
 
             <button
@@ -1265,21 +1123,18 @@ function FocusView({
               className="secondary-button full"
               style={{ marginTop: 0 }}
               disabled={finish.isPending}
-              onClick={() =>
-                finish.mutate({ markDone: false, openCheckIn: true })
-              }
+              onClick={() => finish.mutate({ markDone: false, openCheckIn: false })}
             >
-              Got stuck (Reflect on blocker)
+              Finish session only (Skip reflection)
             </button>
 
             <button
               type="button"
-              className="secondary-button full"
-              style={{ marginTop: 0 }}
-              disabled={finish.isPending}
-              onClick={() => finish.mutate({ markDone: false })}
+              className="text-button"
+              style={{ marginTop: 4, alignSelf: "center", fontSize: 11 }}
+              onClick={() => setShowEndDialog(false)}
             >
-              Did something else
+              Resume focus session
             </button>
           </div>
         </section>
@@ -1292,7 +1147,7 @@ function FocusView({
       <div className="section-heading compact">
         <div>
           <span className="section-kicker">
-            {activeSession ? "FOCUSING" : "FOCUS BLOCK"}
+            {activeSession ? "CURRENT FOCUS" : "FOCUS BLOCK"}
           </span>
           <h1 style={{ fontSize: 15 }}>
             {activeSession ? "Deliberate execution." : "One thing at a time."}
@@ -1301,28 +1156,129 @@ function FocusView({
       </div>
 
       <section className="focus-card">
+        {/* Timer Box */}
         <div className="focus-timer-box">
           <div>
-            <span>{activeSession ? "Time remaining" : "Duration"}</span>
+            <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+              {activeSession && (
+                <span
+                  style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: "50%",
+                    background: "var(--success)",
+                    display: "inline-block",
+                  }}
+                />
+              )}
+              {activeSession
+                ? remainingSec > 0
+                  ? "Time remaining"
+                  : "Elapsed time"
+                : "Duration"}
+            </span>
             <strong>
-              {formatClock(activeSession ? remainingSec : targetDurationSec)}
+              {formatClock(
+                activeSession
+                  ? remainingSec > 0
+                    ? remainingSec
+                    : elapsedSec
+                  : targetDurationSec
+              )}
             </strong>
           </div>
-          <Timer size={26} color="#a78bfa" />
+          <Timer size={26} color="var(--accent-primary)" />
         </div>
 
-        <div className="focus-details">
-          <span className="section-kicker">CURRENT TASK</span>
-          <h2>{task?.title ?? "An intentional work block"}</h2>
-          <p>
-            {activeSession
-              ? "Work session is active and being recorded."
-              : "Choose your focus block below."}
-          </p>
-        </div>
+        {/* Task Selection & Information */}
+        {activeSession ? (
+          <div className="focus-details">
+            {task?.goalTitle && (
+              <span className="section-kicker" style={{ color: "var(--accent-primary)" }}>
+                GOAL: {task.goalTitle}
+              </span>
+            )}
+            <h2>{task?.title ?? "Intentional work session"}</h2>
+            <p style={{ margin: "2px 0 0" }}>
+              {status?.currentActivity?.domain ? (
+                <span>
+                  Observed: <strong style={{ color: "var(--text-primary)" }}>{status.currentActivity.domain}</strong>
+                </span>
+              ) : (
+                "Work session is active and being recorded."
+              )}
+            </p>
+          </div>
+        ) : (
+          <div style={{ marginBottom: 12 }}>
+            <label
+              style={{
+                fontSize: 10,
+                textTransform: "uppercase",
+                letterSpacing: "0.05em",
+                color: "var(--text-secondary)",
+                display: "block",
+                marginBottom: 6,
+                fontWeight: 550,
+              }}
+            >
+              Select Target Task
+            </label>
+            {incompleteTasks.length > 0 ? (
+              <select
+                value={task?.id ?? ""}
+                onChange={(e) => setSelectedTaskId(e.target.value)}
+                style={{
+                  width: "100%",
+                  padding: "8px 10px",
+                  background: "var(--bg-subtle)",
+                  border: "1px solid var(--border-default)",
+                  borderRadius: 6,
+                  color: "var(--text-primary)",
+                  fontSize: 11.5,
+                  outline: "none",
+                  cursor: "pointer",
+                }}
+              >
+                {incompleteTasks.map((t) => (
+                  <option key={t.id} value={t.id} style={{ background: "var(--bg-surface-elevated)", color: "var(--text-primary)" }}>
+                    {t.title} {t.goalTitle ? `· [${t.goalTitle}]` : ""} ({t.plannedDurationMinutes ?? 30}m)
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <div
+                style={{
+                  padding: "8px 10px",
+                  background: "var(--bg-subtle)",
+                  border: "1px solid var(--border-subtle)",
+                  borderRadius: 6,
+                  fontSize: 11,
+                  color: "var(--text-secondary)",
+                }}
+              >
+                No incomplete tasks. Starting will create an intentional focus block.
+              </div>
+            )}
+          </div>
+        )}
 
+        {/* Preset Selector when not active */}
         {!activeSession && (
           <div>
+            <label
+              style={{
+                fontSize: 10,
+                textTransform: "uppercase",
+                letterSpacing: "0.05em",
+                color: "var(--text-secondary)",
+                display: "block",
+                marginBottom: 6,
+                fontWeight: 550,
+              }}
+            >
+              Duration Preset
+            </label>
             <div style={{ display: "flex", gap: 5 }}>
               {[25, 50].map((mins) => (
                 <button
@@ -1336,9 +1292,9 @@ function FocusView({
                     padding: "7px 2px",
                     fontSize: 11,
                     background:
-                      preset === mins ? "rgba(139,92,246,0.3)" : undefined,
-                    borderColor: preset === mins ? "#a78bfa" : undefined,
-                    color: preset === mins ? "#faf7ff" : undefined,
+                      preset === mins ? "var(--bg-active)" : undefined,
+                    borderColor: preset === mins ? "var(--accent-primary)" : undefined,
+                    color: preset === mins ? "var(--accent-primary)" : undefined,
                   }}
                 >
                   {mins}m
@@ -1354,9 +1310,9 @@ function FocusView({
                   padding: "7px 2px",
                   fontSize: 11,
                   background:
-                    preset === "custom" ? "rgba(139,92,246,0.3)" : undefined,
-                  borderColor: preset === "custom" ? "#a78bfa" : undefined,
-                  color: preset === "custom" ? "#faf7ff" : undefined,
+                    preset === "custom" ? "var(--bg-active)" : undefined,
+                  borderColor: preset === "custom" ? "var(--accent-primary)" : undefined,
+                  color: preset === "custom" ? "var(--accent-primary)" : undefined,
                 }}
               >
                 Custom
@@ -1372,9 +1328,7 @@ function FocusView({
                   marginTop: 8,
                 }}
               >
-                <span style={{ fontSize: 10.5, color: "#90869e" }}>
-                  Duration:
-                </span>
+                <span style={{ fontSize: 10.5, color: "var(--text-secondary)" }}>Duration:</span>
                 <input
                   type="number"
                   min={5}
@@ -1389,27 +1343,27 @@ function FocusView({
                     width: 50,
                     padding: "3px 6px",
                     borderRadius: 6,
-                    border: "1px solid rgba(255,255,255,0.15)",
-                    background: "#161320",
-                    color: "#f5f0fb",
+                    border: "1px solid var(--border-default)",
+                    background: "var(--bg-surface-elevated)",
+                    color: "var(--text-primary)",
                     fontSize: 11,
                     textAlign: "center",
                   }}
                 />
-                <span style={{ fontSize: 10, color: "#90869e" }}>
-                  min (5–180)
-                </span>
+                <span style={{ fontSize: 10, color: "var(--text-muted)" }}>min (5–180)</span>
               </div>
             )}
           </div>
         )}
 
+        {/* Start / End CTA */}
         {activeSession ? (
           <button
             type="button"
             className="danger-button full"
-            onClick={() => setShowReflection(true)}
+            onClick={() => setShowEndDialog(true)}
             disabled={finish.isPending}
+            style={{ marginTop: 12 }}
           >
             <Square size={13} fill="currentColor" />
             End Session
@@ -1420,13 +1374,12 @@ function FocusView({
             className="primary-button full"
             onClick={() => start.mutate()}
             disabled={start.isPending || status?.trackingPaused}
+            style={{ marginTop: 12 }}
           >
             <Play size={13} fill="currentColor" />
             {status?.trackingPaused
               ? "Resume tracking first"
-              : `Start ${
-                  preset === "custom" ? customMins : preset
-                }m Focus`}
+              : `Start ${preset === "custom" ? customMins : preset}m Focus`}
           </button>
         )}
       </section>
@@ -1434,113 +1387,7 @@ function FocusView({
   );
 }
 
-// -------------------------------------------------------------
-// REFLECT VIEW (Locked 3rd tab: Hourly check-in wizard & reflections)
-// -------------------------------------------------------------
-function ReflectView({
-  activeTask,
-  patterns,
-  mode = "hourly",
-  isStandalone,
-  onModeChange,
-  onCheckInComplete,
-}: {
-  activeTask?: Task;
-  patterns?: any[];
-  mode?: "menu" | "hourly" | "inactivity";
-  isStandalone?: boolean;
-  onModeChange?: (mode: "menu" | "hourly" | "inactivity") => void;
-  onCheckInComplete?: () => void;
-}) {
-  const [internalMode, setInternalMode] = useState<"menu" | "hourly" | "inactivity">(mode);
 
-  useEffect(() => {
-    setInternalMode(mode);
-  }, [mode]);
-
-  const setMode = (m: "menu" | "hourly" | "inactivity") => {
-    setInternalMode(m);
-    onModeChange?.(m);
-  };
-
-  if (internalMode === "hourly") {
-    return (
-      <CheckInView
-        currentTask={activeTask}
-        patterns={patterns ?? []}
-        isStandalone={isStandalone}
-        onComplete={() => {
-          setMode("menu");
-          onCheckInComplete?.();
-        }}
-        onCancel={() => setMode("menu")}
-        onSwitchToInactivity={() => setMode("inactivity")}
-      />
-    );
-  }
-
-  if (internalMode === "inactivity") {
-    return (
-      <InactivityView
-        isStandalone={isStandalone}
-        onComplete={() => {
-          setMode("menu");
-          onCheckInComplete?.();
-        }}
-        onCancel={() => setMode("menu")}
-      />
-    );
-  }
-
-  return (
-    <main className="content" style={{ gap: 10 }}>
-      <div className="section-heading compact">
-        <div>
-          <span className="section-kicker">REFLECTION WORKSPACE</span>
-          <h1 style={{ fontSize: 15 }}>Close the loop on reality.</h1>
-        </div>
-      </div>
-
-      <section className="hero-card" style={{ padding: 14 }}>
-        <div style={{ display: "grid", gap: 3, marginBottom: 12 }}>
-          <strong style={{ fontSize: 12.5, color: "#faf7ff" }}>
-            Hourly Check-in
-          </strong>
-          <span style={{ fontSize: 11, color: "#948ca2" }}>
-            30-second qualitative reflection on energy, blockers, and cognitive focus.
-          </span>
-        </div>
-        <button
-          type="button"
-          className="primary-button full"
-          style={{ marginTop: 0 }}
-          onClick={() => setMode("hourly")}
-        >
-          <Sparkles size={13} /> Start Hourly Check-in
-        </button>
-      </section>
-
-      <section className="hero-card" style={{ padding: 14 }}>
-        <div style={{ display: "grid", gap: 3, marginBottom: 12 }}>
-          <strong style={{ fontSize: 12.5, color: "#faf7ff" }}>
-            Inactivity Recovery
-          </strong>
-          <span style={{ fontSize: 11, color: "#948ca2" }}>
-            Label prolonged periods of observed inactivity (Break, Meeting, Away).
-          </span>
-        </div>
-        <button
-          type="button"
-          className="secondary-button full"
-          style={{ marginTop: 0 }}
-          onClick={() => setMode("inactivity")}
-        >
-          Review Inactivity Blocks
-        </button>
-      </section>
-    </main>
-  );
-}
 
 // -------------------------------------------------------------
 // REVIEW VIEW (Locked 4th tab: Delayed Spaced Learning Recall)
@@ -1615,10 +1462,10 @@ function ReviewView() {
                 alignItems: "center",
               }}
             >
-              <span className="section-kicker" style={{ color: "#a78bfa" }}>
+              <span className="section-kicker" style={{ color: "var(--accent-primary)" }}>
                 {due.length} {due.length === 1 ? "REVIEW DUE" : "REVIEWS DUE"}
               </span>
-              <span style={{ fontSize: 10, color: "#8a8298" }}>
+              <span style={{ fontSize: 10, color: "var(--text-secondary)" }}>
                 {activeAssessment.topic}
               </span>
             </div>
@@ -1627,9 +1474,10 @@ function ReviewView() {
               <span
                 style={{
                   fontSize: 9.5,
-                  color: "#a78bfa",
+                  color: "var(--accent-primary)",
                   textTransform: "uppercase",
                   letterSpacing: ".06em",
+                  fontWeight: 600,
                 }}
               >
                 QUESTION
@@ -1681,19 +1529,19 @@ function ReviewView() {
                 width: 36,
                 height: 36,
                 borderRadius: "50%",
-                background: "rgba(52,211,153,0.12)",
+                background: "var(--success-subtle)",
                 display: "grid",
                 placeItems: "center",
-                color: "#34d399",
+                color: "var(--success)",
                 margin: "0 auto 10px",
               }}
             >
               <CheckCircle2 size={18} />
             </div>
-            <h2 style={{ fontSize: 14, margin: "0 0 4px", color: "#f7f3fc" }}>
+            <h2 style={{ fontSize: 14, margin: "0 0 4px", color: "var(--text-primary)" }}>
               You&apos;re caught up.
             </h2>
-            <p style={{ fontSize: 11, color: "#948ca2", margin: "0 0 12px" }}>
+            <p style={{ fontSize: 11, color: "var(--text-secondary)", margin: "0 0 12px" }}>
               No learning recall prompts are due right now.
             </p>
             <button
@@ -1887,9 +1735,9 @@ function MoreView({
           </div>
           <div className="setting-copy">
             <strong>Settings</strong>
-            <span>Check-in, quiet hours, focus blocks, privacy</span>
+            <span>Check-in, quiet hours, focus blocks, appearance</span>
           </div>
-          <ExternalLink size={12} color="#8a8298" />
+          <ExternalLink size={12} color="var(--text-muted)" />
         </button>
 
         <button
@@ -1911,7 +1759,7 @@ function MoreView({
             <strong>System Diagnostics</strong>
             <span>Event counters, scheduler state, test notification</span>
           </div>
-          <ExternalLink size={12} color="#8a8298" />
+          <ExternalLink size={12} color="var(--text-muted)" />
         </button>
 
         <div className="setting-row">
@@ -1956,7 +1804,7 @@ export function App() {
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<Tab>("today");
   const [moreSubView, setMoreSubView] = useState<MoreSubView>("menu");
-  const [reflectMode, setReflectMode] = useState<"hourly" | "inactivity" | "menu">("hourly");
+  const [reflectionOverlay, setReflectionOverlay] = useState<"hourly" | "inactivity" | null>(null);
 
   const isStandalone = useMemo(() => {
     try {
@@ -1974,6 +1822,30 @@ export function App() {
       document.body.classList.add("standalone");
     }
   }, [isStandalone]);
+
+  // Synchronize and apply active theme (light / dark / system)
+  useEffect(() => {
+    try {
+      if (typeof chrome !== "undefined" && chrome.storage?.local) {
+        chrome.storage.local.get(["theme"], (result) => {
+          if (result && result.theme) {
+            document.documentElement.setAttribute("data-theme", result.theme);
+          }
+        });
+
+        const handleThemeChange = (changes: { [key: string]: chrome.storage.StorageChange }, area: string) => {
+          if (area === "local" && changes.theme?.newValue) {
+            document.documentElement.setAttribute("data-theme", changes.theme.newValue);
+          }
+        };
+
+        chrome.storage.onChanged.addListener(handleThemeChange);
+        return () => {
+          chrome.storage.onChanged.removeListener(handleThemeChange);
+        };
+      }
+    } catch {}
+  }, []);
 
   const status = useQuery({
     queryKey: ["extension-status"],
@@ -1997,20 +1869,14 @@ export function App() {
 
   useEffect(() => {
     const applyRouting = (targetTab?: string, targetMode?: string) => {
-      if (targetMode === "hourly" || targetMode === "inactivity" || targetMode === "menu") {
-        setReflectMode(targetMode);
-      }
-      if (targetTab === "inactivity") {
-        setTab("reflect");
-        setReflectMode("inactivity");
+      if (targetMode === "inactivity" || targetTab === "inactivity") {
+        setReflectionOverlay("inactivity");
       } else if (
+        targetMode === "hourly" ||
         targetTab === "reflect" ||
         targetTab === "checkin"
       ) {
-        setTab("reflect");
-        if (!targetMode) {
-          setReflectMode("hourly");
-        }
+        setReflectionOverlay("hourly");
       } else if (
         targetTab === "focus" ||
         targetTab === "review" ||
@@ -2018,6 +1884,7 @@ export function App() {
         targetTab === "today"
       ) {
         setTab(targetTab as Tab);
+        setReflectionOverlay(null);
       }
     };
 
@@ -2073,73 +1940,100 @@ export function App() {
   const handleTabChange = (newTab: Tab) => {
     setTab(newTab);
     setMoreSubView("menu");
-    if (newTab === "reflect") {
-      setReflectMode("hourly");
-    }
   };
 
-function notifyCloseModal() {
-  try {
-    if (typeof window !== "undefined") {
-      if (window.parent && window.parent !== window) {
-        window.parent.postMessage({ type: "PRODUCTIVEHIX_CLOSE_MODAL" }, "*");
+  function notifyCloseModal() {
+    try {
+      if (typeof window !== "undefined") {
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: "PRODUCTIVEHIX_CLOSE_MODAL" }, "*");
+        }
+        window.close();
       }
-      window.close();
-    }
-  } catch {}
-}
+    } catch {}
+  }
+
+  // If a reflection event is active, render full-screen CheckInView or InactivityView
+  if (reflectionOverlay === "inactivity") {
+    return (
+      <div className="app-shell">
+        <Header
+          isStandalone={isStandalone}
+          onClose={() => {
+            setReflectionOverlay(null);
+            notifyCloseModal();
+          }}
+        />
+        <InactivityView
+          isStandalone={isStandalone}
+          onComplete={() => {
+            void queryClient.invalidateQueries({ queryKey: ["extension-status"] });
+            void queryClient.invalidateQueries({ queryKey: ["activity-summary"] });
+            setReflectionOverlay(null);
+            if (isStandalone) notifyCloseModal();
+          }}
+          onCancel={() => {
+            setReflectionOverlay(null);
+            if (isStandalone) notifyCloseModal();
+          }}
+        />
+      </div>
+    );
+  }
+
+  if (reflectionOverlay === "hourly") {
+    return (
+      <div className="app-shell">
+        <Header
+          isStandalone={isStandalone}
+          onClose={() => {
+            setReflectionOverlay(null);
+            notifyCloseModal();
+          }}
+        />
+        <CheckInView
+          currentTask={activeTask}
+          patterns={patterns.data ?? []}
+          isStandalone={isStandalone}
+          onComplete={() => {
+            void queryClient.invalidateQueries({ queryKey: ["extension-status"] });
+            void queryClient.invalidateQueries({ queryKey: ["activity-summary"] });
+            setReflectionOverlay(null);
+            if (isStandalone) notifyCloseModal();
+          }}
+          onCancel={() => {
+            setReflectionOverlay(null);
+            if (isStandalone) notifyCloseModal();
+          }}
+          onSwitchToInactivity={() => setReflectionOverlay("inactivity")}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="app-shell">
       <Header
-        status={status.data}
         isStandalone={isStandalone}
         onClose={notifyCloseModal}
-        onPillClick={() => {
-          setTab("more");
-        }}
       />
 
       <TopNav tab={tab} setTab={handleTabChange} />
 
-      {/* VIEW RENDERER: Locked 5 Views */}
+      {/* VIEW RENDERER: 4 Persistent Navigation Tabs */}
       {tab === "today" ? (
         <TodayView
           status={status.data}
           setTab={setTab}
           onStartReflect={() => {
-            setReflectMode("hourly");
-            setTab("reflect");
+            setReflectionOverlay("hourly");
           }}
         />
       ) : tab === "focus" ? (
         <FocusView
           status={status.data}
           onStartReflect={() => {
-            setReflectMode("hourly");
-            setTab("reflect");
-          }}
-        />
-      ) : tab === "reflect" ? (
-        <ReflectView
-          activeTask={activeTask}
-          patterns={patterns.data ?? []}
-          mode={reflectMode}
-          isStandalone={isStandalone}
-          onModeChange={setReflectMode}
-          onCheckInComplete={() => {
-            void queryClient.invalidateQueries({
-              queryKey: ["extension-status"],
-            });
-            void queryClient.invalidateQueries({
-              queryKey: ["activity-summary"],
-            });
-            if (isStandalone) {
-              notifyCloseModal();
-            } else {
-              setTab("today");
-              setReflectMode("hourly");
-            }
+            setReflectionOverlay("hourly");
           }}
         />
       ) : tab === "review" ? (

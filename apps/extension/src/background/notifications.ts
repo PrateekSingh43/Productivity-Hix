@@ -19,28 +19,34 @@ export async function showNativeCheckInNotification(options: {
   dominantContext?: string;
   isAwayReview?: boolean;
   awayTimeStr?: string;
+  isFocusReview?: boolean;
+  customTitle?: string;
+  customMessage?: string;
 }): Promise<string> {
   if (typeof chrome === "undefined" || !chrome.notifications?.create) {
     return LEGACY_NOTIFICATION_ID;
   }
 
-  let title = "ProductiveHix";
-  let message = "";
+  let title = options.customTitle || "ProductiveHix";
+  let message = options.customMessage || "";
 
-  if (options.isAwayReview) {
-    title = "ProductiveHix — Welcome back";
-    message = `You were inactive for ${options.awayTimeStr || "a while"}. What was the reason?`;
-  } else {
-    const activeMin = options.activeMinutes ?? 50;
-    message = options.dominantContext
-      ? `You've been active for ~${activeMin}m (mainly in ${options.dominantContext}). Quick check-in?`
-      : `You've been active for ~${activeMin}m. Time for a quick reflection?`;
+  if (!options.customMessage) {
+    if (options.isAwayReview) {
+      title = "ProductiveHix — Welcome back";
+      message = `You were inactive for ${options.awayTimeStr || "a while"}. What was the reason?`;
+    } else {
+      const activeMin = options.activeMinutes ?? 50;
+      message = options.dominantContext
+        ? `You've been active for ~${activeMin}m (mainly in ${options.dominantContext}). Quick check-in?`
+        : `You've been active for ~${activeMin}m. Time for a quick reflection?`;
+    }
   }
 
   const iconUrl = getNotificationIconUrl();
   
-  // Unique notification ID per trigger (append "away" if it's an away review)
-  const notificationId = `${CHECKIN_NOTIFICATION_PREFIX}${options.isAwayReview ? "away-" : ""}${Date.now()}`;
+  // Unique notification ID per trigger (away / focus / periodic)
+  const tag = options.isAwayReview ? "away-" : options.isFocusReview ? "focus-" : "";
+  const notificationId = `${CHECKIN_NOTIFICATION_PREFIX}${tag}${Date.now()}`;
 
   return new Promise((resolve) => {
     const notificationOptions: chrome.notifications.NotificationOptions<true> = {
@@ -82,6 +88,21 @@ export async function showNativeCheckInNotification(options: {
 }
 
 export const showCheckInNotification = showNativeCheckInNotification;
+
+export async function showFocusEndedNotification(options: {
+  taskTitle?: string;
+  durationMinutes?: number;
+}): Promise<string> {
+  const title = "ProductiveHix — Focus Session Complete";
+  const message = options.taskTitle
+    ? `You just wrapped up your focus session on "${options.taskTitle}". Time for a quick reflection?`
+    : `You just wrapped up your focus session. Time for a quick reflection?`;
+  return showNativeCheckInNotification({
+    customTitle: title,
+    customMessage: message,
+    isFocusReview: true,
+  });
+}
 
 async function handleReflectAction(notificationId: string) {
   try {
@@ -129,25 +150,7 @@ async function handleReflectAction(notificationId: string) {
     // Window focus optional
   }
 
-  // Loom / Grammarly Pattern: Display the reflection popup directly in the active webpage
-  try {
-    if (typeof chrome !== "undefined" && chrome.tabs?.query) {
-      const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-      const activeTab = tabs[0] || (targetWindowId ? (await chrome.tabs.query({ active: true, windowId: targetWindowId }))[0] : null);
-      if (activeTab?.id) {
-        const modalUrl = chrome.runtime.getURL(`popup.html?standalone=true&inModal=true&tab=reflect&mode=${targetMode}`);
-        await chrome.tabs.sendMessage(activeTab.id, {
-          type: "SHOW_REFLECTION_MODAL",
-          mode: targetMode,
-          url: modalUrl,
-        });
-      }
-    }
-  } catch (err) {
-    console.warn("[NOTIFICATION] In-page modal trigger skipped (e.g. non-web tab):", err);
-  }
-
-  // Try opening the extension popup directly if supported by browser
+  // 1. Primary Action: Try opening the main extension popup directly
   try {
     if (typeof chrome !== "undefined" && typeof chrome.action?.openPopup === "function") {
       if (targetWindowId) {
@@ -162,14 +165,33 @@ async function handleReflectAction(notificationId: string) {
       return;
     }
   } catch {
-    // Expected in Chrome service workers: openPopup requires direct toolbar gesture
+    // Expected in Chrome service workers when user did not click directly on extension toolbar
+  }
+
+  // 2. Fallback: Only if extension popup cannot be opened directly, open in-page overlay
+  try {
+    if (typeof chrome !== "undefined" && chrome.tabs?.query) {
+      const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      const activeTab = tabs[0] || (targetWindowId ? (await chrome.tabs.query({ active: true, windowId: targetWindowId }))[0] : null);
+      if (activeTab?.id && activeTab.url && !activeTab.url.startsWith("chrome://")) {
+        const modalUrl = chrome.runtime.getURL(`popup.html?standalone=true&inModal=true&tab=reflect&mode=${targetMode}`);
+        await chrome.tabs.sendMessage(activeTab.id, {
+          type: "SHOW_REFLECTION_MODAL",
+          mode: targetMode,
+          url: modalUrl,
+        });
+        return;
+      }
+    }
+  } catch (err) {
+    console.warn("[NOTIFICATION] In-page modal trigger skipped:", err);
   }
 
   // Visual prompt on the extension icon indicating reflection is ready
   try {
     if (typeof chrome !== "undefined" && chrome.action?.setBadgeText) {
       await chrome.action.setBadgeText({ text: "!" });
-      await chrome.action.setBadgeBackgroundColor({ color: "#8b5cf6" });
+      await chrome.action.setBadgeBackgroundColor({ color: "#3b82f6" });
     }
   } catch {
     // Ignore

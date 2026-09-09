@@ -77,8 +77,8 @@ export default function DevicesPage() {
     >
       {/* Header */}
       <motion.div variants={item}>
-        <h1 className="text-2xl font-semibold text-white">Devices</h1>
-        <p className="text-sm text-slate-500 mt-1">
+        <h1 className="text-2xl font-semibold text-text-primary tracking-tight">Devices</h1>
+        <p className="text-sm text-text-secondary mt-1">
           Collectors & Diagnostics
         </p>
       </motion.div>
@@ -86,22 +86,22 @@ export default function DevicesPage() {
       {/* 2-Column Grid */}
       <div className="grid grid-cols-12 gap-6">
         {/* Left Column: Device Cards & Pairing (6 cols) */}
-        <div className="col-span-6 space-y-6">
+        <div className="col-span-12 lg:col-span-6 space-y-6">
           {/* Desktop Agent Card */}
           <motion.div
             variants={item}
-            className="bg-[#111111] border border-white/[0.06] rounded-2xl p-6 space-y-4"
+            className="bg-bg-card border border-border-subtle rounded-2xl p-6 space-y-4 shadow-xs"
           >
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-white/[0.04] flex items-center justify-center text-indigo-400">
+                <div className="w-8 h-8 rounded-lg bg-bg-secondary border border-border-subtle flex items-center justify-center text-accent-default">
                   <Laptop size={16} />
                 </div>
                 <div>
-                  <h3 className="text-sm font-semibold text-white">
+                  <h3 className="text-sm font-semibold text-text-primary">
                     Windows Desktop Bridge
                   </h3>
-                  <p className="text-[11px] text-slate-500">
+                  <p className="text-[11px] text-text-tertiary">
                     ActivityWatch Native Collector
                   </p>
                 </div>
@@ -109,15 +109,15 @@ export default function DevicesPage() {
               <span
                 className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold ${
                   isRecentlyActive
-                    ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
-                    : "bg-amber-500/10 text-amber-400 border border-amber-500/20"
+                    ? "bg-emerald-500/10 text-emerald-500 dark:text-emerald-400 border border-emerald-500/20"
+                    : "bg-amber-500/10 text-amber-500 dark:text-amber-400 border border-amber-500/20"
                 }`}
               >
                 <span
                   className={`h-1.5 w-1.5 rounded-full ${
                     isRecentlyActive
-                      ? "bg-emerald-400 animate-pulse"
-                      : "bg-amber-400"
+                      ? "bg-emerald-500 dark:bg-emerald-400 animate-pulse"
+                      : "bg-amber-500 dark:bg-amber-400"
                   }`}
                 />
                 {isRecentlyActive ? "CONNECTED" : "IDLE"}
@@ -125,38 +125,38 @@ export default function DevicesPage() {
             </div>
 
             {/* Specs Grid */}
-            <div className="rounded-xl bg-white/[0.03] border border-white/[0.06] p-4 space-y-2 text-xs">
+            <div className="rounded-xl bg-bg-secondary border border-border-subtle p-4 space-y-2 text-xs">
               <div className="flex items-center justify-between">
-                <span className="text-slate-500">Local AW Server</span>
-                <span className="font-mono text-white">
+                <span className="text-text-secondary">Local AW Server</span>
+                <span className="font-mono text-text-primary">
                   http://127.0.0.1:5600
                 </span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-slate-500">Discovered Buckets</span>
-                <span className="font-mono text-indigo-300">window, afk, input</span>
+                <span className="text-text-secondary">Discovered Buckets</span>
+                <span className="font-mono text-accent-default">window, afk, input</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-slate-500">Last Sync</span>
-                <span className="font-mono text-slate-400">
+                <span className="text-text-secondary">Last Sync</span>
+                <span className="font-mono text-text-tertiary">
                   {telemetry.secondsAgo !== null
                     ? `${telemetry.secondsAgo}s ago`
                     : "Awaiting sync"}
                 </span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-slate-500">Presentation Stream</span>
-                <span className="font-mono text-indigo-400">
+                <span className="text-text-secondary">Presentation Stream</span>
+                <span className="font-mono text-accent-default">
                   {isConnected ? "Connected (:4000/ws)" : "Disconnected"}
                 </span>
               </div>
             </div>
 
-            <div className="flex items-center justify-between pt-2 border-t border-white/[0.06]">
+            <div className="flex items-center justify-between pt-2 border-t border-border-subtle">
               <button
                 onClick={handleManualSync}
                 disabled={syncing}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-slate-400 hover:text-white hover:bg-white/[0.06] transition-colors disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 rounded-xl border border-border-default bg-bg-secondary px-3 py-1.5 text-xs font-medium text-text-secondary hover:text-text-primary hover:bg-bg-tertiary transition-colors disabled:opacity-50"
               >
                 <RefreshCw
                   size={12}
@@ -164,7 +164,7 @@ export default function DevicesPage() {
                 />
                 Force Resync
               </button>
-              <span className="text-[11px] text-slate-600">
+              <span className="text-[11px] text-text-tertiary font-mono">
                 Desktop Agent v0.2.0
               </span>
             </div>
@@ -173,44 +173,44 @@ export default function DevicesPage() {
           {/* Browser Extension Card */}
           <motion.div
             variants={item}
-            className="bg-[#111111] border border-white/[0.06] rounded-2xl p-6 space-y-4"
+            className="bg-bg-card border border-border-subtle rounded-2xl p-6 space-y-4 shadow-xs"
           >
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-white/[0.04] flex items-center justify-center text-slate-300">
+                <div className="w-8 h-8 rounded-lg bg-bg-secondary border border-border-subtle flex items-center justify-center text-text-secondary">
                   <Globe size={16} />
                 </div>
                 <div>
-                  <h3 className="text-sm font-semibold text-white">
+                  <h3 className="text-sm font-semibold text-text-primary">
                     Browser Telemetry
                   </h3>
-                  <p className="text-[11px] text-slate-500">
+                  <p className="text-[11px] text-text-tertiary">
                     ProductiveHix Extension (Exclusive Browser Collector)
                   </p>
                 </div>
               </div>
-              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-500 dark:text-emerald-400 border border-emerald-500/20">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 dark:bg-emerald-400 animate-pulse" />
                 STREAMING
               </span>
             </div>
 
-            <div className="rounded-xl bg-white/[0.03] border border-white/[0.06] p-4 space-y-2 text-xs">
+            <div className="rounded-xl bg-bg-secondary border border-border-subtle p-4 space-y-2 text-xs">
               <div className="flex items-center justify-between">
-                <span className="text-slate-500">Active Source</span>
-                <span className="font-mono text-white">
+                <span className="text-text-secondary">Active Source</span>
+                <span className="font-mono text-text-primary">
                   Browser Extension (HTTPS Direct)
                 </span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-slate-500">Live Active Tab</span>
-                <span className="font-mono text-indigo-300 truncate max-w-[200px]">
+                <span className="text-text-secondary">Live Active Tab</span>
+                <span className="font-mono text-accent-default truncate max-w-[200px]">
                   {telemetry.activeDomain || "chatgpt.com"}
                 </span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-slate-500">Privacy Filter</span>
-                <span className="font-mono text-slate-400">
+                <span className="text-text-secondary">Privacy Filter</span>
+                <span className="font-mono text-text-tertiary">
                   Domain & Title sanitization active
                 </span>
               </div>
@@ -220,21 +220,21 @@ export default function DevicesPage() {
           {/* Desktop Bridge Pairing */}
           <motion.div
             variants={item}
-            className="bg-[#111111] border border-white/[0.06] rounded-2xl p-6 space-y-3.5"
+            className="bg-bg-card border border-border-subtle rounded-2xl p-6 space-y-3.5 shadow-xs"
           >
             <div className="flex items-center gap-2">
-              <ShieldCheck size={16} className="text-indigo-400" />
-              <h3 className="text-sm font-semibold text-white">
+              <ShieldCheck size={16} className="text-accent-default" />
+              <h3 className="text-sm font-semibold text-text-primary">
                 Pair New Desktop Bridge
               </h3>
             </div>
-            <p className="text-xs text-slate-400 leading-relaxed">
+            <p className="text-xs text-text-secondary leading-relaxed">
               Enter the authorization code displayed in your Windows terminal
               bridge to securely link telemetry.
             </p>
 
             {pairingSuccess ? (
-              <div className="flex items-center gap-2 p-3 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs">
+              <div className="flex items-center gap-2 p-3 rounded-xl bg-emerald-500/10 text-emerald-500 dark:text-emerald-400 border border-emerald-500/20 text-xs">
                 <CheckCircle2 size={14} />
                 <span>
                   Device authorized successfully! Telemetry stream verified.
@@ -253,12 +253,12 @@ export default function DevicesPage() {
                   }
                   placeholder="PHIX-XXXX"
                   maxLength={10}
-                  className="flex-1 rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 font-mono text-xs tracking-wider text-white outline-none focus:border-indigo-500/50 transition-colors uppercase"
+                  className="flex-1 rounded-xl border border-border-default bg-bg-secondary px-3 py-2 font-mono text-xs tracking-wider text-text-primary outline-none focus:border-accent-default transition-colors uppercase"
                 />
                 <button
                   type="submit"
                   disabled={pairingLoading || !pairingCode.trim()}
-                  className="rounded-xl bg-indigo-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-indigo-500 transition-colors disabled:opacity-50"
+                  className="rounded-xl bg-accent-default px-4 py-2 text-xs font-semibold text-white hover:bg-accent-hover transition-colors disabled:opacity-50 shadow-xs"
                 >
                   {pairingLoading ? "Verifying..." : "Authorize Device"}
                 </button>
@@ -266,7 +266,7 @@ export default function DevicesPage() {
             )}
 
             {pairingError && (
-              <div className="flex items-center gap-2 text-xs text-red-400">
+              <div className="flex items-center gap-2 text-xs text-error">
                 <AlertCircle size={14} />
                 <span>{pairingError}</span>
               </div>
@@ -275,26 +275,26 @@ export default function DevicesPage() {
         </div>
 
         {/* Right Column: Live Event Stream & Telemetry Diagnostics (6 cols) */}
-        <div className="col-span-6 space-y-6">
+        <div className="col-span-12 lg:col-span-6 space-y-6">
           {/* Real-time Ingestion Stream */}
           <motion.div
             variants={item}
-            className="bg-[#111111] border border-white/[0.06] rounded-2xl p-6 space-y-4"
+            className="bg-bg-card border border-border-subtle rounded-2xl p-6 space-y-4 shadow-xs"
           >
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2.5">
-                <Terminal size={15} className="text-indigo-400" />
-                <h3 className="text-xs font-semibold text-white uppercase tracking-wider">
+                <Terminal size={15} className="text-accent-default" />
+                <h3 className="text-xs font-semibold text-text-primary uppercase tracking-wider">
                   Live Telemetry Ingestion Stream
                 </h3>
               </div>
-              <div className="flex items-center gap-2 text-[10px] text-slate-500 font-mono">
+              <div className="flex items-center gap-2 text-[10px] text-text-tertiary font-mono">
                 <Radio
                   size={12}
                   className={
                     isConnected
-                      ? "text-emerald-400 animate-pulse"
-                      : "text-slate-600"
+                      ? "text-emerald-500 dark:text-emerald-400 animate-pulse"
+                      : "text-text-tertiary"
                   }
                 />
                 <span>{telemetry.eventCount} events buffered</span>
@@ -302,46 +302,46 @@ export default function DevicesPage() {
             </div>
 
             {/* Event Feed */}
-            <div className="rounded-xl bg-white/[0.02] border border-white/[0.06] p-3 space-y-2 max-h-[380px] overflow-y-auto font-mono text-[11px]">
+            <div className="rounded-xl bg-bg-inset border border-border-subtle p-3 space-y-2 max-h-[380px] overflow-y-auto font-mono text-[11px]">
               {telemetry.recentEvents.length > 0 ? (
                 telemetry.recentEvents.map((ev) => (
                   <div
                     key={ev.id}
-                    className="p-2.5 rounded-lg bg-white/[0.03] border border-white/[0.04] flex flex-col gap-1 text-slate-400"
+                    className="p-2.5 rounded-lg bg-bg-card border border-border-subtle flex flex-col gap-1 text-text-secondary"
                   >
                     <div className="flex items-center justify-between text-[10px]">
-                      <span className="text-indigo-400 font-semibold">
+                      <span className="text-accent-default font-semibold">
                         [{ev.source}:{ev.type}]
                       </span>
-                      <span className="text-slate-600">
+                      <span className="text-text-tertiary">
                         {new Date(ev.timestamp).toLocaleTimeString()}
                       </span>
                     </div>
-                    <span className="text-white truncate font-medium">
+                    <span className="text-text-primary truncate font-medium">
                       {ev.title}
                     </span>
                     {Boolean(ev.raw) && typeof ev.raw === "object" ? (
-                      <div className="text-[10px] text-slate-600 truncate pt-0.5 border-t border-white/[0.04]">
+                      <div className="text-[10px] text-text-tertiary truncate pt-0.5 border-t border-border-subtle">
                         {JSON.stringify(ev.raw)}
                       </div>
                     ) : null}
                   </div>
                 ))
               ) : (
-                <div className="p-8 text-center text-slate-600 text-xs space-y-1">
+                <div className="p-8 text-center text-text-tertiary text-xs space-y-1">
                   <p>
                     Awaiting incoming telemetry batches from desktop bridge...
                   </p>
-                  <p className="text-[10px] text-slate-700">
+                  <p className="text-[10px] text-text-tertiary/70">
                     Events will stream in real-time as you switch applications.
                   </p>
                 </div>
               )}
             </div>
 
-            <div className="flex items-center justify-between text-[11px] text-slate-600 pt-1">
+            <div className="flex items-center justify-between text-[11px] text-text-tertiary pt-1">
               <span>Presentation: WebSocket JSON | Ingestion: HTTPS Batch</span>
-              <span className="text-emerald-400 font-medium">
+              <span className="text-emerald-500 dark:text-emerald-400 font-medium">
                 Durable Local Queue
               </span>
             </div>
@@ -350,30 +350,30 @@ export default function DevicesPage() {
           {/* Architecture Card */}
           <motion.div
             variants={item}
-            className="bg-[#111111] border border-white/[0.06] rounded-2xl p-6 space-y-3"
+            className="bg-bg-card border border-border-subtle rounded-2xl p-6 space-y-3 shadow-xs"
           >
             <div className="flex items-center gap-2">
-              <Database size={15} className="text-indigo-400" />
-              <h3 className="text-xs font-semibold text-white uppercase tracking-wider">
+              <Database size={15} className="text-accent-default" />
+              <h3 className="text-xs font-semibold text-text-primary uppercase tracking-wider">
                 Storage & Pipeline Topology
               </h3>
             </div>
-            <div className="space-y-2 text-xs text-slate-400">
-              <div className="flex justify-between p-3 rounded-xl bg-white/[0.03] border border-white/[0.06]">
-                <span className="text-slate-500">Telemetry Engine</span>
-                <span className="text-white font-medium">
+            <div className="space-y-2 text-xs text-text-secondary">
+              <div className="flex justify-between p-3 rounded-xl bg-bg-secondary border border-border-subtle">
+                <span className="text-text-secondary">Telemetry Engine</span>
+                <span className="text-text-primary font-medium">
                   ActivityWatch REST (:5600)
                 </span>
               </div>
-              <div className="flex justify-between p-3 rounded-xl bg-white/[0.03] border border-white/[0.06]">
-                <span className="text-slate-500">Analytical Storage</span>
-                <span className="text-white font-medium">
+              <div className="flex justify-between p-3 rounded-xl bg-bg-secondary border border-border-subtle">
+                <span className="text-text-secondary">Analytical Storage</span>
+                <span className="text-text-primary font-medium">
                   DuckDB OLAP Columns
                 </span>
               </div>
-              <div className="flex justify-between p-3 rounded-xl bg-white/[0.03] border border-white/[0.06]">
-                <span className="text-slate-500">Source of Truth</span>
-                <span className="text-white font-medium">
+              <div className="flex justify-between p-3 rounded-xl bg-bg-secondary border border-border-subtle">
+                <span className="text-text-secondary">Source of Truth</span>
+                <span className="text-text-primary font-medium">
                   PostgreSQL (Relational)
                 </span>
               </div>

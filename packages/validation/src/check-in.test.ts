@@ -24,15 +24,21 @@ test("checkInCreateSchema validates structured check-in", () => {
   assert.deepEqual(parsed.reasons, []);
 });
 
-test("checkInCreateSchema strictly enforces 350 character limit on note", () => {
-  const note350 = "a".repeat(350);
+test("checkInCreateSchema strictly enforces 500 character limit on note", () => {
+  const note500 = "a".repeat(500);
   assert.doesNotThrow(() => {
-    checkInCreateSchema.parse({ note: note350 });
+    checkInCreateSchema.parse({ note: note500 });
   });
 
-  const note351 = "a".repeat(351);
+  const note501 = "a".repeat(501);
   assert.throws(() => {
-    checkInCreateSchema.parse({ note: note351 });
+    checkInCreateSchema.parse({ note: note501 });
+  });
+
+  // Emotional states including sleepy and angry
+  assert.doesNotThrow(() => {
+    checkInCreateSchema.parse({ state: "sleepy" });
+    checkInCreateSchema.parse({ state: "angry" });
   });
 });
 

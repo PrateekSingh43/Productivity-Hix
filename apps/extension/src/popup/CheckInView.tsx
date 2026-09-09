@@ -1,7 +1,79 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { CheckCircle2, ArrowLeft, ArrowRight, X, Sparkles } from "lucide-react";
 import type { Task, CheckInPatternCandidate } from "@repo/types";
 import { submitCheckIn } from "../api/client";
+
+function Step6Confirmation({
+  offlineQueued,
+  isStandalone,
+  onComplete,
+  notifyClose,
+}: {
+  offlineQueued: boolean;
+  isStandalone?: boolean;
+  onComplete: () => void;
+  notifyClose: () => void;
+}) {
+  useEffect(() => {
+    // Auto-close / auto-advance after 1.8 seconds
+    const timer = setTimeout(() => {
+      notifyClose();
+      onComplete();
+    }, 1800);
+    return () => clearTimeout(timer);
+  }, [notifyClose, onComplete]);
+
+  return (
+    <main className="content" style={{ justifyContent: "center", alignItems: "center", textAlign: "center", padding: "20px 10px" }}>
+      <div style={{ width: 44, height: 44, borderRadius: "50%", background: "var(--success-subtle)", display: "grid", placeItems: "center", color: "var(--success)", marginBottom: 12 }}>
+        <CheckCircle2 size={24} />
+      </div>
+      <h2 style={{ fontSize: 16, margin: "0 0 6px", color: "var(--text-primary)" }}>
+        {offlineQueued ? "Saved Offline" : "Check-in Saved"}
+      </h2>
+      <p style={{ fontSize: 11, color: "var(--text-secondary)", margin: "0 0 16px", maxWidth: 260 }}>
+        {offlineQueued
+          ? "Your reflection is securely queued locally and will sync when reconnected."
+          : "Your intentional reflection has been recorded."}
+      </p>
+
+      {isStandalone ? (
+        <div style={{ display: "flex", gap: 8, width: "100%", maxWidth: 280, marginTop: 4 }}>
+          <button
+            type="button"
+            className="secondary-button"
+            style={{ flex: 1, marginTop: 0 }}
+            onClick={onComplete}
+          >
+            View Today
+          </button>
+          <button
+            type="button"
+            className="primary-button"
+            style={{ flex: 1, marginTop: 0 }}
+            onClick={() => {
+              notifyClose();
+              onComplete();
+            }}
+          >
+            Done & Close
+          </button>
+        </div>
+      ) : (
+        <button
+          className="primary-button"
+          style={{ minWidth: 140 }}
+          onClick={() => {
+            notifyClose();
+            onComplete();
+          }}
+        >
+          Continue to Today
+        </button>
+      )}
+    </main>
+  );
+}
 
 interface CheckInViewProps {
   currentTask?: Task | null;
@@ -42,10 +114,12 @@ const EMOTIONAL_STATES = [
   { id: "calm", label: "Calm" },
   { id: "neutral", label: "Neutral" },
   { id: "happy", label: "Happy" },
+  { id: "motivated", label: "Motivated" },
+  { id: "sleepy", label: "Sleepy" },
   { id: "stressed", label: "Stressed" },
   { id: "anxious", label: "Anxious" },
   { id: "frustrated", label: "Frustrated" },
-  { id: "motivated", label: "Motivated" },
+  { id: "angry", label: "Angry" },
 ] as const;
 
 const ENERGY_LEVELS = [
@@ -151,7 +225,7 @@ export function CheckInView({
       state: state ?? "neutral",
       energy: energy ?? "medium",
       focus: focus ?? "focused",
-      note: note.trim().slice(0, 350) || null,
+      note: note.trim().slice(0, 500) || null,
       questionVersion: "v1",
       source: "extension_hourly",
       eventType: "PERIODIC",
@@ -176,44 +250,12 @@ export function CheckInView({
   // Step 6: Confirmation
   if (step === 6) {
     return (
-      <main className="content" style={{ justifyContent: "center", alignItems: "center", textAlign: "center", padding: "20px 10px" }}>
-        <div style={{ width: 44, height: 44, borderRadius: "50%", background: "rgba(52,211,153,0.15)", display: "grid", placeItems: "center", color: "#34d399", marginBottom: 12 }}>
-          <CheckCircle2 size={24} />
-        </div>
-        <h2 style={{ fontSize: 16, margin: "0 0 6px", color: "#f7f3fc" }}>
-          {offlineQueued ? "Saved Offline" : "Check-in Saved"}
-        </h2>
-        <p style={{ fontSize: 11, color: "#948ca2", margin: "0 0 16px", maxWidth: 260 }}>
-          {offlineQueued
-            ? "Your reflection is securely queued locally and will sync when reconnected."
-            : "Your intentional reflection has been recorded."}
-        </p>
-
-        {isStandalone ? (
-          <div style={{ display: "flex", gap: 8, width: "100%", maxWidth: 280, marginTop: 4 }}>
-            <button
-              type="button"
-              className="secondary-button"
-              style={{ flex: 1, marginTop: 0 }}
-              onClick={onComplete}
-            >
-              View Today
-            </button>
-            <button
-              type="button"
-              className="primary-button"
-              style={{ flex: 1, marginTop: 0 }}
-              onClick={notifyClose}
-            >
-              Done & Close
-            </button>
-          </div>
-        ) : (
-          <button className="primary-button" style={{ minWidth: 140 }} onClick={onComplete}>
-            Continue to Today
-          </button>
-        )}
-      </main>
+      <Step6Confirmation
+        offlineQueued={offlineQueued}
+        isStandalone={isStandalone}
+        onComplete={onComplete}
+        notifyClose={notifyClose}
+      />
     );
   }
 
@@ -236,19 +278,19 @@ export function CheckInView({
             else if (step === 4 && !shouldAskBlocker) setStep(2);
             else setStep((prev) => Math.max(1, prev - 1) as any);
           }}
-          style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "transparent", border: 0, color: "#90869e", fontSize: 11, cursor: "pointer", padding: 0 }}
+          style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "transparent", border: 0, color: "var(--text-muted)", fontSize: 11, cursor: "pointer", padding: 0 }}
         >
           <ArrowLeft size={13} /> {step === 1 ? "Cancel" : "Back"}
         </button>
 
-        <span style={{ fontSize: 10, color: "#a78bfa", fontWeight: 650, letterSpacing: ".08em", textTransform: "uppercase" }}>
+        <span style={{ fontSize: 10, color: "var(--accent-primary)", fontWeight: 650, letterSpacing: ".08em", textTransform: "uppercase" }}>
           Step {currentStepDisplay} of {totalSteps}
         </span>
 
         <button
           type="button"
           onClick={isStandalone ? notifyClose : onCancel}
-          style={{ background: "transparent", border: 0, color: "#90869e", padding: 0, cursor: "pointer" }}
+          style={{ background: "transparent", border: 0, color: "var(--text-muted)", padding: 0, cursor: "pointer" }}
           title="Exit check-in"
         >
           <X size={14} />
@@ -256,7 +298,7 @@ export function CheckInView({
       </div>
 
       {error && (
-        <div style={{ padding: "8px 10px", background: "rgba(244,63,94,0.12)", border: "1px solid rgba(244,63,94,0.25)", borderRadius: 8, fontSize: 11, color: "#ffc6cf" }}>
+        <div style={{ padding: "8px 10px", background: "var(--danger-subtle)", border: "1px solid rgba(244,63,94,0.25)", borderRadius: 8, fontSize: 11, color: "var(--danger)" }}>
           {error}
         </div>
       )}
@@ -264,11 +306,11 @@ export function CheckInView({
       {/* STEP 1: Assessment */}
       {step === 1 && (
         <section className="reflect-card" style={{ padding: 14 }}>
-          <span className="section-kicker" style={{ color: "#a78bfa" }}>HOURLY CHECK-IN</span>
-          <h2 style={{ fontSize: 15, margin: "6px 0 12px", color: "#faf7ff" }}>How did the last hour go?</h2>
+          <span className="section-kicker" style={{ color: "var(--accent-primary)" }}>HOURLY CHECK-IN</span>
+          <h2 style={{ fontSize: 15, margin: "6px 0 12px", color: "var(--text-primary)" }}>How did the last hour go?</h2>
           {currentTask && (
-            <p style={{ margin: "0 0 12px", fontSize: 11, color: "#948ca2" }}>
-              Target task: <strong style={{ color: "#f5f0fb" }}>{currentTask.title}</strong>
+            <p style={{ margin: "0 0 12px", fontSize: 11, color: "var(--text-secondary)" }}>
+              Target task: <strong style={{ color: "var(--text-primary)" }}>{currentTask.title}</strong>
             </p>
           )}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
@@ -284,9 +326,9 @@ export function CheckInView({
                   fontSize: 11,
                   textAlign: "center",
                   justifyContent: "center",
-                  background: assessment === item.id ? "rgba(139,92,246,0.3)" : undefined,
-                  borderColor: assessment === item.id ? "#a78bfa" : undefined,
-                  color: assessment === item.id ? "#faf7ff" : undefined,
+                  background: assessment === item.id ? "var(--bg-active)" : undefined,
+                  borderColor: assessment === item.id ? "var(--accent-primary)" : undefined,
+                  color: assessment === item.id ? "var(--accent-primary)" : undefined,
                 }}
               >
                 {item.label}
@@ -302,7 +344,7 @@ export function CheckInView({
                 style={{
                   background: "transparent",
                   border: 0,
-                  color: "#948ca2",
+                  color: "var(--text-secondary)",
                   fontSize: 11,
                   cursor: "pointer",
                   textDecoration: "underline",
@@ -318,8 +360,8 @@ export function CheckInView({
       {/* STEP 2: Alignment */}
       {step === 2 && (
         <section className="reflect-card" style={{ padding: 14 }}>
-          <span className="section-kicker" style={{ color: "#a78bfa" }}>INTENTIONALITY</span>
-          <h2 style={{ fontSize: 15, margin: "6px 0 12px", color: "#faf7ff" }}>
+          <span className="section-kicker" style={{ color: "var(--accent-primary)" }}>INTENTIONALITY</span>
+          <h2 style={{ fontSize: 15, margin: "6px 0 12px", color: "var(--text-primary)" }}>
             {currentTask ? "Were you working on what you intended?" : "Did this block feel intentional?"}
           </h2>
           <div style={{ display: "flex", gap: 6 }}>
@@ -336,9 +378,9 @@ export function CheckInView({
                   fontSize: 11,
                   textAlign: "center",
                   justifyContent: "center",
-                  background: alignment === item.id ? "rgba(139,92,246,0.3)" : undefined,
-                  borderColor: alignment === item.id ? "#a78bfa" : undefined,
-                  color: alignment === item.id ? "#faf7ff" : undefined,
+                  background: alignment === item.id ? "var(--bg-active)" : undefined,
+                  borderColor: alignment === item.id ? "var(--accent-primary)" : undefined,
+                  color: alignment === item.id ? "var(--accent-primary)" : undefined,
                 }}
               >
                 {item.label}
@@ -351,9 +393,9 @@ export function CheckInView({
       {/* STEP 3: Conditional Blocker Question */}
       {step === 3 && shouldAskBlocker && (
         <section className="reflect-card" style={{ padding: 14 }}>
-          <span className="section-kicker" style={{ color: "#fbbf24" }}>ADAPTIVE REFLECTION</span>
-          <h2 style={{ fontSize: 15, margin: "6px 0 10px", color: "#faf7ff" }}>What got in the way?</h2>
-          <p style={{ fontSize: 10.5, color: "#948ca2", margin: "0 0 10px" }}>Select any that apply:</p>
+          <span className="section-kicker" style={{ color: "var(--warning)" }}>ADAPTIVE REFLECTION</span>
+          <h2 style={{ fontSize: 15, margin: "6px 0 10px", color: "var(--text-primary)" }}>What got in the way?</h2>
+          <p style={{ fontSize: 10.5, color: "var(--text-secondary)", margin: "0 0 10px" }}>Select any that apply:</p>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
             {BLOCKER_REASONS.map((item) => {
               const active = selectedReasons.includes(item.id);
@@ -365,9 +407,9 @@ export function CheckInView({
                   style={{
                     padding: "6px 10px",
                     borderRadius: 999,
-                    border: `1px solid ${active ? "#fbbf24" : "rgba(255,255,255,0.1)"}`,
-                    background: active ? "rgba(251,191,36,0.18)" : "rgba(255,255,255,0.03)",
-                    color: active ? "#fef3c7" : "#c4bdd4",
+                    border: `1px solid ${active ? "var(--warning)" : "var(--border-subtle)"}`,
+                    background: active ? "var(--warning-subtle)" : "var(--bg-subtle)",
+                    color: active ? "var(--warning)" : "var(--text-secondary)",
                     fontSize: 10.5,
                     cursor: "pointer",
                   }}
@@ -380,11 +422,11 @@ export function CheckInView({
 
           {/* Longitudinal Deeper Reflection Prompt */}
           {activeDeeperQuestion && (
-            <div style={{ marginTop: 12, padding: 10, borderRadius: 8, background: "rgba(139,92,246,0.12)", border: "1px solid rgba(167,139,250,0.22)" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 5, color: "#d8c6ff", fontSize: 10, fontWeight: 700, marginBottom: 4 }}>
+            <div style={{ marginTop: 12, padding: 10, borderRadius: 8, background: "var(--accent-subtle)", border: "1px solid var(--accent-border)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 5, color: "var(--accent-primary)", fontSize: 10, fontWeight: 700, marginBottom: 4 }}>
                 <Sparkles size={12} /> RECURRING PATTERN
               </div>
-              <p style={{ margin: "0 0 8px", fontSize: 11, color: "#f5f0fb" }}>{activeDeeperQuestion.prompt}</p>
+              <p style={{ margin: "0 0 8px", fontSize: 11, color: "var(--text-primary)" }}>{activeDeeperQuestion.prompt}</p>
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 {activeDeeperQuestion.options.map((opt, i) => {
                   const sel = deeperAnswers[activeDeeperQuestion.id] === opt;
@@ -397,9 +439,9 @@ export function CheckInView({
                         padding: "5px 8px",
                         textAlign: "left",
                         borderRadius: 6,
-                        border: `1px solid ${sel ? "#a78bfa" : "rgba(255,255,255,0.08)"}`,
-                        background: sel ? "rgba(139,92,246,0.25)" : "transparent",
-                        color: sel ? "#faf7ff" : "#b0a8c2",
+                        border: `1px solid ${sel ? "var(--accent-primary)" : "var(--border-subtle)"}`,
+                        background: sel ? "var(--accent-subtle)" : "transparent",
+                        color: sel ? "var(--text-primary)" : "var(--text-secondary)",
                         fontSize: 10.5,
                       }}
                     >
@@ -421,8 +463,8 @@ export function CheckInView({
       {step === 4 && (
         <section className="reflect-card" style={{ padding: 14, display: "flex", flexDirection: "column", gap: 12 }}>
           <div>
-            <span className="section-kicker" style={{ color: "#a78bfa" }}>STATE OF MIND</span>
-            <h2 style={{ fontSize: 14, margin: "4px 0 8px", color: "#faf7ff" }}>Primary state</h2>
+            <span className="section-kicker" style={{ color: "var(--accent-primary)" }}>STATE OF MIND</span>
+            <h2 style={{ fontSize: 14, margin: "4px 0 8px", color: "var(--text-primary)" }}>Primary state</h2>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
               {EMOTIONAL_STATES.map((item) => {
                 const active = state === item.id;
@@ -434,9 +476,9 @@ export function CheckInView({
                     style={{
                       padding: "5px 9px",
                       borderRadius: 999,
-                      border: `1px solid ${active ? "#a78bfa" : "rgba(255,255,255,0.1)"}`,
-                      background: active ? "rgba(139,92,246,0.25)" : "rgba(255,255,255,0.03)",
-                      color: active ? "#faf7ff" : "#c4bdd4",
+                      border: `1px solid ${active ? "var(--accent-primary)" : "var(--border-subtle)"}`,
+                      background: active ? "var(--accent-subtle)" : "var(--bg-subtle)",
+                      color: active ? "var(--accent-primary)" : "var(--text-secondary)",
                       fontSize: 10.5,
                       cursor: "pointer",
                     }}
@@ -449,7 +491,7 @@ export function CheckInView({
           </div>
 
           <div>
-            <span className="section-kicker" style={{ color: "#a78bfa" }}>ENERGY LEVEL</span>
+            <span className="section-kicker" style={{ color: "var(--accent-primary)" }}>ENERGY LEVEL</span>
             <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
               {ENERGY_LEVELS.map((item) => {
                 const active = energy === item.id;
@@ -466,9 +508,9 @@ export function CheckInView({
                       fontSize: 10.5,
                       textAlign: "center",
                       justifyContent: "center",
-                      background: active ? "rgba(139,92,246,0.25)" : undefined,
-                      borderColor: active ? "#a78bfa" : undefined,
-                      color: active ? "#faf7ff" : undefined,
+                      background: active ? "var(--bg-active)" : undefined,
+                      borderColor: active ? "var(--accent-primary)" : undefined,
+                      color: active ? "var(--accent-primary)" : undefined,
                     }}
                   >
                     {item.label}
@@ -479,7 +521,7 @@ export function CheckInView({
           </div>
 
           <div>
-            <span className="section-kicker" style={{ color: "#a78bfa" }}>FOCUS LEVEL</span>
+            <span className="section-kicker" style={{ color: "var(--accent-primary)" }}>FOCUS LEVEL</span>
             <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
               {FOCUS_LEVELS.map((item) => {
                 const active = focus === item.id;
@@ -496,9 +538,9 @@ export function CheckInView({
                       fontSize: 10.5,
                       textAlign: "center",
                       justifyContent: "center",
-                      background: active ? "rgba(139,92,246,0.25)" : undefined,
-                      borderColor: active ? "#a78bfa" : undefined,
-                      color: active ? "#faf7ff" : undefined,
+                      background: active ? "var(--bg-active)" : undefined,
+                      borderColor: active ? "var(--accent-primary)" : undefined,
+                      color: active ? "var(--accent-primary)" : undefined,
                     }}
                   >
                     {item.label}
@@ -514,29 +556,29 @@ export function CheckInView({
         </section>
       )}
 
-      {/* STEP 5: Optional Note (0 / 350) */}
+      {/* STEP 5: Optional Note (0 / 500) */}
       {step === 5 && (
         <section className="reflect-card" style={{ padding: 14 }}>
-          <span className="section-kicker" style={{ color: "#a78bfa" }}>OPTIONAL NOTE</span>
-          <h2 style={{ fontSize: 15, margin: "6px 0 6px", color: "#faf7ff" }}>Anything else?</h2>
-          <p style={{ fontSize: 10.5, color: "#948ca2", margin: "0 0 10px" }}>
-            Add brief context about this block (max 350 characters):
+          <span className="section-kicker" style={{ color: "var(--accent-primary)" }}>OPTIONAL NOTE</span>
+          <h2 style={{ fontSize: 15, margin: "6px 0 6px", color: "var(--text-primary)" }}>Anything else?</h2>
+          <p style={{ fontSize: 10.5, color: "var(--text-secondary)", margin: "0 0 10px" }}>
+            Add brief context about this block (max 500 characters):
           </p>
 
           <div style={{ position: "relative" }}>
             <textarea
               value={note}
-              maxLength={350}
-              onChange={(e) => setNote(e.target.value.slice(0, 350))}
+              maxLength={500}
+              onChange={(e) => setNote(e.target.value.slice(0, 500))}
               placeholder="e.g. Cleared difficult bug in router"
               rows={4}
               style={{
                 width: "100%",
                 padding: "8px 10px",
                 borderRadius: 8,
-                border: "1px solid rgba(255,255,255,0.12)",
-                background: "rgba(0,0,0,0.25)",
-                color: "#f5f0fb",
+                border: "1px solid var(--border-default)",
+                background: "var(--bg-surface-elevated)",
+                color: "var(--text-primary)",
                 fontSize: 11,
                 fontFamily: "inherit",
                 resize: "none",
@@ -544,8 +586,8 @@ export function CheckInView({
                 boxSizing: "border-box",
               }}
             />
-            <div style={{ textAlign: "right", fontSize: 9.5, color: note.length >= 350 ? "#fb7171" : "#81798d", marginTop: 4 }}>
-              {note.length} / 350
+            <div style={{ textAlign: "right", fontSize: 9.5, color: note.length >= 500 ? "var(--danger)" : "var(--text-muted)", marginTop: 4 }}>
+              {note.length} / 500
             </div>
           </div>
 

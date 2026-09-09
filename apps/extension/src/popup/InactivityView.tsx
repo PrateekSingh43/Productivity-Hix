@@ -16,11 +16,17 @@ export function InactivityView({
   const [reason, setReason] = useState("");
 
   const handleFinish = () => {
-    if (isStandalone) {
-      window.close();
-    } else {
-      onComplete();
-    }
+    try {
+      if (typeof window !== "undefined") {
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: "PRODUCTIVEHIX_CLOSE_MODAL" }, "*");
+        }
+        if (isStandalone) {
+          window.close();
+        }
+      }
+    } catch {}
+    onComplete();
   };
 
   const submit = useMutation({
@@ -53,7 +59,7 @@ export function InactivityView({
             gap: 4,
             background: "transparent",
             border: 0,
-            color: "#90869e",
+            color: "var(--text-muted)",
             fontSize: 11,
             cursor: "pointer",
             padding: 0,
@@ -72,34 +78,36 @@ export function InactivityView({
 
       <section className="hero-card">
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#a78bfa" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--accent-primary)" }}>
             <Coffee size={18} />
-            <span style={{ fontSize: 12, fontWeight: 500, color: "#faf7ff" }}>
+            <span style={{ fontSize: 12, fontWeight: 500, color: "var(--text-primary)" }}>
               You were inactive for a while.
             </span>
           </div>
           
-          <p style={{ fontSize: 11.5, color: "#90869e", margin: 0, lineHeight: 1.4 }}>
+          <p style={{ fontSize: 11.5, color: "var(--text-secondary)", margin: 0, lineHeight: 1.4 }}>
             ProductiveHix detected a long gap in your activity outside of your sleep schedule. What was the reason?
           </p>
 
           <div style={{ position: "relative" }}>
             <textarea
               value={reason}
-              onChange={(e) => setReason(e.target.value.slice(0, 350))}
+              maxLength={500}
+              onChange={(e) => setReason(e.target.value.slice(0, 500))}
               placeholder="e.g., Went for a walk, took a lunch break, read a book..."
               disabled={submit.isPending}
               style={{
                 width: "100%",
                 minHeight: 120,
-                background: "#121019",
-                border: "1px solid rgba(167,139,250,0.3)",
+                background: "var(--bg-surface-elevated)",
+                border: "1px solid var(--border-default)",
                 borderRadius: 8,
                 padding: "10px",
-                color: "#faf7ff",
+                color: "var(--text-primary)",
                 fontSize: 12,
                 resize: "none",
                 outline: "none",
+                boxSizing: "border-box",
               }}
             />
             <div style={{
@@ -107,9 +115,9 @@ export function InactivityView({
               bottom: 8,
               right: 10,
               fontSize: 10,
-              color: reason.length >= 350 ? "#ef4444" : "#6c667a"
+              color: reason.length >= 500 ? "var(--danger)" : "var(--text-muted)"
             }}>
-              {reason.length}/350
+              {reason.length}/500
             </div>
           </div>
 

@@ -61,9 +61,14 @@ export class ActivityEngine {
 
       // 1. Time Jump Detection (Fallback for Sleep/Hibernate)
       // If the JS event loop was paused for more than 10 seconds, the OS was suspended or severely blocked.
-      // We do not count this time towards any activity or inactivity threshold.
       if (dtMs > 10000) {
-        console.log(`[ActivityEngine] Detected massive time jump of ${dtMs}ms. OS likely slept. Ignoring delta.`);
+        console.log(`[ActivityEngine] Detected massive time jump of ${dtMs}ms. OS slept or resumed.`);
+        import("./inactivity-engine").then(({ inactivityEngine }) => {
+          void inactivityEngine.handleWakeupGap(dtMs, now);
+        }).catch(() => {});
+        import("./reflection-engine").then(({ reflectionEngine }) => {
+          void reflectionEngine.handleWakeupGap(dtMs, now);
+        }).catch(() => {});
         return; 
       }
 

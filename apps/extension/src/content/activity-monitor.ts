@@ -61,13 +61,13 @@ function showReflectionModal(url: string) {
   host.style.maxHeight = "calc(100vh - 28px)";
   host.style.maxWidth = "calc(100vw - 32px)";
   host.style.zIndex = "2147483647";
-  host.style.boxShadow = "0 20px 50px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(167, 139, 250, 0.3)";
+  host.style.boxShadow = "0 20px 50px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.12)";
   host.style.borderRadius = "14px";
   host.style.overflow = "hidden";
   host.style.transition = "transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease";
   host.style.transform = "translateY(-12px) scale(0.97)";
   host.style.opacity = "0";
-  host.style.background = "#0b0a10";
+  host.style.background = "#09090b";
 
   const shadow = host.attachShadow({ mode: "open" });
 
@@ -77,7 +77,7 @@ function showReflectionModal(url: string) {
   iframe.style.height = "100%";
   iframe.style.border = "none";
   iframe.style.display = "block";
-  iframe.style.background = "#0b0a10";
+  iframe.style.background = "#09090b";
   iframe.style.colorScheme = "dark";
   shadow.appendChild(iframe);
 
