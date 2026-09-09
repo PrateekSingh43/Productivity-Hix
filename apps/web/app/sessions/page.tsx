@@ -5,7 +5,6 @@ import { PageContainer } from "../../components/layout/page-container";
 import { PageHeader } from "../../components/layout/page-header";
 import { Section } from "../../components/layout/section";
 import { SectionHeader } from "../../components/layout/section-header";
-import { StatCard } from "../../components/primitives/stat-card";
 import { EmptyState } from "../../components/primitives/empty-state";
 import { CurrentFocusCard } from "../../components/primitives/current-focus-card";
 import { Clock, Zap, Target, History, CheckCircle2, Play } from "lucide-react";
@@ -47,7 +46,7 @@ export default function SessionsPage() {
         if (found) setSelectedTask(found);
       }
     } else if (activeSessionId && !liveActiveSession) {
-      // Session ended externally (e.g. from extension)
+      // Session ended externally
       setSessionActive(false);
       setActiveSessionId(null);
       setElapsedSeconds(0);
@@ -134,15 +133,15 @@ export default function SessionsPage() {
   return (
     <PageContainer>
       <PageHeader
-        title="Focus & Sessions"
-        subtitle="Deliberate execution blocks — comparing intention to observed telemetry and outcomes"
+        title="Sessions"
+        subtitle="Deliberate focus execution blocks and telemetry observation"
         breadcrumbs={[
-          { label: "ProductiveHix", href: "/" },
-          { label: "Focus & Sessions" },
+          { label: "Home", href: "/" },
+          { label: "Sessions" },
         ]}
       />
 
-      {/* 1. CURRENT FOCUS EXECUTION CARD */}
+      {/* 1. VISUAL ANCHOR: CURRENT FOCUS CARD */}
       <Section>
         <CurrentFocusCard
           isActive={sessionActive}
@@ -160,52 +159,71 @@ export default function SessionsPage() {
         />
       </Section>
 
-      {/* 2. Metric Summary */}
+      {/* 2. METRIC SUMMARY RIBBON */}
       <Section>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <StatCard
-            label="Total Sessions"
-            value={completedSessions.length}
-            subtext={
-              completedSessions.length > 0
-                ? `${totalMinutes}m total deliberate work`
-                : "No completed sessions yet"
-            }
-            state={completedSessions.length > 0 ? "ready" : "empty"}
-            icon={Zap}
-          />
-          <StatCard
-            label="Avg Duration"
-            value={avgMinutes > 0 ? `${avgMinutes}m` : "—"}
-            subtext="Calculated across completed blocks"
-            state={avgMinutes > 0 ? "ready" : "empty"}
-            icon={Clock}
-          />
-          <StatCard
-            label="Task Alignment"
-            value={completedSessions.length > 0 ? `${taskAlignmentPercent}%` : "—"}
-            subtext="Linked directly to planned priorities"
-            state={completedSessions.length > 0 ? "ready" : "empty"}
-            icon={Target}
-          />
+        <div className="rounded-xl border border-border-subtle bg-bg-card grid grid-cols-2 sm:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-border-subtle overflow-hidden">
+          <div className="p-4 sm:p-5">
+            <span className="text-xs text-text-muted block mb-1">Total Sessions</span>
+            <div className="text-xl sm:text-2xl font-semibold font-mono tabular-nums text-text-primary">
+              {completedSessions.length}
+            </div>
+            <p className="text-[11px] text-text-muted mt-0.5">
+              Completed focus blocks
+            </p>
+          </div>
+
+          <div className="p-4 sm:p-5">
+            <span className="text-xs text-text-muted block mb-1">Total Focus Time</span>
+            <div className="text-xl sm:text-2xl font-semibold font-mono tabular-nums text-emerald-600 dark:text-emerald-400">
+              {totalMinutes}m
+            </div>
+            <p className="text-[11px] text-text-muted mt-0.5">
+              Deliberate work recorded
+            </p>
+          </div>
+
+          <div className="p-4 sm:p-5">
+            <span className="text-xs text-text-muted block mb-1">Avg Duration</span>
+            <div className="text-xl sm:text-2xl font-semibold font-mono tabular-nums text-text-primary">
+              {avgMinutes > 0 ? `${avgMinutes}m` : "—"}
+            </div>
+            <p className="text-[11px] text-text-muted mt-0.5">
+              Per completed block
+            </p>
+          </div>
+
+          <div className="p-4 sm:p-5">
+            <span className="text-xs text-text-muted block mb-1">Task Alignment</span>
+            <div className="text-xl sm:text-2xl font-semibold font-mono tabular-nums text-text-primary">
+              {completedSessions.length > 0 ? `${taskAlignmentPercent}%` : "—"}
+            </div>
+            <p className="text-[11px] text-text-muted mt-0.5">
+              Linked to deliberate goals
+            </p>
+          </div>
         </div>
       </Section>
 
-      {/* 3. Session History */}
+      {/* 3. SESSION HISTORY */}
       <Section>
-        <SectionHeader
-          title="Session History"
-          description="Detailed logs of deliberate focus blocks, self-reported blockers, and observed activity"
-        />
+        <div className="flex items-center justify-between mb-3">
+          <SectionHeader
+            title="Session History"
+            description="Chronological log of deliberate focus blocks and observed activity"
+          />
+          <span className="text-xs font-mono text-text-muted">
+            {sessions.length} {sessions.length === 1 ? "session" : "sessions"}
+          </span>
+        </div>
 
         {sessions.length === 0 ? (
           <EmptyState
             icon={History}
             title="No Sessions Recorded Yet"
-            description="Start a focus session above or from the browser extension to begin capturing deliberate work periods and comparing intention with telemetry."
+            description="Start a focus block above or from the browser extension to begin capturing deliberate work periods."
           />
         ) : (
-          <div className="rounded-[var(--radius-md)] border border-border-subtle bg-bg-card overflow-hidden divide-y divide-border-subtle shadow-xs">
+          <div className="rounded-xl border border-border-subtle bg-bg-card divide-y divide-border-subtle overflow-hidden">
             {sessions.map((sess) => {
               const task = tasks.find((t) => t.id === sess.taskId);
               const isLive = !sess.endedAt;
@@ -214,40 +232,40 @@ export default function SessionsPage() {
               return (
                 <div
                   key={sess.id}
-                  className="p-3.5 sm:p-4 flex items-center justify-between gap-3 transition-colors hover:bg-bg-secondary/60"
+                  className="px-4 sm:px-5 py-3.5 flex items-center justify-between gap-3 hover:bg-bg-secondary/40 transition-colors"
                 >
                   <div className="flex items-center gap-3 min-w-0">
                     <div
                       className={`h-7 w-7 rounded-full flex items-center justify-center shrink-0 ${
                         isLive
-                          ? "bg-emerald-500/15 text-emerald-500 dark:text-emerald-400 border border-emerald-500/30"
-                          : "bg-bg-secondary text-text-secondary border border-border-default"
+                          ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30"
+                          : "bg-bg-secondary text-text-muted border border-border-subtle"
                       }`}
                     >
-                      {isLive ? <Play size={12} fill="currentColor" /> : <CheckCircle2 size={13} />}
+                      {isLive ? <Play size={11} className="fill-current animate-pulse" /> : <CheckCircle2 size={13} />}
                     </div>
 
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="text-xs font-semibold text-text-primary truncate">
+                        <span className="text-sm font-medium text-text-primary truncate">
                           {task?.title ?? sess.notes ?? "Intentional Focus Session"}
                         </span>
                         {isLive && (
-                          <span className="text-[9px] font-mono uppercase tracking-wider text-emerald-500 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/25 px-1.5 py-0.5 rounded">
-                            Active
+                          <span className="text-[10px] font-mono uppercase tracking-wider text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/25 px-1.5 py-0.5 rounded">
+                            Live
                           </span>
                         )}
                       </div>
-                      <span className="text-[11px] text-text-tertiary">
+                      <span className="text-xs text-text-muted font-mono">
                         {format(new Date(sess.startedAt), "MMM d, HH:mm")}
-                        {sess.endedAt ? ` · ${durationMins} min` : " · Running now"}
+                        {sess.endedAt ? ` · ${durationMins}m` : " · Running now"}
                       </span>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2 shrink-0 font-mono text-xs text-text-secondary">
+                  <div className="flex items-center gap-2 shrink-0 font-mono text-xs text-text-muted">
                     {isLive ? (
-                      <span className="text-emerald-500 dark:text-emerald-400 font-bold">Live</span>
+                      <span className="text-emerald-600 dark:text-emerald-400 font-semibold">Running</span>
                     ) : (
                       <span>{durationMins}m</span>
                     )}

@@ -50,15 +50,15 @@ export function ActiveSessionBanner({ sessions, tasks, onSelectTask }: ActiveSes
   };
 
   return (
-    <div className="rounded-[var(--radius-lg)] border border-emerald-500/30 bg-emerald-500/5 p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-2xs animate-in fade-in slide-in-from-top-2 duration-300">
+    <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 animate-in fade-in slide-in-from-top-2 duration-300">
       <div className="flex items-center gap-3.5 min-w-0">
-        <div className="h-10 w-10 rounded-full bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-500 shrink-0">
+        <div className="h-10 w-10 rounded-full bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
           <Activity size={18} className="animate-pulse" />
         </div>
 
         <div className="min-w-0 space-y-0.5">
           <div className="flex items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[var(--radius-sm)] text-[10px] font-bold tracking-wider uppercase bg-emerald-500/15 text-emerald-500 border border-emerald-500/25">
+            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/25">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-ping" />
               Focus Session In Progress
             </span>
@@ -75,17 +75,17 @@ export function ActiveSessionBanner({ sessions, tasks, onSelectTask }: ActiveSes
 
       <div className="flex items-center gap-3 shrink-0 self-end sm:self-auto">
         <div className="text-right">
-          <div className="font-mono text-base sm:text-lg font-bold tracking-tight text-emerald-500">
+          <div className="font-mono text-base sm:text-lg font-semibold tabular-nums tracking-tight text-emerald-600 dark:text-emerald-400">
             {formatTimer(elapsedSeconds)}
           </div>
-          <span className="text-[10px] text-text-muted">elapsed</span>
+          <span className="text-[11px] text-text-muted font-mono">elapsed</span>
         </div>
 
         <div className="flex items-center gap-2">
           {linkedTask && onSelectTask && (
             <button
               onClick={() => onSelectTask(linkedTask)}
-              className="inline-flex items-center gap-1 px-3 py-2 rounded-[var(--radius-sm)] border border-border-subtle bg-bg-card text-xs font-medium text-text-secondary hover:text-text-primary hover:border-border-hover transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md border border-border-subtle bg-bg-card text-xs font-medium text-text-secondary hover:text-text-primary hover:border-border-hover transition-colors cursor-pointer"
             >
               <ExternalLink size={13} />
               Details
@@ -95,7 +95,7 @@ export function ActiveSessionBanner({ sessions, tasks, onSelectTask }: ActiveSes
           <button
             onClick={() => endSessionMutation.mutate(activeSession.id)}
             disabled={endSessionMutation.isPending}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-[var(--radius-sm)] bg-rose-500/15 border border-rose-500/30 text-xs font-semibold text-rose-500 hover:bg-rose-500/25 transition-colors disabled:opacity-50 cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-md bg-rose-500/15 border border-rose-500/30 text-xs font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-500/25 transition-colors disabled:opacity-50 cursor-pointer"
           >
             <Square size={13} />
             {endSessionMutation.isPending ? "Ending..." : "End Session"}

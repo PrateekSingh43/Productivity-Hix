@@ -36,11 +36,11 @@ interface TaskDetailDrawerProps {
   onClose: () => void;
 }
 
-const PRIORITIES: Array<{ label: string; value: TaskPriority; color: string }> = [
-  { label: "High", value: "high", color: "text-rose-500" },
-  { label: "Medium", value: "medium", color: "text-amber-500" },
-  { label: "Low", value: "low", color: "text-blue-500" },
-  { label: "None", value: "none", color: "text-text-muted" },
+const PRIORITIES: Array<{ label: string; value: TaskPriority }> = [
+  { label: "High", value: "high" },
+  { label: "Medium", value: "medium" },
+  { label: "Low", value: "low" },
+  { label: "None", value: "none" },
 ];
 
 const STATUSES: Array<{ label: string; value: TaskStatus }> = [
@@ -225,21 +225,21 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
     <div className="fixed inset-0 z-50 overflow-hidden flex justify-end">
       {/* Backdrop */}
       <div
-        className="fixed inset-0 bg-black/50 backdrop-blur-xs transition-opacity animate-in fade-in duration-200"
+        className="fixed inset-0 bg-black/40 backdrop-blur-xs transition-opacity animate-in fade-in duration-200"
         onClick={onClose}
       />
 
-      {/* Drawer Body */}
+      {/* Surface 2 Drawer Body */}
       <div className="relative w-full max-w-xl bg-bg-card border-l border-border-subtle shadow-2xl h-full flex flex-col z-10 animate-in slide-in-from-right duration-200 text-text-primary">
         {/* Header Bar */}
-        <div className="p-4 sm:p-5 border-b border-border-subtle flex items-center justify-between gap-3 bg-bg-card">
+        <div className="px-5 py-4 border-b border-border-subtle flex items-center justify-between gap-3 bg-bg-card">
           <div className="flex items-center gap-3 min-w-0">
             {/* Mark Done Checkbox */}
             <button
               type="button"
               onClick={() => setStatus(status === "done" ? "todo" : "done")}
               className={`shrink-0 transition-transform active:scale-95 cursor-pointer ${
-                isDone ? "text-emerald-500 hover:text-emerald-600" : "text-text-muted hover:text-text-primary"
+                isDone ? "text-emerald-500 hover:text-emerald-600" : "text-text-muted hover:text-emerald-500"
               }`}
               title={isDone ? "Mark incomplete" : "Mark done"}
             >
@@ -250,8 +250,8 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
               )}
             </button>
 
-            <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
-              Task Intention
+            <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary font-mono">
+              Task Details
             </span>
           </div>
 
@@ -261,9 +261,9 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
               type="button"
               onClick={handleSaveAll}
               disabled={!title.trim() || updateTaskMutation.isPending || !isDirty}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-sm)] text-xs font-semibold transition-all cursor-pointer ${
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${
                 isDirty
-                  ? "bg-text-primary text-bg-primary hover:opacity-90 shadow-sm"
+                  ? "bg-text-primary text-bg-primary hover:opacity-90 shadow-xs"
                   : "bg-bg-secondary text-text-muted border border-border-subtle cursor-not-allowed opacity-50"
               }`}
               title="Save task changes"
@@ -275,17 +275,17 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
             <button
               type="button"
               onClick={handleDelete}
-              className="p-1.5 rounded-[var(--radius-sm)] text-text-muted hover:text-rose-500 hover:bg-rose-500/10 transition-colors cursor-pointer"
+              className="p-1.5 rounded-md text-text-muted hover:text-rose-500 hover:bg-bg-secondary transition-colors cursor-pointer"
               title="Delete task"
             >
-              <Trash2 size={16} />
+              <Trash2 size={15} />
             </button>
             <button
               type="button"
               onClick={onClose}
-              className="p-1.5 rounded-[var(--radius-sm)] text-text-muted hover:text-text-primary hover:bg-bg-secondary transition-colors cursor-pointer"
+              className="p-1.5 rounded-md text-text-muted hover:text-text-primary hover:bg-bg-secondary transition-colors cursor-pointer"
             >
-              <X size={18} />
+              <X size={17} />
             </button>
           </div>
         </div>
@@ -295,11 +295,11 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
           {/* Title Editor */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <label className="text-[10px] uppercase font-semibold tracking-wider text-text-muted">
-                Task Title
+              <label className="text-xs font-semibold text-text-secondary">
+                Title
               </label>
               {isDirty && (
-                <span className="text-[10px] text-amber-500 font-medium">● Unsaved changes</span>
+                <span className="text-[11px] text-amber-600 dark:text-amber-400 font-medium">● Unsaved changes</span>
               )}
             </div>
             <input
@@ -308,21 +308,21 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
               onChange={(e) => setTitle(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleSaveAll()}
               placeholder="Task title..."
-              className="w-full bg-bg-secondary border border-border-subtle focus:border-border-hover rounded-[var(--radius-sm)] p-2.5 text-sm sm:text-base font-semibold text-text-primary outline-none transition-colors"
+              className="w-full bg-bg-secondary border border-border-subtle focus:border-border-hover rounded-lg p-2.5 text-sm sm:text-base font-semibold text-text-primary outline-none transition-colors"
             />
           </div>
 
           {/* Properties Grid */}
-          <div className="grid grid-cols-2 gap-3 p-4 rounded-[var(--radius-md)] bg-bg-secondary border border-border-subtle">
+          <div className="grid grid-cols-2 gap-3.5 p-4 rounded-xl bg-bg-secondary/40 border border-border-subtle">
             {/* Status Selector */}
             <div className="space-y-1">
-              <label className="text-[10px] uppercase font-semibold tracking-wider text-text-muted">
+              <label className="text-xs font-medium text-text-secondary">
                 Status
               </label>
               <select
                 value={status}
                 onChange={(e) => setStatus(e.target.value as TaskStatus)}
-                className="w-full bg-bg-card border border-border-subtle rounded-[var(--radius-sm)] px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-border-hover cursor-pointer [&>option]:bg-bg-card [&>option]:text-text-primary"
+                className="w-full bg-bg-card border border-border-subtle rounded-md px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-border-hover cursor-pointer [&>option]:bg-bg-card [&>option]:text-text-primary"
               >
                 {STATUSES.map((s) => (
                   <option key={s.value} value={s.value}>
@@ -334,13 +334,13 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
 
             {/* Priority Selector */}
             <div className="space-y-1">
-              <label className="text-[10px] uppercase font-semibold tracking-wider text-text-muted">
+              <label className="text-xs font-medium text-text-secondary">
                 Priority
               </label>
               <select
                 value={priority}
                 onChange={(e) => setPriority(e.target.value as TaskPriority)}
-                className="w-full bg-bg-card border border-border-subtle rounded-[var(--radius-sm)] px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-border-hover cursor-pointer [&>option]:bg-bg-card [&>option]:text-text-primary"
+                className="w-full bg-bg-card border border-border-subtle rounded-md px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-border-hover cursor-pointer [&>option]:bg-bg-card [&>option]:text-text-primary"
               >
                 {PRIORITIES.map((p) => (
                   <option key={p.value} value={p.value}>
@@ -352,7 +352,7 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
 
             {/* Due Date Selector */}
             <div className="space-y-1">
-              <label className="text-[10px] uppercase font-semibold tracking-wider text-text-muted flex items-center gap-1">
+              <label className="text-xs font-medium text-text-secondary flex items-center gap-1">
                 <Calendar size={11} className="text-text-muted" />
                 Due Date
               </label>
@@ -360,20 +360,20 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
                 type="date"
                 value={dueDate}
                 onChange={(e) => setDueDate(e.target.value)}
-                className="w-full bg-bg-card border border-border-subtle rounded-[var(--radius-sm)] px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-border-hover cursor-pointer"
+                className="w-full bg-bg-card border border-border-subtle rounded-md px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-border-hover cursor-pointer"
               />
             </div>
 
             {/* Planned Effort */}
             <div className="space-y-1">
-              <label className="text-[10px] uppercase font-semibold tracking-wider text-text-muted flex items-center gap-1">
+              <label className="text-xs font-medium text-text-secondary flex items-center gap-1">
                 <Clock size={11} className="text-text-muted" />
                 Planned Effort
               </label>
               <select
                 value={plannedDuration}
                 onChange={(e) => setPlannedDuration(Number(e.target.value))}
-                className="w-full bg-bg-card border border-border-subtle rounded-[var(--radius-sm)] px-2.5 py-1.5 text-xs text-text-primary font-mono outline-none focus:border-border-hover cursor-pointer [&>option]:bg-bg-card [&>option]:text-text-primary"
+                className="w-full bg-bg-card border border-border-subtle rounded-md px-2.5 py-1.5 text-xs text-text-primary font-mono outline-none focus:border-border-hover cursor-pointer [&>option]:bg-bg-card [&>option]:text-text-primary"
               >
                 {DURATION_OPTIONS.map((mins) => (
                   <option key={mins} value={mins}>
@@ -385,37 +385,35 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
 
             {/* Actual Duration (Derived dynamically from sessions) */}
             <div className="space-y-1 col-span-2">
-              <label className="text-[10px] uppercase font-semibold tracking-wider text-text-muted">
-                Actual Time (From Sessions)
+              <label className="text-xs font-medium text-text-secondary">
+                Actual Time (Recorded from sessions)
               </label>
-              <div className="px-2.5 py-1.5 rounded-[var(--radius-sm)] bg-bg-card border border-border-subtle text-xs font-mono font-bold text-emerald-500 flex items-center justify-between">
+              <div className="px-2.5 py-1.5 rounded-md bg-bg-card border border-border-subtle text-xs font-mono font-medium text-emerald-600 dark:text-emerald-400 flex items-center justify-between">
                 <span>{formatDuration(actualMinutes)}</span>
                 {varianceMinutes !== 0 && actualMinutes > 0 && (
                   <span
-                    className={`text-[10px] font-normal ${
-                      varianceMinutes > 0 ? "text-amber-500" : "text-emerald-500"
+                    className={`text-[11px] font-normal ${
+                      varianceMinutes > 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"
                     }`}
                   >
-                    {varianceMinutes > 0 ? `+${varianceMinutes}m` : `${varianceMinutes}m`}
+                    {varianceMinutes > 0 ? `+${varianceMinutes}m variance` : `${varianceMinutes}m under plan`}
                   </span>
                 )}
               </div>
             </div>
 
             {/* Linked Goal Selector */}
-            <div className="space-y-1 col-span-2 pt-1 border-t border-border-subtle">
-              <label className="text-[10px] uppercase font-semibold tracking-wider text-text-muted flex items-center gap-1">
+            <div className="space-y-1 col-span-2 pt-2 border-t border-border-subtle/60">
+              <label className="text-xs font-medium text-text-secondary flex items-center gap-1">
                 <Target size={11} className="text-text-muted" />
                 Linked Daily Goal
               </label>
               <select
                 value={goalId}
                 onChange={(e) => setGoalId(e.target.value)}
-                className="w-full bg-bg-card border border-border-subtle rounded-[var(--radius-sm)] px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-border-hover cursor-pointer [&>option]:bg-bg-card [&>option]:text-text-primary"
+                className="w-full bg-bg-card border border-border-subtle rounded-md px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-border-hover cursor-pointer [&>option]:bg-bg-card [&>option]:text-text-primary"
               >
-                <option value="">
-                  Independent Task (No Goal)
-                </option>
+                <option value="">Independent Task (No Goal)</option>
                 {/* Preserve past goal if goalId exists but not in today's active goals */}
                 {goalId && !goals.some((g) => g.id === goalId) && (
                   <option value={goalId}>
@@ -432,7 +430,7 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
           </div>
 
           {/* Notes / Description */}
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <div className="flex items-center gap-1.5 text-xs font-semibold text-text-secondary">
               <FileText size={13} className="text-text-muted" />
               <span>Notes & Acceptance Criteria</span>
@@ -442,19 +440,19 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Add deliberate intention, scope, or notes for this task..."
               rows={3}
-              className="w-full rounded-[var(--radius-md)] border border-border-subtle bg-bg-secondary p-3 text-xs text-text-primary placeholder:text-text-muted outline-none focus:border-border-hover transition-colors resize-none leading-relaxed"
+              className="w-full rounded-lg border border-border-subtle bg-bg-secondary/40 p-3 text-xs text-text-primary placeholder:text-text-muted outline-none focus:border-border-hover transition-colors resize-none leading-relaxed"
             />
           </div>
 
-          {/* SESSIONS SECTION: The Core Data Relationship */}
-          <div className="space-y-3 pt-2">
+          {/* SESSIONS SECTION: Intentional execution blocks */}
+          <div className="space-y-3 pt-1">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Layers size={14} className="text-text-muted" />
-                <h3 className="text-xs font-bold uppercase tracking-wider text-text-secondary">
+                <Layers size={13} className="text-text-muted" />
+                <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
                   Deliberate Focus Sessions
                 </h3>
-                <span className="text-[10px] font-mono text-text-muted bg-bg-secondary px-1.5 py-0.5 rounded">
+                <span className="text-xs font-mono text-text-muted bg-bg-secondary px-1.5 py-0.2 rounded border border-border-subtle">
                   {sessions.length}
                 </span>
               </div>
@@ -464,20 +462,20 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
                   type="button"
                   onClick={() => startSessionMutation.mutate(currentTask.id)}
                   disabled={startSessionMutation.isPending}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[var(--radius-sm)] bg-bg-secondary border border-border-subtle text-xs font-semibold text-text-primary hover:bg-bg-tertiary transition-colors cursor-pointer"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-bg-secondary border border-border-subtle text-xs font-medium text-text-primary hover:border-border-hover transition-colors cursor-pointer"
                 >
-                  <Play size={11} fill="currentColor" />
-                  <span>Start Session</span>
+                  <Play size={10} className="fill-current" />
+                  <span>Start Focus</span>
                 </button>
               )}
             </div>
 
-            {/* Active Session Callout if this task is active */}
+            {/* Active Session Callout */}
             {activeSession && (
-              <div className="p-3 rounded-[var(--radius-md)] bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
+              <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
                   <span className="h-2 w-2 rounded-full bg-emerald-500 animate-ping" />
-                  <span className="text-xs font-semibold text-emerald-500">
+                  <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
                     Session active right now
                   </span>
                 </div>
@@ -485,7 +483,7 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
                   type="button"
                   onClick={() => endSessionMutation.mutate(activeSession.id)}
                   disabled={endSessionMutation.isPending}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[var(--radius-sm)] bg-rose-500/20 border border-rose-500/30 text-xs font-semibold text-rose-500 hover:bg-rose-500/30 transition-colors cursor-pointer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md bg-rose-500/15 border border-rose-500/30 text-xs font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-500/25 transition-colors cursor-pointer"
                 >
                   <Square size={11} />
                   <span>End Session</span>
@@ -495,16 +493,16 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
 
             {/* Sessions List */}
             {sessions.length === 0 ? (
-              <div className="p-4 rounded-[var(--radius-md)] bg-bg-secondary border border-border-subtle text-center space-y-1">
+              <div className="p-4 rounded-xl bg-bg-secondary/30 border border-border-subtle text-center space-y-1">
                 <p className="text-xs text-text-muted">
-                  No sessions recorded for this task yet.
+                  No focus sessions recorded for this task yet.
                 </p>
-                <p className="text-[11px] text-text-muted opacity-80">
-                  Click "Start Session" to begin a focused work period.
+                <p className="text-[11px] text-text-muted">
+                  Click &ldquo;Start Focus&rdquo; to begin a deliberate execution block.
                 </p>
               </div>
             ) : (
-              <div className="divide-y divide-border-subtle rounded-[var(--radius-md)] border border-border-subtle bg-bg-secondary overflow-hidden">
+              <div className="divide-y divide-border-subtle rounded-xl border border-border-subtle bg-bg-secondary/20 overflow-hidden">
                 {sessions.map((session, idx) => {
                   const isOngoing = !session.endedAt;
                   const startText = format(new Date(session.startedAt), "HH:mm");
@@ -518,7 +516,7 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
                   return (
                     <div
                       key={session.id}
-                      className="p-3 flex items-center justify-between text-xs"
+                      className="px-3.5 py-2.5 flex items-center justify-between text-xs hover:bg-bg-secondary/40 transition-colors"
                     >
                       <div className="flex items-center gap-2.5">
                         <span className="text-[11px] font-mono text-text-muted">
@@ -536,11 +534,11 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
 
                       <div className="flex items-center gap-2">
                         {isOngoing ? (
-                          <span className="text-[10px] font-semibold text-emerald-500 bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 rounded">
+                          <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 rounded">
                             Active
                           </span>
                         ) : (
-                          <span className="font-mono text-[11px] text-text-muted">
+                          <span className="font-mono text-xs text-text-muted">
                             {durationMins !== null ? `${durationMins}m` : "0m"}
                           </span>
                         )}
@@ -553,40 +551,40 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
           </div>
 
           {/* OBSERVED TELEMETRY EVIDENCE SECTION */}
-          <div className="space-y-3 pt-2">
+          <div className="space-y-3 pt-1">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Activity size={14} className="text-text-muted" />
-                <h3 className="text-xs font-bold uppercase tracking-wider text-text-secondary">
+                <Activity size={13} className="text-text-muted" />
+                <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
                   Observed Desktop Telemetry
                 </h3>
               </div>
 
               <Link
                 href="/timeline"
-                className="inline-flex items-center gap-1 text-xs text-text-primary hover:opacity-80 transition-opacity"
+                className="inline-flex items-center gap-1 text-xs text-text-muted hover:text-text-primary transition-colors"
               >
-                <span>View timeline evidence</span>
-                <ArrowRight size={12} />
+                <span>Timeline evidence</span>
+                <ArrowRight size={11} />
               </Link>
             </div>
 
-            <div className="p-4 rounded-[var(--radius-md)] bg-bg-secondary border border-border-subtle space-y-3">
-              <p className="text-[11px] text-text-muted leading-relaxed">
-                ActivityWatch telemetry observed during this task's focus sessions. This evidence validates execution without automatically closing tasks.
+            <div className="p-4 rounded-xl bg-bg-secondary/30 border border-border-subtle space-y-3">
+              <p className="text-xs text-text-muted leading-relaxed">
+                Activity telemetry observed during this task&apos;s focus periods. This provides observational evidence without auto-completing tasks.
               </p>
 
               {activitySummary.length === 0 ? (
-                <div className="py-2 text-center text-[11px] text-text-muted opacity-80">
-                  No desktop activity telemetry matched session time intervals yet.
+                <div className="py-2 text-center text-xs text-text-muted">
+                  No telemetry recorded during this task&apos;s session windows.
                 </div>
               ) : (
-                <div className="space-y-2">
+                <div className="space-y-1.5 divide-y divide-border-subtle/40">
                   {activitySummary.slice(0, 5).map((act, i) => {
                     const mins = Math.round(act.durationSeconds / 60);
                     return (
-                      <div key={i} className="flex items-center justify-between text-xs">
-                        <span className="font-medium text-text-primary truncate max-w-[200px]">
+                      <div key={i} className="pt-1.5 first:pt-0 flex items-center justify-between text-xs">
+                        <span className="font-medium text-text-primary truncate max-w-[220px]">
                           {act.application}
                         </span>
                         <span className="font-mono text-text-muted">
@@ -602,13 +600,13 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
         </div>
 
         {/* Footer actions & info */}
-        <div className="p-4 border-t border-border-subtle bg-bg-card flex items-center justify-between gap-3">
+        <div className="px-5 py-3.5 border-t border-border-subtle bg-bg-card flex items-center justify-between gap-3">
           <div className="flex flex-col text-[11px] text-text-muted">
             <span>
               Created: {format(new Date(currentTask.createdAt), "MMM d, HH:mm")}
             </span>
             {currentTask.completedAt && (
-              <span className="text-emerald-500">
+              <span className="text-emerald-600 dark:text-emerald-400">
                 Completed: {format(new Date(currentTask.completedAt), "MMM d, HH:mm")}
               </span>
             )}
@@ -618,7 +616,7 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
             <button
               type="button"
               onClick={onClose}
-              className="px-3 py-1.5 rounded-[var(--radius-sm)] text-xs text-text-muted hover:text-text-primary hover:bg-bg-secondary border border-transparent hover:border-border-subtle transition-all cursor-pointer"
+              className="px-3 py-1.5 rounded-md text-xs text-text-muted hover:text-text-primary hover:bg-bg-secondary transition-colors cursor-pointer"
             >
               Close
             </button>
@@ -626,7 +624,7 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
               type="button"
               onClick={handleSaveAll}
               disabled={!isDirty || updateTaskMutation.isPending || !title.trim()}
-              className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-[var(--radius-sm)] text-xs font-semibold transition-all cursor-pointer ${
+              className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${
                 isDirty && title.trim()
                   ? "bg-text-primary text-bg-primary hover:opacity-90 shadow-xs"
                   : "bg-bg-secondary text-text-muted border border-border-subtle cursor-not-allowed opacity-50"

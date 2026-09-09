@@ -7,11 +7,11 @@ import {
   CheckCircle2,
   ListTodo,
   Plus,
-  ExternalLink,
   Target,
   Clock,
   Radio,
   RotateCcw,
+  ChevronRight,
 } from "lucide-react";
 import type { Task } from "@repo/types";
 import { PriorityBadge } from "./data-badge";
@@ -58,7 +58,7 @@ export function CurrentFocusCard({
 }: CurrentFocusCardProps) {
   const [isChoosing, setIsChoosing] = useState(false);
 
-  // 1. ACTIVE SESSION STATE (Active execution with contextual observed telemetry)
+  // 1. ACTIVE SESSION STATE (Operational, high-contrast, dominant timer)
   if (isActive && selectedTask) {
     const observedContext = observedDomain
       ? `${observedApplication || "Browser"} · ${observedDomain}`
@@ -68,50 +68,66 @@ export function CurrentFocusCard({
 
     return (
       <div
-        className={`rounded-lg border border-accent-default/40 bg-bg-card p-5 space-y-4 shadow-xs ${className}`}
+        className={`rounded-xl border border-emerald-500/30 bg-bg-card p-6 sm:p-7 space-y-5 ${className}`}
       >
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-emerald-500 dark:bg-emerald-400 animate-pulse" />
-            <span className="text-xs font-semibold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
-              ACTIVE SESSION
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <span className="relative flex h-3 w-3">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500" />
             </span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                Focus Session Active
+              </span>
+              {selectedTask.goalTitle && (
+                <>
+                  <span className="text-text-muted text-xs">·</span>
+                  <span className="inline-flex items-center gap-1 text-[11px] font-medium text-text-secondary bg-bg-secondary border border-border-subtle px-2 py-0.5 rounded">
+                    <Target size={11} className="text-text-muted" />
+                    <span>{selectedTask.goalTitle}</span>
+                  </span>
+                </>
+              )}
+            </div>
           </div>
-          <div className="text-sm font-mono text-text-secondary">
-            <span className="text-text-primary font-semibold text-base">
+
+          <div className="flex items-baseline gap-2">
+            <span className="text-[11px] font-mono text-text-muted">Elapsed</span>
+            <span className="text-3xl sm:text-4xl font-semibold font-mono tabular-nums text-text-primary">
               {formatElapsed(elapsedSeconds)}
             </span>
           </div>
         </div>
 
         <div className="space-y-1">
-          <h2 className="text-lg sm:text-xl font-bold text-text-primary tracking-tight">
+          <h2 className="text-xl sm:text-2xl font-semibold text-text-primary tracking-tight">
             {selectedTask.title}
           </h2>
-          {selectedTask.goalTitle && (
-            <div className="flex items-center gap-1 text-xs text-accent-default">
-              <Target size={12} />
-              <span>Goal: {selectedTask.goalTitle}</span>
-            </div>
+          {selectedTask.description && (
+            <p className="text-xs sm:text-sm text-text-muted leading-relaxed max-w-2xl">
+              {selectedTask.description}
+            </p>
           )}
         </div>
 
-        {/* Contextual Observed Telemetry */}
+        {/* Realtime Observed Telemetry */}
         {observedContext && (
-          <div className="flex items-center gap-2 text-xs text-text-secondary bg-bg-secondary border border-border-subtle px-3 py-1.5 rounded-md">
-            <Radio size={12} className="text-accent-default shrink-0" />
+          <div className="flex items-center gap-2 text-xs text-text-secondary bg-bg-secondary/60 border border-border-subtle px-3.5 py-2 rounded-lg">
+            <Radio size={12} className="text-emerald-500 shrink-0 animate-pulse" />
             <span className="truncate">
-              Observed: <strong className="text-text-primary font-medium">{observedContext}</strong>
+              Live Observation: <strong className="text-text-primary font-medium">{observedContext}</strong>
             </span>
           </div>
         )}
 
-        <div className="flex items-center justify-end gap-2 pt-2 border-t border-border-subtle">
+        {/* Execution Actions */}
+        <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-border-subtle">
           {onPause && (
             <button
               type="button"
               onClick={onPause}
-              className="inline-flex items-center gap-1.5 text-xs text-text-secondary hover:text-text-primary bg-bg-secondary border border-border-default hover:bg-bg-tertiary px-3 py-1.5 rounded-md transition-colors"
+              className="inline-flex items-center gap-1.5 text-xs text-text-secondary hover:text-text-primary bg-bg-secondary border border-border-subtle hover:border-border-hover px-3.5 py-2 rounded-md transition-colors cursor-pointer"
             >
               <Pause size={12} />
               <span>Pause</span>
@@ -121,7 +137,7 @@ export function CurrentFocusCard({
             <button
               type="button"
               onClick={onComplete}
-              className="inline-flex items-center gap-1.5 text-xs font-semibold bg-emerald-500 hover:bg-emerald-400 text-white dark:text-black px-4 py-1.5 rounded-md transition-colors shadow-xs"
+              className="inline-flex items-center gap-1.5 text-xs font-medium bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-md transition-colors cursor-pointer"
             >
               <CheckCircle2 size={13} />
               <span>Complete Focus</span>
@@ -132,59 +148,60 @@ export function CurrentFocusCard({
     );
   }
 
-  // 2. TASK SELECTED, READY TO START FOCUS
-  if (selectedTask) {
+  // 2. TASK SELECTED, READY TO START FOCUS (Clean launchpad)
+  if (selectedTask && !isChoosing) {
     return (
       <div
-        className={`rounded-lg border border-border-subtle bg-bg-card p-5 space-y-4 shadow-xs ${className}`}
+        className={`rounded-xl border border-border-subtle bg-bg-card p-6 space-y-4 ${className}`}
       >
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-accent-default" />
-            <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
-              CURRENT FOCUS
+          <div className="flex items-center gap-2.5">
+            <span className="w-2 h-2 rounded-full bg-text-primary" />
+            <span className="text-xs font-medium text-text-muted">
+              Ready to Focus
             </span>
           </div>
           <button
             type="button"
             onClick={() => setIsChoosing(true)}
-            className="text-xs text-text-secondary hover:text-text-primary transition-colors"
+            className="text-xs text-text-muted hover:text-text-primary transition-colors cursor-pointer"
           >
             Switch Task
           </button>
         </div>
 
         <div className="space-y-1.5">
-          <h2 className="text-base sm:text-lg font-bold text-text-primary">
+          <h2 className="text-lg sm:text-xl font-semibold text-text-primary tracking-tight">
             {selectedTask.title}
           </h2>
-          <div className="flex items-center gap-3 text-xs text-text-secondary">
+          <div className="flex items-center gap-3 text-xs text-text-muted flex-wrap">
             {selectedTask.goalTitle ? (
-              <span className="flex items-center gap-1 text-accent-default">
-                <Target size={12} />
+              <span className="flex items-center gap-1 text-text-secondary">
+                <Target size={12} className="text-text-muted" />
                 <span>Goal: {selectedTask.goalTitle}</span>
               </span>
             ) : (
               <span>Independent Task</span>
             )}
-            <span className="flex items-center gap-1">
-              <Clock size={12} />
-              <span>Estimate: {selectedTask.plannedDurationMinutes ?? 30}m</span>
+            <span>·</span>
+            <span className="flex items-center gap-1 font-mono">
+              <Clock size={11} />
+              <span>Planned: {selectedTask.plannedDurationMinutes ?? 30}m</span>
             </span>
             <PriorityBadge priority={selectedTask.priority} />
           </div>
         </div>
 
-        <div className="pt-2 border-t border-border-subtle flex items-center justify-between">
-          <span className="text-xs text-text-secondary">
-            Ready to begin intentional execution
+        <div className="pt-3 border-t border-border-subtle flex items-center justify-between">
+          <span className="text-xs text-text-muted">
+            Ready to begin deliberate focus block
           </span>
           <button
             type="button"
             onClick={onStartFocus}
-            className="inline-flex items-center justify-center gap-1.5 rounded-md bg-text-primary hover:opacity-90 text-bg-default text-xs font-semibold px-4 py-2 transition-opacity shadow-xs"
+            className="inline-flex items-center gap-1.5 rounded-md bg-text-primary hover:opacity-90 text-bg-primary text-xs font-medium px-4 py-2 transition-opacity cursor-pointer"
           >
-            <Play size={13} className="fill-current" />
+            <Play size={11} className="fill-current" />
             <span>Start Focus</span>
           </button>
         </div>
@@ -192,7 +209,7 @@ export function CurrentFocusCard({
     );
   }
 
-  // 3. COMPACT TASK CHOOSER (Tasks available, choose one to focus)
+  // 3. TASK CHOOSER (Incomplete tasks available)
   const incompleteTasks = availableTasks.filter(
     (t) => t.status !== "done" && t.status !== "cancelled"
   );
@@ -200,53 +217,52 @@ export function CurrentFocusCard({
   if (incompleteTasks.length > 0) {
     return (
       <div
-        className={`rounded-lg border border-border-subtle bg-bg-card p-5 space-y-3 shadow-xs ${className}`}
+        className={`rounded-xl border border-border-subtle bg-bg-card p-5 sm:p-6 space-y-4 ${className}`}
       >
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
-              CURRENT FOCUS
+            <span className="text-xs font-medium text-text-muted">
+              Choose Task to Focus
             </span>
-            <span className="text-xs text-text-tertiary">· Select task to focus</span>
+            <span className="text-xs text-text-muted font-mono">({incompleteTasks.length} available)</span>
           </div>
-          {onAddTask && (
+          {isChoosing && selectedTask && (
             <button
               type="button"
-              onClick={onAddTask}
-              className="inline-flex items-center gap-1 text-xs text-accent-default hover:underline"
+              onClick={() => setIsChoosing(false)}
+              className="text-xs text-text-muted hover:text-text-primary cursor-pointer"
             >
-              <Plus size={12} />
-              <span>Add Task</span>
+              Cancel
             </button>
           )}
         </div>
 
-        <p className="text-xs text-text-secondary">
-          Choose a task from today&apos;s work to begin an intentional session:
-        </p>
-
-        <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-          {incompleteTasks.slice(0, 5).map((task) => (
+        <div className="rounded-lg border border-border-subtle bg-bg-secondary/20 divide-y divide-border-subtle overflow-hidden max-h-56 overflow-y-auto">
+          {incompleteTasks.slice(0, 6).map((task) => (
             <div
               key={task.id}
-              onClick={() => onSelectTask?.(task)}
-              className="flex items-center justify-between p-2.5 rounded-md border border-border-subtle bg-bg-secondary hover:border-accent-default/50 hover:bg-bg-tertiary cursor-pointer transition-colors"
+              onClick={() => {
+                onSelectTask?.(task);
+                setIsChoosing(false);
+              }}
+              className="flex items-center justify-between px-4 py-2.5 hover:bg-bg-secondary/60 cursor-pointer transition-colors"
             >
-              <div className="flex items-center gap-2 min-w-0">
+              <div className="flex items-center gap-2.5 min-w-0 flex-1">
                 <span className="text-xs font-medium text-text-primary truncate">
                   {task.title}
                 </span>
                 {task.goalTitle && (
-                  <span className="text-[10px] text-accent-default bg-accent-subtle px-1.5 py-0.5 rounded truncate border border-accent-default/20">
+                  <span className="text-[10px] text-text-muted bg-bg-secondary px-1.5 py-0.5 rounded border border-border-subtle truncate">
                     {task.goalTitle}
                   </span>
                 )}
               </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <span className="text-[11px] text-text-secondary">
+              <div className="flex items-center gap-3 shrink-0 ml-3">
+                <span className="text-xs font-mono text-text-muted">
                   {task.plannedDurationMinutes ?? 30}m
                 </span>
                 <PriorityBadge priority={task.priority} />
+                <ChevronRight size={13} className="text-text-muted" />
               </div>
             </div>
           ))}
@@ -258,20 +274,20 @@ export function CurrentFocusCard({
   // 4. NO TASK AVAILABLE STATE
   return (
     <div
-      className={`rounded-lg border border-border-subtle bg-bg-card p-5 space-y-3 shadow-xs ${className}`}
+      className={`rounded-xl border border-border-subtle bg-bg-card p-6 space-y-3.5 ${className}`}
     >
       <div className="flex items-center gap-2">
-        <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
-          CURRENT FOCUS
+        <span className="text-xs font-medium text-text-muted">
+          Current Focus
         </span>
       </div>
 
       <div className="space-y-1">
-        <h3 className="text-sm font-semibold text-text-primary">
-          Nothing ready to focus on.
+        <h3 className="text-base font-semibold text-text-primary">
+          No tasks ready for focus
         </h3>
-        <p className="text-xs text-text-secondary leading-relaxed">
-          Create or select a task to begin an intentional focus session.
+        <p className="text-xs text-text-muted leading-relaxed">
+          Create or plan a task for today to begin an intentional focus block.
         </p>
       </div>
 
@@ -280,7 +296,7 @@ export function CurrentFocusCard({
           <button
             type="button"
             onClick={onAddTask}
-            className="inline-flex items-center gap-1.5 rounded-md bg-text-primary hover:opacity-90 text-bg-default text-xs font-medium px-3.5 py-1.5 transition-opacity"
+            className="inline-flex items-center gap-1.5 rounded-md bg-text-primary hover:opacity-90 text-bg-primary text-xs font-medium px-3.5 py-1.5 transition-opacity cursor-pointer"
           >
             <Plus size={13} />
             <span>Add Task</span>
@@ -288,7 +304,7 @@ export function CurrentFocusCard({
         )}
         <Link
           href="/tasks"
-          className="inline-flex items-center gap-1.5 rounded-md bg-bg-secondary hover:bg-bg-tertiary border border-border-default text-text-primary text-xs font-medium px-3 py-1.5 transition-colors"
+          className="inline-flex items-center gap-1.5 rounded-md bg-bg-secondary hover:bg-bg-tertiary border border-border-subtle text-text-primary text-xs font-medium px-3.5 py-1.5 transition-colors"
         >
           <ListTodo size={13} />
           <span>View Tasks</span>
