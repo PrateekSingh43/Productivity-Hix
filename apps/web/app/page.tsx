@@ -82,7 +82,7 @@ export default function HomePage() {
         actions={
           <Link
             href="/today"
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-text-primary text-bg-primary hover:opacity-90 transition-opacity cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-text-primary text-bg-default hover:opacity-90 transition-opacity cursor-pointer shadow-xs"
           >
             <span>Open Today</span>
             <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />

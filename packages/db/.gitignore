@@ -39,3 +39,9 @@ next-env.d.ts
 
 src/generated
 /generated/prisma
+
+/node_modules/prisma/build/
+/node_modules/prisma/lib/
+
+
+

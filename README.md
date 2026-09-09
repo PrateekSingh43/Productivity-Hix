@@ -10,6 +10,12 @@ ActivityWatch → normalized activity → Express API → PostgreSQL/Prisma
 
 ActivityWatch remains the raw telemetry source. The application stores identity, tasks, work sessions, check-ins, learning assessments, synchronization state, normalized activity, and deterministic summaries. Desktop/window, AFK/input, and browser events are identified by `packages/activitywatch`.
 
+## Core Documentation
+
+- **Master System Blueprint & Product Spec**: [docs/PRODUCTIVEHIX_SYSTEM_BLUEPRINT.md](file:///c:/Users/prate/ProductiveHix/docs/PRODUCTIVEHIX_SYSTEM_BLUEPRINT.md) — The locked single source of truth for the product mental model, the Four Kinds of Truth, DuckDB analytics engine, telemetry gap recovery, retention loops, and the 9-phase roadmap.
+- **UX Contract & IA Spec**: [docs/PRODUCTIVEHIX_UX_CONTRACT.md](file:///c:/Users/prate/ProductiveHix/docs/PRODUCTIVEHIX_UX_CONTRACT.md) — Locked UX interaction contracts, navigation structures, page specifications, and zero-fake-data design principles.
+
+
 ## Development
 
 ```sh

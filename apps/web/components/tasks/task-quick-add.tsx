@@ -150,7 +150,7 @@ export function TaskQuickAdd({ onSuccess }: TaskQuickAddProps) {
                 onClick={() => setPlannedDurationMinutes(preset.value)}
                 className={`px-2 py-0.5 rounded-md text-xs font-mono transition-colors cursor-pointer ${
                   isSelected
-                    ? "bg-text-primary text-bg-primary font-medium"
+                    ? "bg-text-primary text-bg-default font-medium shadow-xs"
                     : "bg-bg-secondary text-text-muted border border-border-subtle hover:text-text-primary hover:border-border-hover"
                 }`}
               >
@@ -171,7 +171,7 @@ export function TaskQuickAdd({ onSuccess }: TaskQuickAddProps) {
             onClick={() => setDueDate(todayStr)}
             className={`px-2 py-0.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${
               dueDate === todayStr
-                ? "bg-text-primary text-bg-primary font-medium"
+                ? "bg-text-primary text-bg-default font-medium shadow-xs"
                 : "bg-bg-secondary text-text-muted border border-border-subtle hover:text-text-primary"
             }`}
           >
@@ -182,7 +182,7 @@ export function TaskQuickAdd({ onSuccess }: TaskQuickAddProps) {
             onClick={() => setDueDate(tomorrowStr)}
             className={`px-2 py-0.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${
               dueDate === tomorrowStr
-                ? "bg-text-primary text-bg-primary font-medium"
+                ? "bg-text-primary text-bg-default font-medium shadow-xs"
                 : "bg-bg-secondary text-text-muted border border-border-subtle hover:text-text-primary"
             }`}
           >
@@ -234,7 +234,7 @@ export function TaskQuickAdd({ onSuccess }: TaskQuickAddProps) {
                   onClick={() => setPriority(p.value)}
                   className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer ${
                     isSelected
-                      ? "bg-text-primary text-bg-primary font-medium"
+                      ? "bg-text-primary text-bg-default font-medium shadow-xs"
                       : "text-text-muted hover:text-text-primary"
                   }`}
                 >
@@ -248,7 +248,7 @@ export function TaskQuickAdd({ onSuccess }: TaskQuickAddProps) {
           <button
             type="submit"
             disabled={!title.trim() || createTaskMutation.isPending}
-            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-md bg-text-primary text-bg-primary text-xs font-medium hover:opacity-90 transition-opacity disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-md bg-text-primary text-bg-default text-xs font-medium hover:opacity-90 transition-opacity disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed shadow-xs"
           >
             <Plus size={13} />
             {createTaskMutation.isPending ? "Creating..." : "Add Task"}

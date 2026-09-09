@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { User, Shield, Laptop, Database, ExternalLink, Sun, Moon } from "lucide-react";
 import Link from "next/link";
+import { useTheme, type ThemeMode } from "../../src/lib/theme-provider";
 
 const container = {
   hidden: { opacity: 0 },
@@ -14,40 +14,8 @@ const item = {
   show: { opacity: 1, y: 0, transition: { duration: 0.3 } },
 };
 
-type ThemeMode = "light" | "dark" | "system";
-
 export default function SettingsPage() {
-  const [theme, setTheme] = useState<ThemeMode>("dark");
-
-  useEffect(() => {
-    try {
-      const saved = (localStorage.getItem("theme") as ThemeMode) || "dark";
-      setTheme(saved);
-    } catch {}
-  }, []);
-
-  const handleThemeChange = (newTheme: ThemeMode) => {
-    setTheme(newTheme);
-    try {
-      localStorage.setItem("theme", newTheme);
-      document.documentElement.setAttribute("data-theme", newTheme);
-      if (newTheme === "light") {
-        document.documentElement.classList.remove("dark");
-        document.documentElement.classList.add("light");
-      } else if (newTheme === "dark") {
-        document.documentElement.classList.remove("light");
-        document.documentElement.classList.add("dark");
-      } else {
-        if (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches) {
-          document.documentElement.classList.remove("dark");
-          document.documentElement.classList.add("light");
-        } else {
-          document.documentElement.classList.remove("light");
-          document.documentElement.classList.add("dark");
-        }
-      }
-    } catch {}
-  };
+  const { theme, setTheme } = useTheme();
 
   return (
     <motion.div
@@ -80,7 +48,7 @@ export default function SettingsPage() {
           <div className="grid grid-cols-3 gap-2.5 max-w-sm">
             <button
               type="button"
-              onClick={() => handleThemeChange("light")}
+              onClick={() => setTheme("light")}
               className={`flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl border text-xs font-medium transition-all ${
                 theme === "light"
                   ? "border-accent-default bg-accent-subtle text-accent-default shadow-xs font-semibold"
@@ -91,7 +59,7 @@ export default function SettingsPage() {
             </button>
             <button
               type="button"
-              onClick={() => handleThemeChange("dark")}
+              onClick={() => setTheme("dark")}
               className={`flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl border text-xs font-medium transition-all ${
                 theme === "dark"
                   ? "border-accent-default bg-accent-subtle text-accent-default shadow-xs font-semibold"
@@ -102,7 +70,7 @@ export default function SettingsPage() {
             </button>
             <button
               type="button"
-              onClick={() => handleThemeChange("system")}
+              onClick={() => setTheme("system")}
               className={`flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl border text-xs font-medium transition-all ${
                 theme === "system"
                   ? "border-accent-default bg-accent-subtle text-accent-default shadow-xs font-semibold"

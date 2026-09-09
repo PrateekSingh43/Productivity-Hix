@@ -1,5 +1,3 @@
-
-
 generator client {
   provider = "prisma-client"
   output   = "../src/generated/prisma"
@@ -36,6 +34,15 @@ model User {
   deviceAuthorizations DeviceAuthorization[]
   deviceTokens        DeviceToken[]
 
+  // Phase 3A Inverse Relations
+  temporalActivityBlocks   TemporalActivityBlock[]
+  activityContextLinks     ActivityContextLink[]
+  telemetryCoverageGaps    TelemetryCoverageGap[]
+  userGapExplanations      UserGapExplanation[]
+  userActivityRules        UserActivityRule[]
+  userActivityOverrides    UserActivityOverride[]
+  proposedDeviceHeartbeats ProposedDeviceHeartbeat[]
+
   @@map("users")
 }
 
@@ -65,6 +72,10 @@ model DailyGoal {
   plan      DailyPlan   @relation(fields: [planId], references: [id], onDelete: Cascade)
   user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   tasks     Task[]
+
+  // Phase 3A Inverse Relations
+  activityContextLinks ActivityContextLink[]
+  userGapExplanations  UserGapExplanation[]
 
   @@index([planId, order])
   @@index([userId])
@@ -102,6 +113,10 @@ model Task {
   goal                   DailyGoal?    @relation(fields: [goalId], references: [id], onDelete: SetNull)
   sessions               WorkSession[]
   checkIns               CheckIn[]
+
+  // Phase 3A Inverse Relations
+  activityContextLinks   ActivityContextLink[]
+  userGapExplanations    UserGapExplanation[]
 
   @@index([userId, status])
   @@index([userId, productiveDate])
@@ -224,6 +239,9 @@ model NormalizedActivity {
   createdAt  DateTime @default(now()) @map("created_at")
   user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  // Phase 3A Inverse Relations
+  blockObservations BlockObservation[]
+
   @@unique([userId, externalId])
   @@index([userId, timestamp])
   @@map("normalized_activity")
@@ -241,6 +259,11 @@ model DesktopDevice {
   user           User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
   tokens         DeviceToken[]
   authorizations DeviceAuthorization[]
+
+  // Phase 3A Inverse Relations
+  temporalActivityBlocks   TemporalActivityBlock[]
+  telemetryCoverageGaps    TelemetryCoverageGap[]
+  proposedDeviceHeartbeats ProposedDeviceHeartbeat[]
 
   @@index([userId])
   @@map("desktop_devices")
@@ -295,3 +318,429 @@ model DeviceToken {
   @@map("device_tokens")
 }
 
+// ============================================================================
+// PHASE 3A ENUMS (ACTIVITY SEMANTICS & DUAL-LEDGER DOMAIN)
+// ============================================================================
+
+enum ActivityModality {
+  development
+  reading_research
+  writing_documentation
+  communication
+  administration
+  media_consumption
+  gaming
+  idle_away
+  system_maintenance
+  unknown
+}
+
+enum ClaimType {
+  MODALITY_PRIMARY
+  MODALITY_SECONDARY
+  TOPIC_CONTEXT
+  INFERRED_BEHAVIOR
+}
+
+enum ClaimProvenance {
+  SENSOR_OBSERVED
+  USER_RULE
+  USER_OVERRIDE
+  ACTIVE_SESSION_AFFINITY
+  CONTEXT_HEURISTIC
+  INFERRED
+}
+
+enum ClaimAuthority {
+  SYSTEM
+  USER
+}
+
+enum TargetScope {
+  TASK
+  GOAL
+  PROJECT
+  GENERAL_WORK
+  UNLINKED
+}
+
+enum ContextRelevance {
+  DIRECT
+  SUPPORTIVE
+  TANGENTIAL
+  UNRELATED
+  UNKNOWN
+}
+
+enum IntentionRelationship {
+  ALIGNED
+  DIVERGENT
+  UNLINKED
+  UNKNOWN
+}
+
+enum FocusEvidenceState {
+  UNKNOWN
+  INSUFFICIENT
+  SUPPORTED
+  CONTRADICTORY
+}
+
+enum TrackType {
+  FOREGROUND
+  AMBIENT_AUDIO
+  BACKGROUND_PROCESS
+}
+
+enum CoverageState {
+  SYSTEM_SLEEP
+  POWER_OFF
+  COLLECTOR_DISCONNECTED
+  SENSOR_AFK
+  UNKNOWN_SILENCE
+}
+
+enum ReconciliationState {
+  UNEXPLAINED
+  PENDING_PROMPT
+  EXPLAINED
+  DISMISSED
+}
+
+enum SourceChannel {
+  DESKTOP_WINDOW
+  BROWSER_TAB
+  COORDINATED_DESKTOP_WEB
+}
+
+enum MachinePowerState {
+  ACTIVE
+  SLEEPING
+  POWERED_OFF
+  UNKNOWN
+}
+
+enum CollectorState {
+  CONNECTED
+  DISCONNECTED
+}
+
+enum InputState {
+  ACTIVE
+  AFK
+}
+
+// ============================================================================
+// PHASE 3A MODELS
+// ============================================================================
+
+// ----------------------------------------------------------------------------
+// 1. TEMPORAL ACTIVITY BLOCK (Materialized Interval Projection)
+// ----------------------------------------------------------------------------
+model TemporalActivityBlock {
+  id                        String              @id @default(uuid()) @db.Uuid
+  userId                    String              @map("user_id") @db.Uuid
+  deviceId                  String?             @map("device_id") @db.Uuid
+
+  // Observation Set Identity (hash of contributing observations + contribution ranges)
+  observationSetFingerprint String              @map("observation_set_fingerprint")
+
+  // Temporal Bounds & Disambiguated Durations
+  startTime                 DateTime            @map("start_time")
+  endTime                   DateTime            @map("end_time")
+  wallClockDurationMs       Int                 @map("wall_clock_duration_ms")
+  observedActiveDurationMs  Int                 @map("observed_active_duration_ms")
+  pausedDurationMs          Int                 @default(0) @map("paused_duration_ms")
+  track                     TrackType           @default(FOREGROUND)
+
+  // Denormalized Presentation Fields (Copied from observations for query efficiency)
+  primaryApplication        String              @map("primary_application")
+  cleanTitle                String              @map("clean_title")
+  domain                    String?
+  sanitizedUrl              String?             @map("sanitized_url")
+  sourceChannel             SourceChannel       @default(DESKTOP_WINDOW) @map("source_channel")
+  rawEventCount             Int                 @default(1) @map("raw_event_count")
+  interactionDensity        Json?               @map("interaction_density")
+  sourceComposition         Json?               @map("source_composition")
+
+  // Versioning
+  semanticVersion           String              @default("1.0.0") @map("semantic_version")
+
+  createdAt                 DateTime            @default(now()) @map("created_at")
+  updatedAt                 DateTime            @updatedAt @map("updated_at")
+
+  // Relations
+  user                      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device                    DesktopDevice?      @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  observations              BlockObservation[]
+  claims                    SemanticClaim[]
+  contextLinks              ActivityContextLink[]
+  attentionInferences       AttentionInference[]
+
+  @@index([userId, startTime, endTime])
+  @@index([observationSetFingerprint])
+  @@map("temporal_activity_blocks")
+}
+
+// ----------------------------------------------------------------------------
+// 2. BLOCK OBSERVATION (Explicit Contributing Observations & Ranges)
+// ----------------------------------------------------------------------------
+model BlockObservation {
+  id                    String              @id @default(uuid()) @db.Uuid
+  blockId               String              @map("block_id") @db.Uuid
+  activityId            String              @map("activity_id") @db.Uuid
+
+  // Exact Contribution Boundaries
+  contributionStart     DateTime            @map("contribution_start")
+  contributionEnd       DateTime            @map("contribution_end")
+  contributionDurationMs Int                @map("contribution_duration_ms")
+
+  block                 TemporalActivityBlock @relation(fields: [blockId], references: [id], onDelete: Cascade)
+  activity              NormalizedActivity    @relation(fields: [activityId], references: [id], onDelete: Cascade)
+
+  @@unique([blockId, activityId, contributionStart])
+  @@index([activityId])
+  @@map("block_observations")
+}
+
+// ----------------------------------------------------------------------------
+// 3. SEMANTIC CLAIM (Family 1: Classification Claims)
+// ----------------------------------------------------------------------------
+model SemanticClaim {
+  id                    String              @id @default(uuid()) @db.Uuid
+  blockId               String              @map("block_id") @db.Uuid
+
+  claimType             ClaimType           @map("claim_type")
+  value                 String              // e.g. "development", "ProductiveHix"
+  confidence            Float?              // Calibrated signal strength (0.00 - 1.00), null if uncalibrated
+  provenance            ClaimProvenance     @default(INFERRED)
+  authority             ClaimAuthority      @default(SYSTEM)
+
+  // Versioning & Explicit Self-Relation Supersession
+  engineVersion         String              @map("engine_version")
+  ruleSetVersion        String?             @map("rule_set_version")
+  evaluatedAt           DateTime            @default(now()) @map("evaluated_at")
+  inputFingerprint      String?             @map("input_fingerprint")
+  isCurrent             Boolean             @default(true) @map("is_current")
+  supersedesId          String?             @map("supersedes_id") @db.Uuid
+
+  block                 TemporalActivityBlock @relation(fields: [blockId], references: [id], onDelete: Cascade)
+  supersedes            SemanticClaim?        @relation("ClaimSupersession", fields: [supersedesId], references: [id], onDelete: SetNull)
+  supersededBy          SemanticClaim[]       @relation("ClaimSupersession")
+  evidence              ClaimEvidence[]
+
+  @@index([blockId, isCurrent])
+  @@index([claimType, value, isCurrent])
+  @@index([provenance])
+  @@map("semantic_claims")
+}
+
+// ----------------------------------------------------------------------------
+// 4. CLAIM EVIDENCE (Relational Citations of Signal Sources)
+// ----------------------------------------------------------------------------
+model ClaimEvidence {
+  id                    String              @id @default(uuid()) @db.Uuid
+  claimId               String?             @map("claim_id") @db.Uuid
+  linkId                String?             @map("link_id") @db.Uuid
+  inferenceId           String?             @map("inference_id") @db.Uuid
+
+  evidenceType          String              @map("evidence_type") // e.g. "USER_RULE", "PROCESS_NAME", "WINDOW_TITLE"
+  evidenceReference     String              @map("evidence_reference") // e.g. "rule:usr_123", "title:React"
+  weight                Float               @default(1.0)
+
+  claim                 SemanticClaim?      @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  contextLink           ActivityContextLink? @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  attentionInference    AttentionInference?  @relation(fields: [inferenceId], references: [id], onDelete: Cascade)
+
+  @@index([claimId])
+  @@index([linkId])
+  @@index([inferenceId])
+  @@map("claim_evidence")
+}
+
+// ----------------------------------------------------------------------------
+// 5. ACTIVITY CONTEXT LINK (Family 2: Intent Associations)
+// ----------------------------------------------------------------------------
+model ActivityContextLink {
+  id                    String                @id @default(uuid()) @db.Uuid
+  blockId               String                @map("block_id") @db.Uuid
+  userId                String                @map("user_id") @db.Uuid
+
+  targetScope           TargetScope           @default(UNLINKED) @map("target_scope")
+  taskId                String?               @map("task_id") @db.Uuid
+  goalId                String?               @map("goal_id") @db.Uuid
+  projectTag            String?               @map("project_tag")
+
+  relevance             ContextRelevance      @default(UNKNOWN)
+  intentionRelationship IntentionRelationship @default(UNKNOWN) @map("intention_relationship")
+
+  confidence            Float?                // Calibrated confidence, nullable
+  provenance            ClaimProvenance       @default(INFERRED)
+  authority             ClaimAuthority        @default(SYSTEM)
+
+  block                 TemporalActivityBlock @relation(fields: [blockId], references: [id], onDelete: Cascade)
+  user                  User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  task                  Task?                 @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  goal                  DailyGoal?            @relation(fields: [goalId], references: [id], onDelete: SetNull)
+  evidence              ClaimEvidence[]
+
+  @@index([blockId])
+  @@index([userId])
+  @@index([taskId])
+  @@index([goalId])
+  @@map("activity_context_links")
+}
+
+// ----------------------------------------------------------------------------
+// 6. ATTENTION INFERENCE (Family 3: Attention Inference)
+// ----------------------------------------------------------------------------
+model AttentionInference {
+  id                    String              @id @default(uuid()) @db.Uuid
+  blockId               String              @map("block_id") @db.Uuid
+
+  focusEvidenceState    FocusEvidenceState  @default(UNKNOWN) @map("focus_evidence_state")
+
+  confidence            Float?
+  provenance            ClaimProvenance     @default(INFERRED)
+  authority             ClaimAuthority      @default(SYSTEM)
+
+  block                 TemporalActivityBlock @relation(fields: [blockId], references: [id], onDelete: Cascade)
+  evidence              ClaimEvidence[]
+
+  @@index([blockId])
+  @@map("attention_inferences")
+}
+
+// ----------------------------------------------------------------------------
+// 7. TELEMETRY COVERAGE GAP (Materialized Coverage Inactivity Interval)
+// ----------------------------------------------------------------------------
+model TelemetryCoverageGap {
+  id                    String              @id @default(uuid()) @db.Uuid
+  userId                String              @map("user_id") @db.Uuid
+  deviceId              String?             @map("device_id") @db.Uuid
+
+  startTime             DateTime            @map("start_time")
+  endTime               DateTime            @map("end_time")
+  durationSeconds       Int                 @map("duration_seconds")
+
+  coverageState         CoverageState       @default(UNKNOWN_SILENCE) @map("coverage_state")
+  reconciliationState   ReconciliationState @default(UNEXPLAINED) @map("reconciliation_state")
+
+  createdAt             DateTime            @default(now()) @map("created_at")
+  updatedAt             DateTime            @updatedAt @map("updated_at")
+
+  user                  User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device                DesktopDevice?      @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  explanations          UserGapExplanation[]
+
+  @@index([userId, startTime])
+  @@map("telemetry_coverage_gaps")
+}
+
+// ----------------------------------------------------------------------------
+// 8. USER GAP EXPLANATION (User Truth for Offline Time — 1:N)
+// ----------------------------------------------------------------------------
+model UserGapExplanation {
+  id                    String              @id @default(uuid()) @db.Uuid
+  gapId                 String              @map("gap_id") @db.Uuid
+  userId                String              @map("user_id") @db.Uuid
+
+  startTime             DateTime            @map("start_time")
+  endTime               DateTime            @map("end_time")
+
+  explanationType       String              @map("explanation_type") // "OFFLINE_WORK", "STUDY_LECTURE", "REST_BREAK"
+  description           String
+  offlineWorkContext    String?             @map("offline_work_context")
+
+  associatedTaskId      String?             @map("associated_task_id") @db.Uuid
+  associatedGoalId      String?             @map("associated_goal_id") @db.Uuid
+
+  createdAt             DateTime            @default(now()) @map("created_at")
+
+  gap                   TelemetryCoverageGap @relation(fields: [gapId], references: [id], onDelete: Cascade)
+  user                  User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  task                  Task?               @relation(fields: [associatedTaskId], references: [id], onDelete: SetNull)
+  goal                  DailyGoal?          @relation(fields: [associatedGoalId], references: [id], onDelete: SetNull)
+
+  @@index([gapId])
+  @@index([userId])
+  @@map("user_gap_explanations")
+}
+
+// ----------------------------------------------------------------------------
+// 9. USER ACTIVITY RULE (Declarative Semantic Mapping Engine)
+// ----------------------------------------------------------------------------
+model UserActivityRule {
+  id                    String              @id @default(uuid()) @db.Uuid
+  userId                String              @map("user_id") @db.Uuid
+
+  name                  String
+  priority              Int                 @default(100) // Lower number = higher priority
+  isEnabled             Boolean             @default(true) @map("is_enabled")
+
+  // Matchers
+  applicationPattern    String?             @map("application_pattern")
+  domainPattern         String?             @map("domain_pattern")
+  titlePattern          String?             @map("title_pattern")
+  urlPattern            String?             @map("url_pattern")
+
+  // Assigned Semantics
+  assignedModality      ActivityModality?   @map("assigned_modality")
+  assignedContext       String?             @map("assigned_context")
+  defaultRelevance      ContextRelevance?   @map("default_relevance")
+
+  createdAt             DateTime            @default(now()) @map("created_at")
+  updatedAt             DateTime            @updatedAt @map("updated_at")
+
+  user                  User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, priority])
+  @@map("user_activity_rules")
+}
+
+// ----------------------------------------------------------------------------
+// 10. USER ACTIVITY OVERRIDE (Recomputation-Resilient Manual Correction)
+// ----------------------------------------------------------------------------
+model UserActivityOverride {
+  id                    String              @id @default(uuid()) @db.Uuid
+  userId                String              @map("user_id") @db.Uuid
+
+  targetTimeWindowStart DateTime            @map("target_time_window_start")
+  targetTimeWindowEnd   DateTime            @map("target_time_window_end")
+  targetApplication     String              @map("target_application")
+  targetObservationSetFingerprint String?   @map("target_observation_set_fingerprint")
+
+  targetClaimFamily     String              @map("target_claim_family") // "CLASSIFICATION" | "INTENT_ASSOCIATION"
+  targetClaimType       String              @map("target_claim_type")   // "MODALITY_PRIMARY" | "TOPIC_CONTEXT" | "RELEVANCE"
+  overriddenValue       String              @map("overridden_value")
+  associatedTaskId      String?             @map("associated_task_id") @db.Uuid
+  reason                String?
+
+  createdAt             DateTime            @default(now()) @map("created_at")
+  user                  User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, targetTimeWindowStart, targetTimeWindowEnd])
+  @@map("user_activity_overrides")
+}
+
+// ----------------------------------------------------------------------------
+// 11. PROPOSED DEVICE HEARTBEAT (Hardware Availability & Power State Signal)
+// [PROVISIONAL - Desktop daemon lifecycle hooks to be investigated in Phase 3]
+// ----------------------------------------------------------------------------
+model ProposedDeviceHeartbeat {
+  id                    String              @id @default(uuid()) @db.Uuid
+  userId                String              @map("user_id") @db.Uuid
+  deviceId              String              @map("device_id") @db.Uuid
+
+  timestamp             DateTime
+  machinePowerState     MachinePowerState   @default(ACTIVE) @map("machine_power_state")
+  collectorState        CollectorState      @default(CONNECTED) @map("collector_state")
+  inputState            InputState          @default(ACTIVE) @map("input_state")
+  batteryLevel          Float?              @map("battery_level")
+
+  user                  User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device                DesktopDevice       @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([deviceId, timestamp])
+  @@map("proposed_device_heartbeats")
+}
