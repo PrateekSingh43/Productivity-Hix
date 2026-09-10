@@ -28,8 +28,8 @@ build
 dist
 
 
-#docs
-docs
+# Local doc screenshots (optional)
+# docs/review_img/
 
 # Debug
 npm-debug.log*

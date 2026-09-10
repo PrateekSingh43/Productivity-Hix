@@ -16,3 +16,6 @@ export async function disconnectDb() {
 }
 
 export type Database = PrismaClient;
+export * from "./generated/prisma/enums.js";
+export * from "./generated/prisma/models.js";
+export * from "./generated/prisma/client.js";

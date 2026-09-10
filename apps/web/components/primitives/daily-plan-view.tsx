@@ -183,7 +183,7 @@ export function DailyPlanView({
           <button
             type="button"
             onClick={handleSave}
-            className="text-xs font-medium bg-text-primary text-bg-primary hover:opacity-90 px-4 py-2 rounded-md transition-opacity cursor-pointer"
+            className="text-xs font-medium bg-text-primary text-bg-default hover:opacity-90 px-4 py-2 rounded-md transition-opacity cursor-pointer shadow-xs"
           >
             Save Plan
           </button>
@@ -218,7 +218,7 @@ export function DailyPlanView({
           <button
             type="button"
             onClick={startEditing}
-            className="inline-flex items-center gap-2 rounded-md bg-text-primary hover:opacity-90 text-bg-primary text-xs font-semibold px-4 py-2 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-hover cursor-pointer"
+            className="inline-flex items-center gap-2 rounded-md bg-text-primary hover:opacity-90 text-bg-default text-xs font-semibold px-4 py-2 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-hover cursor-pointer shadow-xs"
           >
             <Target size={14} />
             <span>Plan Today</span>
@@ -403,7 +403,7 @@ export function DailyPlanView({
                             onClick={() => onAssessOutcome?.(goal.id, outcome)}
                             className={`text-xs px-2.5 py-0.5 rounded border transition-colors cursor-pointer ${
                               goal.outcome === outcome
-                                ? "border-border-hover bg-text-primary text-bg-primary font-medium"
+                                ? "border-border-hover bg-text-primary text-bg-default font-medium shadow-xs"
                                 : "border-border-subtle text-text-muted hover:text-text-primary hover:bg-bg-secondary"
                             }`}
                           >

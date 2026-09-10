@@ -1,6 +1,8 @@
 @import "tailwindcss";
 
-:root, [data-theme="dark"] {
+@custom-variant dark (&:is(.dark, .dark *));
+
+:root, [data-theme="dark"], .dark {
   --background-default: #09090b;
   --background-inset: #0d0d10;
   --background-card: #111115;
@@ -34,7 +36,7 @@
   --radius-xl: 1rem;
 }
 
-[data-theme="light"] {
+[data-theme="light"], .light {
   --background-default: #ffffff;
   --background-inset: #f8fafc;
   --background-card: #ffffff;
@@ -99,8 +101,40 @@
   }
 }
 
+@media (prefers-color-scheme: dark) {
+  [data-theme="system"] {
+    --background-default: #09090b;
+    --background-inset: #0d0d10;
+    --background-card: #111115;
+    --background-secondary: #131318;
+    --background-tertiary: #1a1a22;
+    --border-subtle: #23232d;
+    --border-default: #30303d;
+    --border-strong: #424250;
+    --text-primary: #f7f7fb;
+    --text-secondary: #c0bfca;
+    --text-tertiary: #858493;
+    --foreground-primary: var(--text-primary);
+    --foreground-muted: var(--text-tertiary);
+    --foreground-secondary: var(--text-secondary);
+    --background-primary: var(--background-default);
+    --background-subtle: var(--background-secondary);
+    --border-hover: var(--border-strong);
+    --accent-default: #3b82f6;
+    --accent-hover: #60a5fa;
+    --accent-subtle: rgba(59, 130, 246, 0.12);
+    --success: #52d397;
+    --success-bg-subtle: #52d39719;
+    --warning: #f6c76c;
+    --warning-bg-subtle: #f6c76c19;
+    --error: #fb7185;
+    --error-bg-subtle: #fb718519;
+  }
+}
+
 @theme inline {
   --color-bg-default: var(--background-default);
+  --color-bg-primary: var(--background-default);
   --color-bg-inset: var(--background-inset);
   --color-bg-card: var(--background-card);
   --color-bg-secondary: var(--background-secondary);
@@ -112,6 +146,7 @@
   --color-text-secondary: var(--text-secondary);
   --color-text-tertiary: var(--text-tertiary);
   --color-text-muted: var(--text-tertiary);
+  --color-text-inverse: var(--background-default);
   --color-border-hover: var(--border-default);
   --color-bg-subtle: var(--background-secondary);
   --color-accent-default: var(--accent-default);

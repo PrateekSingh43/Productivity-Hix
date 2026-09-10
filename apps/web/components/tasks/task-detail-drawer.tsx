@@ -263,7 +263,7 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
               disabled={!title.trim() || updateTaskMutation.isPending || !isDirty}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${
                 isDirty
-                  ? "bg-text-primary text-bg-primary hover:opacity-90 shadow-xs"
+                  ? "bg-text-primary text-bg-default hover:opacity-90 shadow-xs"
                   : "bg-bg-secondary text-text-muted border border-border-subtle cursor-not-allowed opacity-50"
               }`}
               title="Save task changes"
@@ -626,7 +626,7 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
               disabled={!isDirty || updateTaskMutation.isPending || !title.trim()}
               className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${
                 isDirty && title.trim()
-                  ? "bg-text-primary text-bg-primary hover:opacity-90 shadow-xs"
+                  ? "bg-text-primary text-bg-default hover:opacity-90 shadow-xs"
                   : "bg-bg-secondary text-text-muted border border-border-subtle cursor-not-allowed opacity-50"
               }`}
             >

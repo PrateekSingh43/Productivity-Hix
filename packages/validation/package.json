@@ -16,6 +16,7 @@
     "test": "tsx --test src/**/*.test.ts"
   },
   "dependencies": {
+    "@repo/types": "workspace:*",
     "zod": "^4.4.3"
   },
   "devDependencies": {

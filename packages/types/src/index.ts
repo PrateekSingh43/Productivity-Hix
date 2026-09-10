@@ -8,3 +8,4 @@ export * from "./task";
 export * from "./timeline";
 export * from "./plan";
 export * from "./productive-day";
+export * from "./semantic-timeline";

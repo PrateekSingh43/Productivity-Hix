@@ -199,7 +199,7 @@ export function CurrentFocusCard({
           <button
             type="button"
             onClick={onStartFocus}
-            className="inline-flex items-center gap-1.5 rounded-md bg-text-primary hover:opacity-90 text-bg-primary text-xs font-medium px-4 py-2 transition-opacity cursor-pointer"
+            className="inline-flex items-center gap-1.5 rounded-md bg-text-primary hover:opacity-90 text-bg-default text-xs font-medium px-4 py-2 transition-opacity cursor-pointer shadow-xs"
           >
             <Play size={11} className="fill-current" />
             <span>Start Focus</span>
@@ -296,7 +296,7 @@ export function CurrentFocusCard({
           <button
             type="button"
             onClick={onAddTask}
-            className="inline-flex items-center gap-1.5 rounded-md bg-text-primary hover:opacity-90 text-bg-primary text-xs font-medium px-3.5 py-1.5 transition-opacity cursor-pointer"
+            className="inline-flex items-center gap-1.5 rounded-md bg-text-primary hover:opacity-90 text-bg-default text-xs font-medium px-3.5 py-1.5 transition-opacity cursor-pointer shadow-xs"
           >
             <Plus size={13} />
             <span>Add Task</span>

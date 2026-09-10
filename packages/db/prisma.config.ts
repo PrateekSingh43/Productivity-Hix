@@ -1,17 +1,10 @@
-// ProductiveHix DB config (Prisma 7)
-//
-// Prisma 7 moved datasource URLs out of schema.prisma into this config file.
-// NOTE: `Datasource` in @prisma/config 7.4 supports only { url, shadowDatabaseUrl }
-// — there is NO directUrl option. Supabase setups therefore need routing here:
-//   - Runtime/app traffic uses DATABASE_URL (transaction pooler, port 6543).
-//   - Schema commands (migrate / db push / pull / studio) need the DIRECT
-//     connection — DDL over the transaction pooler hangs.
+/// <reference types="node" />
 import "dotenv/config";
 import { defineConfig } from "prisma/config";
 
 const args = process.argv.slice(2).join(" ");
 const isSchemaCommand =
-  /\b(db\s+(push|pull|seed))\b/.test(args) ||
+  /\b(db\s+(push|pull|seed|execute))\b/.test(args) ||
   /\bmigrate\b/.test(args) ||
   /\bstudio\b/.test(args);
 
@@ -35,3 +28,6 @@ export default defineConfig({
     url: databaseUrl,
   },
 });
+
+
+

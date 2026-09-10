@@ -283,7 +283,7 @@ export default function TodayPage() {
             <button
               type="button"
               onClick={() => handleStartTaskFocus(nextUpTask)}
-              className="inline-flex items-center gap-1.5 text-xs font-medium bg-text-primary text-bg-primary hover:opacity-90 px-3 py-1.5 rounded-md transition-opacity cursor-pointer shrink-0"
+              className="inline-flex items-center gap-1.5 text-xs font-medium bg-text-primary text-bg-default hover:opacity-90 px-3 py-1.5 rounded-md transition-opacity cursor-pointer shrink-0 shadow-xs"
             >
               <Play size={11} className="fill-current" />
               <span>Start Focus</span>
@@ -373,7 +373,7 @@ export default function TodayPage() {
               </button>
               <button
                 type="submit"
-                className="text-xs font-medium bg-text-primary text-bg-primary px-3.5 py-1.5 rounded-md hover:opacity-90 cursor-pointer transition-opacity"
+                className="text-xs font-medium bg-text-primary text-bg-default px-3.5 py-1.5 rounded-md hover:opacity-90 cursor-pointer transition-opacity shadow-xs"
               >
                 Save Task
               </button>
