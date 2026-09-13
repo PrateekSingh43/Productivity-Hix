@@ -138,6 +138,26 @@ describe("WebSocket integration", () => {
     }
   });
 
+  it("rejects dev auth in production even if ALLOW_DEV_AUTH=true", async () => {
+    const origNodeEnv = process.env.NODE_ENV;
+    const origDevAuth = process.env.ALLOW_DEV_AUTH;
+    process.env.NODE_ENV = "production";
+    process.env.ALLOW_DEV_AUTH = "true";
+
+    try {
+      const ws = track(connectWS(port));
+      const msg = await waitForMessage(ws);
+      expect(msg.type).toBe("error");
+      expect(msg.message).toBe("Authentication required");
+
+      const close = await waitForClose(ws);
+      expect(close.code).toBe(1008);
+    } finally {
+      process.env.NODE_ENV = origNodeEnv;
+      process.env.ALLOW_DEV_AUTH = origDevAuth;
+    }
+  });
+
   // ── Protocol ───────────────────────────────────────────────────
 
   it("responds to ping with pong", async () => {

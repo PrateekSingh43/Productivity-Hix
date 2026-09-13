@@ -1,3 +1,4 @@
+import { AIError } from "../provider/errors";
 import type {
   AIGenerationPolicy,
   AIProvider,
@@ -17,6 +18,7 @@ const DEFAULT_POLICY: AIGenerationPolicy = {
 /**
  * Thin provider-agnostic generation runtime.
  * Applies generation policy defaults and ceilings before delegating to the provider.
+ * Enforces policy invariants at construction time.
  * Phase 0 does not include a tool registry or multi-step agent loop.
  */
 export class AIRuntime {
@@ -26,11 +28,57 @@ export class AIRuntime {
     private readonly provider: AIProvider,
     policy?: Partial<AIGenerationPolicy>,
   ) {
+    const defaultTemperature =
+      policy?.defaultTemperature ?? DEFAULT_POLICY.defaultTemperature;
+    const defaultMaxOutputTokens =
+      policy?.defaultMaxOutputTokens ?? DEFAULT_POLICY.defaultMaxOutputTokens;
+    const maxOutputTokens = policy?.maxOutputTokens ?? DEFAULT_POLICY.maxOutputTokens;
+
+    if (
+      !Number.isFinite(defaultTemperature) ||
+      defaultTemperature < 0 ||
+      defaultTemperature > 2
+    ) {
+      throw new AIError(
+        "defaultTemperature must be a finite number between 0 and 2",
+        "config",
+        500,
+      );
+    }
+    if (
+      !Number.isFinite(defaultMaxOutputTokens) ||
+      !Number.isInteger(defaultMaxOutputTokens) ||
+      defaultMaxOutputTokens <= 0
+    ) {
+      throw new AIError(
+        "defaultMaxOutputTokens must be a positive integer",
+        "config",
+        500,
+      );
+    }
+    if (
+      !Number.isFinite(maxOutputTokens) ||
+      !Number.isInteger(maxOutputTokens) ||
+      maxOutputTokens <= 0
+    ) {
+      throw new AIError(
+        "maxOutputTokens must be a positive integer",
+        "config",
+        500,
+      );
+    }
+    if (defaultMaxOutputTokens > maxOutputTokens) {
+      throw new AIError(
+        `defaultMaxOutputTokens (${defaultMaxOutputTokens}) cannot exceed maxOutputTokens (${maxOutputTokens})`,
+        "config",
+        500,
+      );
+    }
+
     this.policy = {
-      defaultTemperature: policy?.defaultTemperature ?? DEFAULT_POLICY.defaultTemperature,
-      defaultMaxOutputTokens:
-        policy?.defaultMaxOutputTokens ?? DEFAULT_POLICY.defaultMaxOutputTokens,
-      maxOutputTokens: policy?.maxOutputTokens ?? DEFAULT_POLICY.maxOutputTokens,
+      defaultTemperature,
+      defaultMaxOutputTokens,
+      maxOutputTokens,
     };
   }
 
@@ -79,4 +127,3 @@ export class AIRuntime {
     };
   }
 }
-

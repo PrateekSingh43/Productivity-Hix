@@ -2,27 +2,48 @@ import {
   AIRuntime,
   createAIProvider,
   loadAIConfig,
+  loadAIGenerationPolicy,
   type AIConfig,
+  type AIGenerationPolicy,
+  type AIProvider,
   type AIProviderName,
 } from "@repo/ai";
-import { env } from "../../config/env";
+import { env, type Env } from "../../config/env";
 
 let runtimeOverride: AIRuntime | null | undefined;
 let cachedRuntime: AIRuntime | null | undefined;
 
-function envForAI(): Record<string, string | undefined> {
-  return {
-    AI_PROVIDER: env.AI_PROVIDER,
-    AI_MODEL: env.AI_MODEL,
-    GEMINI_API_KEY: env.GEMINI_API_KEY,
-    GROQ_API_KEY: env.GROQ_API_KEY,
-    AI_TEMPERATURE: env.AI_TEMPERATURE?.toString(),
-    AI_MAX_OUTPUT_TOKENS: env.AI_MAX_OUTPUT_TOKENS?.toString(),
-  };
+export type AIEnvSource = Partial<Record<keyof Env, unknown>>;
+
+export function getAIConfigFromEnv(source: AIEnvSource = env): AIConfig | null {
+  return loadAIConfig({
+    AI_PROVIDER: source.AI_PROVIDER !== undefined ? String(source.AI_PROVIDER) : undefined,
+    AI_MODEL: source.AI_MODEL !== undefined ? String(source.AI_MODEL) : undefined,
+    GEMINI_API_KEY: source.GEMINI_API_KEY !== undefined ? String(source.GEMINI_API_KEY) : undefined,
+    GROQ_API_KEY: source.GROQ_API_KEY !== undefined ? String(source.GROQ_API_KEY) : undefined,
+  });
 }
 
-export function loadApiAIConfig(): AIConfig | null {
-  return loadAIConfig(envForAI());
+export function getAIGenerationPolicyFromEnv(source: AIEnvSource = env): AIGenerationPolicy {
+  return loadAIGenerationPolicy({
+    AI_TEMPERATURE:
+      source.AI_TEMPERATURE !== undefined ? String(source.AI_TEMPERATURE) : undefined,
+    AI_DEFAULT_MAX_OUTPUT_TOKENS:
+      source.AI_DEFAULT_MAX_OUTPUT_TOKENS !== undefined
+        ? String(source.AI_DEFAULT_MAX_OUTPUT_TOKENS)
+        : undefined,
+    AI_MAX_OUTPUT_TOKENS:
+      source.AI_MAX_OUTPUT_TOKENS !== undefined ? String(source.AI_MAX_OUTPUT_TOKENS) : undefined,
+  });
+}
+
+export function createAIRuntime(
+  config: AIConfig,
+  policy: AIGenerationPolicy,
+  provider?: AIProvider,
+): AIRuntime {
+  const activeProvider = provider ?? createAIProvider(config);
+  return new AIRuntime(activeProvider, policy);
 }
 
 export function getAIRuntime(): AIRuntime | null {
@@ -32,12 +53,13 @@ export function getAIRuntime(): AIRuntime | null {
   if (cachedRuntime !== undefined) {
     return cachedRuntime;
   }
-  const config = loadApiAIConfig();
+  const config = getAIConfigFromEnv();
   if (!config) {
     cachedRuntime = null;
     return null;
   }
-  cachedRuntime = new AIRuntime(createAIProvider(config));
+  const policy = getAIGenerationPolicyFromEnv();
+  cachedRuntime = createAIRuntime(config, policy);
   return cachedRuntime;
 }
 
@@ -47,7 +69,7 @@ export function getAIStatus(): {
   provider: AIProviderName | null;
   model: string | null;
 } {
-  const config = loadApiAIConfig();
+  const config = getAIConfigFromEnv();
   if (!config) {
     return { configured: false, ready: false, provider: null, model: null };
   }

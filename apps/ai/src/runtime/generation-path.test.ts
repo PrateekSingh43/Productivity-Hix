@@ -145,10 +145,36 @@ describe("provider-agnostic generation path", () => {
     await runtime.generate({
       messages: [{ role: "user", content: "hi" }],
       maxOutputTokens: 50000,
-      temperature: 3.5, // should clamp to 2
+      temperature: 3.5, // defensive runtime clamp
     });
     expect(capturedParams.max_tokens).toBe(4000);
     expect(capturedParams.temperature).toBe(2);
+  });
+
+  it("enforces policy invariants in AIRuntime constructor", () => {
+    const fakeProvider = createAIProvider(
+      { provider: "gemini", model: "gemini-2.5-flash", geminiApiKey: "k" },
+      { geminiClient },
+    );
+
+    // defaultMaxOutputTokens > maxOutputTokens rejected
+    expect(
+      () =>
+        new AIRuntime(fakeProvider, {
+          defaultMaxOutputTokens: 9000,
+          maxOutputTokens: 4000,
+        }),
+    ).toThrow(AIError);
+
+    // Invalid temperatures rejected
+    expect(() => new AIRuntime(fakeProvider, { defaultTemperature: 3.0 })).toThrow(AIError);
+    expect(() => new AIRuntime(fakeProvider, { defaultTemperature: -0.5 })).toThrow(AIError);
+    expect(() => new AIRuntime(fakeProvider, { defaultTemperature: NaN })).toThrow(AIError);
+    expect(() => new AIRuntime(fakeProvider, { defaultTemperature: Infinity })).toThrow(AIError);
+
+    // Non-integer / non-positive tokens rejected
+    expect(() => new AIRuntime(fakeProvider, { defaultMaxOutputTokens: 0 })).toThrow(AIError);
+    expect(() => new AIRuntime(fakeProvider, { maxOutputTokens: 12.5 })).toThrow(AIError);
   });
 });
 

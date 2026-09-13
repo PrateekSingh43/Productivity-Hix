@@ -170,6 +170,34 @@ describe("AI HTTP integration", () => {
 
       expect(res.status).toBe(400);
     });
+
+    it("rejects invalid temperature with HTTP 400", async () => {
+      const resHigh = await request(appWithAI())
+        .post("/api/ai/generate")
+        .set(DEV_USER_HEADER)
+        .send({ prompt: "hello", temperature: 3 });
+      expect(resHigh.status).toBe(400);
+
+      const resNeg = await request(appWithAI())
+        .post("/api/ai/generate")
+        .set(DEV_USER_HEADER)
+        .send({ prompt: "hello", temperature: -1 });
+      expect(resNeg.status).toBe(400);
+    });
+
+    it("rejects fractional or non-positive maxOutputTokens with HTTP 400", async () => {
+      const resFloat = await request(appWithAI())
+        .post("/api/ai/generate")
+        .set(DEV_USER_HEADER)
+        .send({ prompt: "hello", maxOutputTokens: 12.5 });
+      expect(resFloat.status).toBe(400);
+
+      const resZero = await request(appWithAI())
+        .post("/api/ai/generate")
+        .set(DEV_USER_HEADER)
+        .send({ prompt: "hello", maxOutputTokens: 0 });
+      expect(resZero.status).toBe(400);
+    });
   });
 
   // ── POST /api/ai/generate/stream ─────────────────────────────────

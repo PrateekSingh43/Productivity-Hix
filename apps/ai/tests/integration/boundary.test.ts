@@ -49,4 +49,17 @@ describe("Repository Architectural Boundary: @repo/ai", () => {
       }
     });
   }
+
+  it("declares zero dependencies on database, analytics, or telemetry in package.json", () => {
+    const pkgPath = join(__dirname, "../../package.json");
+    const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
+    const allDeps = {
+      ...pkg.dependencies,
+      ...pkg.devDependencies,
+      ...pkg.peerDependencies,
+    };
+    for (const pattern of FORBIDDEN_IMPORT_PATTERNS) {
+      expect(allDeps[pattern]).toBeUndefined();
+    }
+  });
 });

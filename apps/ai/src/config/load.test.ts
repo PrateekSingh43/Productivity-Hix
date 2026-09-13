@@ -20,8 +20,6 @@ describe("loadAIConfig", () => {
       model: "gemini-2.5-flash-lite",
       geminiApiKey: "secret-gemini",
       groqApiKey: undefined,
-      defaultTemperature: undefined,
-      defaultMaxOutputTokens: undefined,
     });
   });
 
@@ -69,26 +67,6 @@ describe("loadAIConfig", () => {
       expect((error as AIError).code).toBe("config");
     }
   });
-
-  it("parses runtime limit defaults from environment", () => {
-    const config = loadAIConfig({
-      AI_PROVIDER: "gemini",
-      GEMINI_API_KEY: "key",
-      AI_TEMPERATURE: "0.7",
-      AI_MAX_OUTPUT_TOKENS: "4096",
-    });
-    expect(config?.defaultTemperature).toBe(0.7);
-    expect(config?.defaultMaxOutputTokens).toBe(4096);
-  });
-
-  it("leaves runtime limits undefined when not specified", () => {
-    const config = loadAIConfig({
-      AI_PROVIDER: "gemini",
-      GEMINI_API_KEY: "key",
-    });
-    expect(config?.defaultTemperature).toBeUndefined();
-    expect(config?.defaultMaxOutputTokens).toBeUndefined();
-  });
 });
 
 describe("loadAIGenerationPolicy", () => {
@@ -118,12 +96,50 @@ describe("loadAIGenerationPolicy", () => {
     expect(() => loadAIGenerationPolicy({ AI_TEMPERATURE: "2.5" })).toThrow(AIError);
     expect(() => loadAIGenerationPolicy({ AI_TEMPERATURE: "-0.1" })).toThrow(AIError);
     expect(() => loadAIGenerationPolicy({ AI_TEMPERATURE: "invalid" })).toThrow(AIError);
+    expect(() => loadAIGenerationPolicy({ AI_TEMPERATURE: "Infinity" })).toThrow(AIError);
+    expect(() => loadAIGenerationPolicy({ AI_TEMPERATURE: "-Infinity" })).toThrow(AIError);
+    expect(() => loadAIGenerationPolicy({ AI_TEMPERATURE: "NaN" })).toThrow(AIError);
   });
 
-  it("rejects non-positive max output tokens", () => {
+  it("rejects non-positive and non-integer max output tokens", () => {
     expect(() => loadAIGenerationPolicy({ AI_MAX_OUTPUT_TOKENS: "0" })).toThrow(AIError);
     expect(() => loadAIGenerationPolicy({ AI_MAX_OUTPUT_TOKENS: "-10" })).toThrow(AIError);
     expect(() => loadAIGenerationPolicy({ AI_MAX_OUTPUT_TOKENS: "abc" })).toThrow(AIError);
+    expect(() => loadAIGenerationPolicy({ AI_MAX_OUTPUT_TOKENS: "12.5" })).toThrow(AIError);
+    expect(() => loadAIGenerationPolicy({ AI_MAX_OUTPUT_TOKENS: "Infinity" })).toThrow(AIError);
+  });
+
+  it("rejects non-positive and non-integer default output tokens", () => {
+    expect(() => loadAIGenerationPolicy({ AI_DEFAULT_MAX_OUTPUT_TOKENS: "0" })).toThrow(AIError);
+    expect(() => loadAIGenerationPolicy({ AI_DEFAULT_MAX_OUTPUT_TOKENS: "-5" })).toThrow(AIError);
+    expect(() => loadAIGenerationPolicy({ AI_DEFAULT_MAX_OUTPUT_TOKENS: "3.14" })).toThrow(AIError);
+    expect(() => loadAIGenerationPolicy({ AI_DEFAULT_MAX_OUTPUT_TOKENS: "Infinity" })).toThrow(AIError);
+  });
+
+  it("enforces defaultMaxOutputTokens <= maxOutputTokens invariant", () => {
+    // default > max -> failure
+    expect(() =>
+      loadAIGenerationPolicy({
+        AI_DEFAULT_MAX_OUTPUT_TOKENS: "9000",
+        AI_MAX_OUTPUT_TOKENS: "8192",
+      }),
+    ).toThrow(AIError);
+
+    // default == max -> valid
+    const equalPolicy = loadAIGenerationPolicy({
+      AI_DEFAULT_MAX_OUTPUT_TOKENS: "8192",
+      AI_MAX_OUTPUT_TOKENS: "8192",
+    });
+    expect(equalPolicy.defaultMaxOutputTokens).toBe(8192);
+    expect(equalPolicy.maxOutputTokens).toBe(8192);
+
+    // default < max -> valid
+    const lessPolicy = loadAIGenerationPolicy({
+      AI_DEFAULT_MAX_OUTPUT_TOKENS: "8191",
+      AI_MAX_OUTPUT_TOKENS: "8192",
+    });
+    expect(lessPolicy.defaultMaxOutputTokens).toBe(8191);
+    expect(lessPolicy.maxOutputTokens).toBe(8192);
   });
 });
 
