@@ -153,3 +153,22 @@ export async function ensureDuckDBSynchronized(): Promise<void> {
 export function isDuckDBSynchronized(): boolean {
   return isSynchronized;
 }
+
+export class DuckDBNotReadyError extends Error {
+  readonly statusCode = 503;
+  constructor(message = "DuckDB analytical projection is not synchronized or is currently rebuilding.") {
+    super(message);
+    this.name = "DuckDBNotReadyError";
+  }
+}
+
+export function assertDuckDBReady(): void {
+  if (!isSynchronized) {
+    throw new DuckDBNotReadyError();
+  }
+}
+
+export async function getSynchronizedDuckDB(): Promise<DuckDBClient> {
+  assertDuckDBReady();
+  return getDuckDB();
+}

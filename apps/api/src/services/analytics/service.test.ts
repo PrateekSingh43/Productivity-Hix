@@ -10,9 +10,11 @@ import {
   rebuildDuckDBFromPostgres,
   ensureDuckDBSynchronized,
   isDuckDBSynchronized,
+  assertDuckDBReady,
 } from "../data/duckdb";
 import { ingestTelemetryEvents } from "@repo/data";
 import type { TelemetryEvent } from "@repo/telemetry";
+import { handleTelemetryBatch } from "../../routes/telemetry";
 
 describe("Daily Analytics Real Service Integration & Backward Compatibility", () => {
   afterEach(async () => {
@@ -352,36 +354,118 @@ describe("DuckDB Analytical Projection Invariants & Resilience", () => {
     assert.equal(Number(countRes.getRows()[0]?.[0]), 1);
   });
 
-  it("Task 13 invariant: DuckDB projection failure does not fail or erase PostgreSQL telemetry", async () => {
-    const postgresStore: Array<{ id: string; userId: string; externalId: string }> = [];
+  it("BLOCKER 2 invariant: assertDuckDBReady() throws 503 while projection is unready or rebuilding", async () => {
+    // 1. When not synchronized
+    setTestDb({
+      normalizedActivity: {
+        findMany: async () => {
+          throw new Error("Simulated failure during rebuild");
+        },
+      },
+    });
 
-    // Step 1: PostgreSQL persistence succeeds
-    const pgPersist = (events: Array<{ id: string; userId: string; externalId: string }>) => {
-      postgresStore.push(...events);
-      return events.length;
-    };
-
-    const newEvents = [
-      { id: "pg-saved-1", userId: "u-pg", externalId: "ev-pg-1" },
-      { id: "pg-saved-2", userId: "u-pg", externalId: "ev-pg-2" },
-    ];
-
-    const persistedCount = pgPersist(newEvents);
-    assert.equal(persistedCount, 2);
-    assert.equal(postgresStore.length, 2);
-
-    // Step 2: Simulate DuckDB projection failure
-    let duckdbFailed = false;
     try {
-      throw new Error("Simulated DuckDB disk write failure / crash");
+      await rebuildDuckDBFromPostgres();
     } catch {
-      duckdbFailed = true;
+      // expected failure
     }
 
-    assert.equal(duckdbFailed, true);
-    // Invariant: PostgreSQL data remains 100% committed and intact!
-    assert.equal(postgresStore.length, 2);
-    assert.equal(postgresStore[0]?.externalId, "ev-pg-1");
-    assert.equal(postgresStore[1]?.externalId, "ev-pg-2");
+    assert.equal(isDuckDBSynchronized(), false);
+
+    // Assert calling assertDuckDBReady throws DuckDBNotReadyError with statusCode 503
+    let threw503 = false;
+    try {
+      assertDuckDBReady();
+    } catch (err: any) {
+      if (err.statusCode === 503) {
+        threw503 = true;
+      }
+    }
+    assert.equal(threw503, true, "assertDuckDBReady() must reject with HTTP 503 when unready");
+
+    // 2. When synchronized
+    setTestDb({
+      normalizedActivity: {
+        findMany: async () => [],
+        aggregate: async () => ({
+          _count: { id: 0 },
+          _sum: { duration: 0 },
+          _max: { timestamp: null },
+        }),
+      },
+    });
+    await ensureDuckDBSynchronized();
+    assert.equal(isDuckDBSynchronized(), true);
+    // Must not throw when synchronized
+    assert.doesNotThrow(() => assertDuckDBReady());
+  });
+
+  it("Task 13 invariant: real handleTelemetryBatch route handler commits PostgreSQL even when DuckDB fails", async () => {
+    const postgresSavedRows: any[] = [];
+
+    setTestDb({
+      normalizedActivity: {
+        findMany: async () => [],
+        createMany: async (args: { data: any[] }) => {
+          postgresSavedRows.push(...args.data);
+          return { count: args.data.length };
+        },
+        update: async () => ({}),
+      },
+    });
+
+    // Close DuckDB so any projection attempt fails
+    await closeDuckDB();
+
+    const mockReq: any = {
+      userId: "u-real-telemetry-user",
+      body: {
+        source: "desktop",
+        installationId: "inst-test",
+        sentAt: new Date().toISOString(),
+        events: [
+          {
+            eventId: "real-batch-ev-1",
+            source: "desktop",
+            installationId: "inst-test",
+            eventType: "active_window",
+            timestamp: "2026-09-13T16:00:00.000Z",
+            durationMs: 30000,
+            data: { application: "Code.exe", windowTitle: "main.ts" },
+          },
+        ],
+      },
+    };
+
+    let responseJson: any = null;
+    let nextCalledWithError: any = null;
+
+    const mockRes: any = {
+      json: (data: any) => {
+        responseJson = data;
+        return mockRes;
+      },
+    };
+
+    const mockNext = (err?: any) => {
+      if (err) nextCalledWithError = err;
+    };
+
+    // Execute the REAL route handler from routes/telemetry.ts
+    await handleTelemetryBatch(mockReq, mockRes, mockNext);
+
+    // 1. PostgreSQL received and committed the event
+    assert.equal(postgresSavedRows.length, 1);
+    assert.equal(postgresSavedRows[0]?.externalId, "real-batch-ev-1");
+    assert.equal(postgresSavedRows[0]?.userId, "u-real-telemetry-user");
+    assert.equal(postgresSavedRows[0]?.duration, 30);
+
+    // 2. HTTP response succeeded (DuckDB error was isolated and did not fail request)
+    assert.equal(nextCalledWithError, null);
+    assert.deepEqual(responseJson, {
+      accepted: 1,
+      duplicates: 0,
+      rejected: 0,
+    });
   });
 });

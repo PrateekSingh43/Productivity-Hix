@@ -3,7 +3,11 @@ import { getDb } from "../../lib/prisma";
 import { env } from "../../config/env";
 import type { DeviceCodeRequestInput, DeviceVerifyInput, DeviceTokenRequestInput } from "@repo/validation";
 
-const prisma = getDb();
+const prisma = new Proxy({} as any, {
+  get(_target, prop) {
+    return (getDb() as any)[prop];
+  },
+});
 
 export function generateUserCode(): string {
   const chars = "BCDFGHJKLMNPQRSTVWXYZ23456789";

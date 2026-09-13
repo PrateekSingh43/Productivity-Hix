@@ -6,6 +6,9 @@ let testDbOverride: Database | null = null;
 
 export function getDb(): Database {
   if (testDbOverride) return testDbOverride;
+  if (!process.env.DATABASE_URL) {
+    return {} as Database;
+  }
   return getBaseDb();
 }
 

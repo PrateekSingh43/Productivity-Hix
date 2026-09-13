@@ -9,7 +9,7 @@ import type { TelemetryEvent } from "@repo/telemetry";
 
 export const telemetryRouter: Router = Router();
 
-const handleTelemetryBatch: RequestHandler = async (request, response, next) => {
+export const handleTelemetryBatch: RequestHandler = async (request, response, next) => {
   try {
     const userId = userIdFrom(request);
     const batch = telemetryBatchSchema.parse(request.body);
