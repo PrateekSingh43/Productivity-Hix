@@ -20,7 +20,65 @@ import {
   collectAtomicBoundaries,
   createAtomicIntervals,
   mergeAdjacentEquivalentBlocks,
+  deduplicateProvenance,
 } from "./slicing";
+
+export const SOURCE_PRIORITY: Record<string, number> = {
+  desktop: 1,
+  browser: 2,
+  unknown: 3,
+};
+
+export function compareSegmentsForPrimary(
+  a: TimelineSegment,
+  b: TimelineSegment,
+  intervalStartMs: number,
+  intervalEndMs: number,
+): number {
+  const aOverlap = Math.min(intervalEndMs, toEpochMs(a.end)) - Math.max(intervalStartMs, toEpochMs(a.start));
+  const bOverlap = Math.min(intervalEndMs, toEpochMs(b.end)) - Math.max(intervalStartMs, toEpochMs(b.start));
+
+  // 1. Largest overlap first
+  if (bOverlap !== aOverlap) {
+    return bOverlap - aOverlap;
+  }
+
+  // 2. Canonical source priority: desktop (1) > browser (2) > unknown (3)
+  const aSrc = SOURCE_PRIORITY[a.source] ?? 99;
+  const bSrc = SOURCE_PRIORITY[b.source] ?? 99;
+  if (aSrc !== bSrc) {
+    return aSrc - bSrc;
+  }
+
+  // 3. Earliest start timestamp
+  const aStart = toEpochMs(a.start);
+  const bStart = toEpochMs(b.start);
+  if (aStart !== bStart) {
+    return aStart - bStart;
+  }
+
+  // 4. Earliest end timestamp
+  const aEnd = toEpochMs(a.end);
+  const bEnd = toEpochMs(b.end);
+  if (aEnd !== bEnd) {
+    return aEnd - bEnd;
+  }
+
+  // 5. Lexicographical application name
+  const appCmp = (a.application || "").localeCompare(b.application || "");
+  if (appCmp !== 0) {
+    return appCmp;
+  }
+
+  // 6. Lexicographical title
+  const titleCmp = (a.title || "").localeCompare(b.title || "");
+  if (titleCmp !== 0) {
+    return titleCmp;
+  }
+
+  // 7. Deterministic unique tie-breaker: Segment ID
+  return (a.id || "").localeCompare(b.id || "");
+}
 
 interface NormalizedCheckInWindow {
   checkIn: CheckIn;
@@ -74,7 +132,17 @@ export function buildEvidenceTimeline(options: BuildEvidenceOptions): EvidenceTi
     const aStart = toEpochMs(a.start);
     const bStart = toEpochMs(b.start);
     if (aStart !== bStart) return aStart - bStart;
-    return toEpochMs(a.end) - toEpochMs(b.end);
+    const aEnd = toEpochMs(a.end);
+    const bEnd = toEpochMs(b.end);
+    if (aEnd !== bEnd) return aEnd - bEnd;
+    const aSrc = SOURCE_PRIORITY[a.source] ?? 99;
+    const bSrc = SOURCE_PRIORITY[b.source] ?? 99;
+    if (aSrc !== bSrc) return aSrc - bSrc;
+    const appCmp = (a.application || "").localeCompare(b.application || "");
+    if (appCmp !== 0) return appCmp;
+    const titleCmp = (a.title || "").localeCompare(b.title || "");
+    if (titleCmp !== 0) return titleCmp;
+    return (a.id || "").localeCompare(b.id || "");
   });
 
   // 2. Normalize Check-in Windows
@@ -175,12 +243,8 @@ export function buildEvidenceTimeline(options: BuildEvidenceOptions): EvidenceTi
     );
 
     if (overlappingSegments.length > 0) {
-      // Pick primary segment (longest overlap with this atomic interval)
-      overlappingSegments.sort((a, b) => {
-        const aOverlap = Math.min(endMs, toEpochMs(a.end)) - Math.max(startMs, toEpochMs(a.start));
-        const bOverlap = Math.min(endMs, toEpochMs(b.end)) - Math.max(startMs, toEpochMs(b.start));
-        return bOverlap - aOverlap;
-      });
+      // Pick primary segment using deterministic total ordering
+      overlappingSegments.sort((a, b) => compareSegmentsForPrimary(a, b, startMs, endMs));
 
       const primarySeg = overlappingSegments[0]!;
       isObserved = true;
@@ -201,10 +265,15 @@ export function buildEvidenceTimeline(options: BuildEvidenceOptions): EvidenceTi
         rawEventCount: primarySeg.rawEventCount ?? 1,
       };
 
-      provenance.push({
-        source: primarySeg.source === "browser" ? "browser_telemetry" : "desktop_telemetry",
-        authority: "SYSTEM",
-      });
+      // Option B: Multi-source telemetry preservation
+      // Preserve provenance for ALL overlapping telemetry sources while retaining dominant primary observation
+      for (const seg of overlappingSegments) {
+        const src = seg.source === "browser" ? "browser_telemetry" : "desktop_telemetry";
+        provenance.push({
+          source: src,
+          authority: "SYSTEM",
+        });
+      }
     }
 
     // B. Check Gap Explanation
@@ -371,7 +440,7 @@ export function buildEvidenceTimeline(options: BuildEvidenceOptions): EvidenceTi
       endTime: new Date(endMs).toISOString(),
       durationSeconds,
       coverage,
-      provenance,
+      provenance: deduplicateProvenance(provenance),
       observation,
       report,
       intention,

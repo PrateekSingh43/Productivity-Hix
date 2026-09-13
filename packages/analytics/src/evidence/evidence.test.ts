@@ -882,4 +882,107 @@ describe("Phase 3: Evidence & Observation Model Invariants", () => {
     assert.equal(b2.observation?.isAfk, true, "Explicit OS AFK sensor must have isAfk = true");
     assert.equal(b2.observation?.application, "Away from Keyboard");
   });
+
+  it("Correction 3: Deterministic tie-breaking and multi-source provenance preservation under equal overlapping segments", () => {
+    // Overlapping telemetry across the EXACT SAME interval (10:00–10:20)
+    const desktopSeg: TimelineSegment = {
+      id: "seg-desktop",
+      start: "2026-09-14T10:00:00.000Z",
+      end: "2026-09-14T10:20:00.000Z",
+      durationMs: 1200000,
+      durationSeconds: 1200,
+      source: "desktop",
+      type: "application",
+      application: "Google Chrome",
+      title: "Google Chrome",
+      category: "focused",
+    };
+
+    const browserSeg: TimelineSegment = {
+      id: "seg-browser",
+      start: "2026-09-14T10:00:00.000Z",
+      end: "2026-09-14T10:20:00.000Z",
+      durationMs: 1200000,
+      durationSeconds: 1200,
+      source: "browser",
+      type: "browser",
+      application: "Google Chrome",
+      title: "github.com/org/repo",
+      domain: "github.com",
+      category: "focused",
+    };
+
+    // Run A: desktop then browser
+    const timelineA = buildEvidenceTimeline({
+      windowStart,
+      windowEnd,
+      segments: [desktopSeg, browserSeg],
+    });
+
+    // Run B: browser then desktop (reversed array order!)
+    const timelineB = buildEvidenceTimeline({
+      windowStart,
+      windowEnd,
+      segments: [browserSeg, desktopSeg],
+    });
+
+    // 1. Primary observation selection must be 100% identical regardless of input ordering
+    assert.equal(timelineA.blocks.length, timelineB.blocks.length);
+    assert.equal(
+      timelineA.blocks[0]!.observation?.title,
+      timelineB.blocks[0]!.observation?.title,
+      "Primary observation must be deterministic regardless of input array order",
+    );
+    // Desktop takes canonical source priority over browser
+    assert.equal(timelineA.blocks[0]!.observation?.title, "Google Chrome");
+    assert.equal(timelineB.blocks[0]!.observation?.title, "Google Chrome");
+
+    // 2. Option B: Multi-source provenance preservation
+    // Both desktop_telemetry and browser_telemetry must be preserved in provenance
+    const provA = timelineA.blocks[0]!.provenance;
+    const provB = timelineB.blocks[0]!.provenance;
+
+    const sourcesA = provA.map((p) => p.source);
+    const sourcesB = provB.map((p) => p.source);
+
+    assert.ok(sourcesA.includes("desktop_telemetry"), "Must preserve desktop telemetry in provenance");
+    assert.ok(sourcesA.includes("browser_telemetry"), "Must preserve concurrent browser telemetry in provenance");
+    assert.deepEqual(sourcesA, sourcesB, "Provenance must be identical regardless of input order");
+
+    // 3. Identical tie-breaker test for same-source segments (lexicographical app/title/id)
+    const segAppA: TimelineSegment = {
+      id: "seg-1",
+      start: "2026-09-14T10:00:00.000Z",
+      end: "2026-09-14T10:20:00.000Z",
+      durationMs: 1200000,
+      durationSeconds: 1200,
+      source: "desktop",
+      type: "application",
+      application: "Alpha.exe",
+      title: "Window A",
+      category: "focused",
+    };
+    const segAppB: TimelineSegment = {
+      id: "seg-2",
+      start: "2026-09-14T10:00:00.000Z",
+      end: "2026-09-14T10:20:00.000Z",
+      durationMs: 1200000,
+      durationSeconds: 1200,
+      source: "desktop",
+      type: "application",
+      application: "Beta.exe",
+      title: "Window B",
+      category: "focused",
+    };
+
+    const run1 = buildEvidenceTimeline({ windowStart, windowEnd, segments: [segAppA, segAppB] });
+    const run2 = buildEvidenceTimeline({ windowStart, windowEnd, segments: [segAppB, segAppA] });
+
+    assert.equal(
+      run1.blocks[0]!.observation?.application,
+      run2.blocks[0]!.observation?.application,
+      "Same-source tie-breaking must be deterministic under input reversal",
+    );
+    assert.equal(run1.blocks[0]!.observation?.application, "Alpha.exe");
+  });
 });

@@ -208,7 +208,7 @@ export function areBlocksSemanticallyEquivalent(
   return true;
 }
 
-function deduplicateProvenance(items: EvidenceProvenance[]): EvidenceProvenance[] {
+export function deduplicateProvenance(items: EvidenceProvenance[]): EvidenceProvenance[] {
   const seen = new Set<string>();
   const result: EvidenceProvenance[] = [];
   for (const item of items) {
@@ -218,6 +218,13 @@ function deduplicateProvenance(items: EvidenceProvenance[]): EvidenceProvenance[
       result.push(item);
     }
   }
+  result.sort((a, b) => {
+    const sCmp = a.source.localeCompare(b.source);
+    if (sCmp !== 0) return sCmp;
+    const aCmp = a.authority.localeCompare(b.authority);
+    if (aCmp !== 0) return aCmp;
+    return (a.collector || "").localeCompare(b.collector || "");
+  });
   return result;
 }
 
