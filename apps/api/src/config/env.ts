@@ -10,6 +10,7 @@ const envSchema = z.object({
   OAUTH_CLIENT_SECRET: z.string().optional(),
   OAUTH_CALLBACK_URL: z.string().url().optional(),
   SESSION_SECRET: z.string().min(32).optional(),
+  DUCKDB_PATH: z.string().optional(),
   ALLOW_DEV_AUTH: z
     .string()
     .optional()

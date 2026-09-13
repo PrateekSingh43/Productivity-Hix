@@ -13,6 +13,7 @@
     "start": "node -r dotenv/config dist/index.js",
     "typecheck": "tsc --noEmit",
     "check-types": "tsc --noEmit",
+    "test": "tsx --test src/**/*.test.ts",
     "test:e2e": "tsx test_e2e_proof.ts",
     "lint": "eslint . --max-warnings 0",
     "clean": "rimraf dist"

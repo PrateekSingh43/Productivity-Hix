@@ -3,11 +3,16 @@ import type { TelemetryEvent } from "@repo/telemetry";
 
 export async function ingestTelemetryEvents(
   client: DuckDBClient,
+  userId: string,
   events: TelemetryEvent[],
 ): Promise<number> {
   if (events.length === 0) return 0;
+  if (!userId || userId.trim() === "") {
+    throw new Error("userId is required for ingestTelemetryEvents");
+  }
 
   const conn = client.getConnection();
+  const safeUserId = userId.replace(/'/g, "''");
   let count = 0;
 
   for (const event of events) {
@@ -26,6 +31,7 @@ export async function ingestTelemetryEvents(
     const sql = `
       INSERT OR REPLACE INTO telemetry_events (
         event_id,
+        user_id,
         source,
         installation_id,
         event_type,
@@ -43,6 +49,7 @@ export async function ingestTelemetryEvents(
         raw_data
       ) VALUES (
         '${event.eventId.replace(/'/g, "''")}',
+        '${safeUserId}',
         '${event.source}',
         '${event.installationId.replace(/'/g, "''")}',
         '${event.eventType}',
@@ -67,3 +74,23 @@ export async function ingestTelemetryEvents(
 
   return count;
 }
+
+export async function updateTelemetryEventDuration(
+  client: DuckDBClient,
+  userId: string,
+  eventId: string,
+  durationMs: number,
+): Promise<void> {
+  if (!userId || userId.trim() === "") {
+    throw new Error("userId is required for updateTelemetryEventDuration");
+  }
+  const conn = client.getConnection();
+  const safeUserId = userId.replace(/'/g, "''");
+  const safeEventId = eventId.replace(/'/g, "''");
+  await conn.run(`
+    UPDATE telemetry_events
+    SET duration_ms = ${Math.round(durationMs)}
+    WHERE user_id = '${safeUserId}' AND event_id = '${safeEventId}';
+  `);
+}
+
