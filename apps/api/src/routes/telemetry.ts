@@ -2,7 +2,7 @@ import { Router, type RequestHandler } from "express";
 import { requireAuth, userIdFrom } from "../middleware/auth";
 import { telemetryBatchSchema } from "@repo/validation";
 import { getDb } from "../lib/prisma";
-import { getDuckDB } from "../services/data/duckdb";
+import { getDuckDB, invalidateDuckDBSynchronization } from "../services/data/duckdb";
 import { ingestTelemetryEvents, updateTelemetryEvent } from "@repo/data";
 import { wsManager } from "../services/websocket/server";
 import type { TelemetryEvent } from "@repo/telemetry";
@@ -129,7 +129,7 @@ export const handleTelemetryBatch: RequestHandler = async (request, response, ne
     }
 
     // Step 2: Project successfully persisted state to DuckDB analytical datastore.
-    // If DuckDB projection fails, PostgreSQL remains committed; log error for later rebuild.
+    // If DuckDB projection fails, PostgreSQL remains committed; invalidate DuckDB readiness and log error.
     if (updateEvents.length > 0) {
       try {
         const duckdb = await getDuckDB();
@@ -137,7 +137,8 @@ export const handleTelemetryBatch: RequestHandler = async (request, response, ne
           await updateTelemetryEvent(duckdb, userId, u.eventId, u.durationMs, u.data);
         }
       } catch (duckdbErr) {
-        console.error("[DuckDB Update Projection Error]:", duckdbErr);
+        invalidateDuckDBSynchronization();
+        console.error("[DuckDB Update Projection Error]: Projection invalidated:", duckdbErr);
       }
     }
 
@@ -146,7 +147,8 @@ export const handleTelemetryBatch: RequestHandler = async (request, response, ne
         const duckdb = await getDuckDB();
         await ingestTelemetryEvents(duckdb, userId, newEvents);
       } catch (duckdbErr) {
-        console.error("[DuckDB Ingest Projection Error]:", duckdbErr);
+        invalidateDuckDBSynchronization();
+        console.error("[DuckDB Ingest Projection Error]: Projection invalidated:", duckdbErr);
       }
 
       // Broadcast live telemetry update to active Web UI clients

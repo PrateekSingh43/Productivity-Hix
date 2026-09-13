@@ -11,6 +11,7 @@ import {
   ensureDuckDBSynchronized,
   isDuckDBSynchronized,
   assertDuckDBReady,
+  setDuckDBClientForTest,
 } from "../data/duckdb";
 import { ingestTelemetryEvents } from "@repo/data";
 import type { TelemetryEvent } from "@repo/telemetry";
@@ -400,9 +401,22 @@ describe("DuckDB Analytical Projection Invariants & Resilience", () => {
     assert.doesNotThrow(() => assertDuckDBReady());
   });
 
-  it("Task 13 invariant: real handleTelemetryBatch route handler commits PostgreSQL even when DuckDB fails", async () => {
-    const postgresSavedRows: any[] = [];
+  it("Task 13 invariant: real handleTelemetryBatch route handler commits PostgreSQL even when DuckDB fails, and invalidates readiness", async () => {
+    // 1. Initially mark DuckDB as synchronized
+    setTestDb({
+      normalizedActivity: {
+        findMany: async () => [],
+        aggregate: async () => ({
+          _count: { id: 0 },
+          _sum: { duration: 0 },
+          _max: { timestamp: null },
+        }),
+      },
+    });
+    await ensureDuckDBSynchronized();
+    assert.equal(isDuckDBSynchronized(), true, "DuckDB should initially be synchronized");
 
+    const postgresSavedRows: any[] = [];
     setTestDb({
       normalizedActivity: {
         findMany: async () => [],
@@ -414,8 +428,13 @@ describe("DuckDB Analytical Projection Invariants & Resilience", () => {
       },
     });
 
-    // Close DuckDB so any projection attempt fails
-    await closeDuckDB();
+    // Inject a failing DuckDB client
+    const failingClient = {
+      getConnection: () => {
+        throw new Error("Simulated DuckDB disk I/O failure or projection error");
+      },
+    } as unknown as any;
+    setDuckDBClientForTest(failingClient);
 
     const mockReq: any = {
       userId: "u-real-telemetry-user",
@@ -460,12 +479,135 @@ describe("DuckDB Analytical Projection Invariants & Resilience", () => {
     assert.equal(postgresSavedRows[0]?.userId, "u-real-telemetry-user");
     assert.equal(postgresSavedRows[0]?.duration, 30);
 
-    // 2. HTTP response succeeded (DuckDB error was isolated and did not fail request)
+    // 2. HTTP response succeeded (DuckDB error was isolated and did not fail telemetry request)
     assert.equal(nextCalledWithError, null);
     assert.deepEqual(responseJson, {
       accepted: 1,
       duplicates: 0,
       rejected: 0,
     });
+
+    // 3. CRITICAL INVARIANT: Invalidation happened!
+    // isDuckDBSynchronized() must now be FALSE
+    assert.equal(isDuckDBSynchronized(), false, "DuckDB readiness must be invalidated when projection fails");
+
+    // 4. CRITICAL INVARIANT: assertDuckDBReady() now rejects subsequent analytics requests with HTTP 503
+    let rejectedWith503 = false;
+    try {
+      assertDuckDBReady();
+    } catch (err: any) {
+      if (err.statusCode === 503) {
+        rejectedWith503 = true;
+      }
+    }
+    assert.equal(rejectedWith503, true, "Subsequent analytics requests must be blocked with HTTP 503 while projection is unready");
+
+    // Clean up
+    setDuckDBClientForTest(null);
+  });
+
+  it("telemetry update projection failure also invalidates DuckDB readiness while preserving PostgreSQL update", async () => {
+    // 1. Initially mark DuckDB as synchronized
+    setTestDb({
+      normalizedActivity: {
+        findMany: async () => [],
+        aggregate: async () => ({
+          _count: { id: 0 },
+          _sum: { duration: 0 },
+          _max: { timestamp: null },
+        }),
+      },
+    });
+    await ensureDuckDBSynchronized();
+    assert.equal(isDuckDBSynchronized(), true, "DuckDB should initially be synchronized");
+
+    let postgresUpdated = false;
+    setTestDb({
+      normalizedActivity: {
+        findMany: async () => [
+          {
+            id: "pg-existing-1",
+            userId: "u-real-telemetry-user",
+            externalId: "real-update-ev-1",
+            bucketId: "inst-test",
+            source: "desktop",
+            watcher: "active_window",
+            timestamp: new Date("2026-09-13T16:00:00.000Z"),
+            duration: 10, // 10s previously
+            data: { application: "Code.exe", windowTitle: "main.ts" },
+          },
+        ],
+        update: async () => {
+          postgresUpdated = true;
+          return {};
+        },
+      },
+    });
+
+    // Inject failing DuckDB client
+    const failingClient = {
+      getConnection: () => {
+        throw new Error("Simulated DuckDB failure during update");
+      },
+    } as unknown as any;
+    setDuckDBClientForTest(failingClient);
+
+    const mockReq: any = {
+      userId: "u-real-telemetry-user",
+      body: {
+        source: "desktop",
+        installationId: "inst-test",
+        sentAt: new Date().toISOString(),
+        events: [
+          {
+            eventId: "real-update-ev-1",
+            source: "desktop",
+            installationId: "inst-test",
+            eventType: "active_window",
+            timestamp: "2026-09-13T16:00:00.000Z",
+            durationMs: 40000, // 40s (increased from 10s)
+            data: { application: "Code.exe", windowTitle: "main.ts" },
+          },
+        ],
+      },
+    };
+
+    let responseJson: any = null;
+    let nextCalledWithError: any = null;
+    const mockRes: any = {
+      json: (data: any) => {
+        responseJson = data;
+        return mockRes;
+      },
+    };
+    const mockNext = (err?: any) => {
+      if (err) nextCalledWithError = err;
+    };
+
+    await handleTelemetryBatch(mockReq, mockRes, mockNext);
+
+    // 1. PostgreSQL updated
+    assert.equal(postgresUpdated, true);
+
+    // 2. HTTP response succeeded
+    assert.equal(nextCalledWithError, null);
+    assert.equal(responseJson.duplicates, 0);
+
+    // 3. DuckDB readiness invalidated
+    assert.equal(isDuckDBSynchronized(), false, "DuckDB readiness must be invalidated when update projection fails");
+
+    // 4. Analytics blocked with HTTP 503
+    let rejectedWith503 = false;
+    try {
+      assertDuckDBReady();
+    } catch (err: any) {
+      if (err.statusCode === 503) {
+        rejectedWith503 = true;
+      }
+    }
+    assert.equal(rejectedWith503, true);
+
+    // Clean up
+    setDuckDBClientForTest(null);
   });
 });

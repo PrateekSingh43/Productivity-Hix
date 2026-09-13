@@ -46,6 +46,10 @@ export async function closeDuckDB(): Promise<void> {
   }
 }
 
+export function setDuckDBClientForTest(client: DuckDBClient | null): void {
+  duckdbClient = client;
+}
+
 export async function rebuildDuckDBFromPostgres(userId?: string): Promise<number> {
   isSynchronized = false;
   const client = await getDuckDB();
@@ -152,6 +156,10 @@ export async function ensureDuckDBSynchronized(): Promise<void> {
 
 export function isDuckDBSynchronized(): boolean {
   return isSynchronized;
+}
+
+export function invalidateDuckDBSynchronization(): void {
+  isSynchronized = false;
 }
 
 export class DuckDBNotReadyError extends Error {
