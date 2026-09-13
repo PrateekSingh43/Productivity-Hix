@@ -24,4 +24,5 @@ export type {
   AggregationOptions,
 } from "./activity/segments";
 export * from "./features";
+export * from "./evidence";
 

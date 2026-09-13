@@ -10,3 +10,4 @@ export * from "./plan";
 export * from "./productive-day";
 export * from "./semantic-timeline";
 export * from "./user-preferences";
+export * from "./evidence";
