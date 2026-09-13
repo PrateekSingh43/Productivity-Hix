@@ -15,6 +15,11 @@ const envSchema = z.object({
     .string()
     .optional()
     .transform((value) => value === "true"),
+  AI_PROVIDER: z.string().optional(),
+  AI_MODEL: z.string().optional(),
+  GEMINI_API_KEY: z.string().optional(),
+  GEMINI_KEY: z.string().optional(),
+  GROQ_API_KEY: z.string().optional(),
 });
 
 export const env = envSchema.parse(process.env);

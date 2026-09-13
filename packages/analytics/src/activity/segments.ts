@@ -798,6 +798,7 @@ export function aggregateActivitySegments(
         source: item.source,
         type,
         activityType: type,
+        isAfk: item.isAfk,
         application: item.application,
         title: item.title,
         primaryTitle: item.title,

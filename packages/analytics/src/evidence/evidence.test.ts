@@ -759,4 +759,127 @@ describe("Phase 3: Evidence & Observation Model Invariants", () => {
 
     assert.deepEqual(t1, t2, "Timeline output must be 100% identical regardless of input ordering");
   });
+
+  it("Correction 1: Merging preserves all semantic dimensions without losing report/intention/observation differences", () => {
+    // Two contiguous 30m check-ins with identical assessment 'focused' BUT different alignment ('yes' vs 'no')
+    const ci1: CheckIn = {
+      id: "ci-align-yes",
+      userId: "u1",
+      workSessionId: null,
+      taskId: null,
+      windowStart: "2026-09-14T10:00:00.000Z",
+      windowEnd: "2026-09-14T10:30:00.000Z",
+      activityAssessment: "focused",
+      alignment: "yes", // ALIGNED
+      reasons: [],
+      state: "calm",
+      energy: "high",
+      focus: "focused",
+      note: null,
+      questionVersion: "v1",
+      source: "extension",
+      intent: null,
+      progress: true,
+      blocker: null,
+      productive: true,
+      outcome: null,
+      createdAt: "2026-09-14T10:30:00.000Z",
+    };
+
+    const ci2: CheckIn = {
+      id: "ci-align-no",
+      userId: "u1",
+      workSessionId: null,
+      taskId: null,
+      windowStart: "2026-09-14T10:30:00.000Z",
+      windowEnd: "2026-09-14T11:00:00.000Z",
+      activityAssessment: "focused",
+      alignment: "no", // NOT ALIGNED
+      reasons: [],
+      state: "calm",
+      energy: "high",
+      focus: "focused",
+      note: null,
+      questionVersion: "v1",
+      source: "extension",
+      intent: null,
+      progress: true,
+      blocker: null,
+      productive: true,
+      outcome: null,
+      createdAt: "2026-09-14T11:00:00.000Z",
+    };
+
+    const timeline = buildEvidenceTimeline({
+      windowStart,
+      windowEnd,
+      checkIns: [ci1, ci2],
+    });
+
+    // Invariant: Because alignment differed ('yes' vs 'no'), the two blocks must NOT merge into one!
+    assert.equal(timeline.blocks.length, 2, "Blocks with different alignment must NOT be merged");
+    assert.equal(timeline.blocks[0]!.report?.alignment, "yes");
+    assert.equal(timeline.blocks[1]!.report?.alignment, "no");
+
+    // Same check for energy difference
+    const ciEnergyLow: CheckIn = { ...ci1, energy: "low" };
+    const timelineEnergy = buildEvidenceTimeline({
+      windowStart,
+      windowEnd,
+      checkIns: [ci1, ciEnergyLow],
+    });
+    assert.equal(timelineEnergy.blocks.length, 2, "Blocks with different energy must NOT be merged");
+  });
+
+  it("Correction 2: Screen lock break category does NOT set isAfk true; only explicit AFK sets isAfk true", () => {
+    // 1. Screen lock event (e.g. LockApp.exe) has category = "break" but is NOT an OS AFK event
+    const lockScreenSeg: TimelineSegment = {
+      id: "seg-lock",
+      start: "2026-09-14T10:00:00.000Z",
+      end: "2026-09-14T10:30:00.000Z",
+      durationMs: 1800000,
+      durationSeconds: 1800,
+      source: "desktop",
+      type: "application",
+      isAfk: false, // NOT AFK
+      application: "LockApp.exe",
+      title: "Windows Default Lock Screen",
+      category: "break", // Classified as break by category rules
+    };
+
+    // 2. Explicit OS AFK event has isAfk = true
+    const osAfkSeg: TimelineSegment = {
+      id: "seg-afk",
+      start: "2026-09-14T10:30:00.000Z",
+      end: "2026-09-14T11:00:00.000Z",
+      durationMs: 1800000,
+      durationSeconds: 1800,
+      source: "desktop",
+      type: "break",
+      isAfk: true, // Explicit OS AFK
+      application: "Away from Keyboard",
+      title: "Away from keyboard",
+      category: "break",
+    };
+
+    const timeline = buildEvidenceTimeline({
+      windowStart,
+      windowEnd,
+      segments: [lockScreenSeg, osAfkSeg],
+    });
+
+    assert.equal(timeline.blocks.length, 2);
+
+    // Block 1 (LockApp.exe): category is "break", but isAfk MUST BE FALSE
+    const b1 = timeline.blocks[0]!;
+    assert.equal(b1.observation?.category, "break");
+    assert.equal(b1.observation?.isAfk, false, "Screen lock must NOT be labeled isAfk = true");
+    assert.equal(b1.observation?.application, "LockApp.exe");
+
+    // Block 2 (OS AFK): category is "break", and isAfk MUST BE TRUE
+    const b2 = timeline.blocks[1]!;
+    assert.equal(b2.observation?.category, "break");
+    assert.equal(b2.observation?.isAfk, true, "Explicit OS AFK sensor must have isAfk = true");
+    assert.equal(b2.observation?.application, "Away from Keyboard");
+  });
 });

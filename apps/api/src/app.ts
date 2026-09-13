@@ -18,6 +18,7 @@ import { analyticsRouter } from "./routes/analytics";
 import { telemetryRouter } from "./routes/telemetry";
 import { exportRouter } from "./routes/export";
 import { userRouter } from "./routes/user";
+import { aiRouter } from "./routes/ai";
 
 export function createApp(): Express {
   const app = express();
@@ -40,6 +41,7 @@ export function createApp(): Express {
   app.use("/api/analytics", analyticsRouter);
   app.use("/api/telemetry", telemetryRouter);
   app.use("/api/export", exportRouter);
+  app.use("/api/ai", aiRouter);
   app.use(errorHandler);
   return app;
 }

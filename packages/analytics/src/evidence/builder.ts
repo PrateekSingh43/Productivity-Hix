@@ -184,7 +184,11 @@ export function buildEvidenceTimeline(options: BuildEvidenceOptions): EvidenceTi
 
       const primarySeg = overlappingSegments[0]!;
       isObserved = true;
-      const isAfk = primarySeg.type === "break" || primarySeg.category === "break";
+      // Note: AFK requires an explicit OS AFK watcher signal, not merely category === "break" (which also includes screen lock)
+      const isAfk = Boolean(
+        primarySeg.isAfk ??
+        (primarySeg.application === "Away from Keyboard" || (primarySeg as any).watcher === "afk")
+      );
 
       observation = {
         application: primarySeg.application,

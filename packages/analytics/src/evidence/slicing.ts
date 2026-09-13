@@ -1,4 +1,11 @@
-import type { TemporalEvidenceBlock, EvidenceProvenance } from "@repo/types";
+import type {
+  TemporalEvidenceBlock,
+  EvidenceProvenance,
+  ObservationEvidence,
+  ReportEvidence,
+  IntentionEvidence,
+  OutcomeEvidence,
+} from "@repo/types";
 import type { BuildEvidenceOptions } from "./types";
 
 export function toEpochMs(val: string | Date | number): number {
@@ -128,66 +135,76 @@ export function createAtomicIntervals(boundaries: number[]): AtomicInterval[] {
 }
 
 /**
+ * Canonical dimension fingerprints to ensure merge equivalence preserves all semantic fields.
+ */
+export function observationFingerprint(obs: ObservationEvidence | null): string {
+  if (!obs) return "null";
+  return JSON.stringify([
+    obs.application,
+    obs.title,
+    obs.cleanTitle,
+    obs.domain ?? null,
+    obs.sanitizedUrl ?? null,
+    obs.category,
+    obs.isAfk,
+  ]);
+}
+
+export function reportFingerprint(rep: ReportEvidence | null): string {
+  if (!rep) return "null";
+  const sortedReasons = rep.reasons ? [...rep.reasons].sort() : [];
+  return JSON.stringify([
+    rep.source,
+    rep.reportingWindow.start,
+    rep.reportingWindow.end,
+    rep.assessment ?? null,
+    rep.alignment ?? null,
+    rep.energy ?? null,
+    rep.focus ?? null,
+    rep.note ?? null,
+    sortedReasons,
+    rep.gapReason ?? null,
+    rep.offlineWorkContext ?? null,
+    rep.authority,
+  ]);
+}
+
+export function intentionFingerprint(intent: IntentionEvidence | null): string {
+  if (!intent) return "null";
+  return JSON.stringify([
+    intent.targetScope,
+    intent.taskId ?? null,
+    intent.taskTitle ?? null,
+    intent.goalId ?? null,
+    intent.goalTitle ?? null,
+    intent.linkType,
+    intent.confidence ?? null,
+  ]);
+}
+
+export function outcomeFingerprint(outcome: OutcomeEvidence | null): string {
+  if (!outcome) return "null";
+  return JSON.stringify([
+    outcome.taskId ?? null,
+    outcome.taskStatus ?? null,
+    outcome.taskCompletedAt ?? null,
+    outcome.goalId ?? null,
+    outcome.goalOutcome ?? null,
+  ]);
+}
+
+/**
  * Compares whether two adjacent blocks are semantically equivalent across all evidence dimensions.
  */
 export function areBlocksSemanticallyEquivalent(
   a: TemporalEvidenceBlock,
   b: TemporalEvidenceBlock,
 ): boolean {
-  // 1. Coverage state must match
   if (a.coverage !== b.coverage) return false;
-
-  // 2. Observation equivalence
-  if ((a.observation === null) !== (b.observation === null)) return false;
-  if (a.observation && b.observation) {
-    if (
-      a.observation.application !== b.observation.application ||
-      a.observation.category !== b.observation.category ||
-      a.observation.title !== b.observation.title ||
-      a.observation.isAfk !== b.observation.isAfk ||
-      a.observation.domain !== b.observation.domain
-    ) {
-      return false;
-    }
-  }
-
-  // 3. Report equivalence
-  if ((a.report === null) !== (b.report === null)) return false;
-  if (a.report && b.report) {
-    if (
-      a.report.source !== b.report.source ||
-      a.report.assessment !== b.report.assessment ||
-      a.report.gapReason !== b.report.gapReason ||
-      a.report.note !== b.report.note
-    ) {
-      return false;
-    }
-  }
-
-  // 4. Intention equivalence
-  if ((a.intention === null) !== (b.intention === null)) return false;
-  if (a.intention && b.intention) {
-    if (
-      a.intention.targetScope !== b.intention.targetScope ||
-      a.intention.taskId !== b.intention.taskId ||
-      a.intention.linkType !== b.intention.linkType
-    ) {
-      return false;
-    }
-  }
-
-  // 5. Outcome equivalence
-  if ((a.outcome === null) !== (b.outcome === null)) return false;
-  if (a.outcome && b.outcome) {
-    if (
-      a.outcome.taskId !== b.outcome.taskId ||
-      a.outcome.taskStatus !== b.outcome.taskStatus ||
-      a.outcome.goalOutcome !== b.outcome.goalOutcome
-    ) {
-      return false;
-    }
-  }
-
+  if (observationFingerprint(a.observation) !== observationFingerprint(b.observation)) return false;
+  if (reportFingerprint(a.report) !== reportFingerprint(b.report)) return false;
+  if (intentionFingerprint(a.intention) !== intentionFingerprint(b.intention)) return false;
+  if (outcomeFingerprint(a.outcome) !== outcomeFingerprint(b.outcome)) return false;
   return true;
 }
 

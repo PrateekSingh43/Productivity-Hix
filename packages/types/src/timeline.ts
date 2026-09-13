@@ -20,6 +20,7 @@ export interface TimelineSegment {
   source: "desktop" | "browser" | "unknown";
   type: "application" | "browser" | "break";
   activityType?: "application" | "browser" | "break";
+  isAfk?: boolean;
   application: string;
   title: string;
   primaryTitle?: string;
