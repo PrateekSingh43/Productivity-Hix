@@ -6,6 +6,7 @@ import path from "node:path";
 import {
   DuckDBClient,
   ingestTelemetryEvents,
+  updateTelemetryEvent,
   updateTelemetryEventDuration,
   getTopApplications,
   getTopDomains,
@@ -154,7 +155,7 @@ test("DuckDB enforces strict user isolation across analytical queries", async ()
   await client.close();
 });
 
-test("DuckDB update projection correctly modifies existing event duration", async () => {
+test("DuckDB update projection correctly modifies existing event duration and metadata", async () => {
   const client = new DuckDBClient();
   await client.initialize(":memory:");
 
@@ -173,11 +174,25 @@ test("DuckDB update projection correctly modifies existing event duration", asyn
   const initialApps = await getTopApplications(client, "user-1");
   assert.equal(initialApps[0].totalDurationMs, 30000);
 
-  // Update duration projection (e.g. ongoing activity extended to 45s)
-  await updateTelemetryEventDuration(client, "user-1", "e-upd", 45000);
+  // Update duration and metadata projection (e.g. ongoing activity extended to 45s with new window title)
+  await updateTelemetryEvent(client, "user-1", "e-upd", 45000, {
+    application: "Slack.exe",
+    windowTitle: "random",
+    extraContext: "thread-123",
+  });
 
   const updatedApps = await getTopApplications(client, "user-1");
   assert.equal(updatedApps[0].totalDurationMs, 45000);
+
+  // Verify metadata and raw_data in DuckDB were faithfully updated
+  const conn = client.getConnection();
+  const rowRes = await conn.runAndReadAll(
+    `SELECT duration_ms, window_title, raw_data FROM telemetry_events WHERE user_id = 'user-1' AND event_id = 'e-upd'`
+  );
+  const rows = rowRes.getRows();
+  assert.equal(Number(rows[0][0]), 45000);
+  assert.equal(String(rows[0][1]), "random");
+  assert.ok(String(rows[0][2]).includes("thread-123"));
 
   await client.close();
 });

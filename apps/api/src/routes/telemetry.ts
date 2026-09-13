@@ -3,7 +3,7 @@ import { requireAuth, userIdFrom } from "../middleware/auth";
 import { telemetryBatchSchema } from "@repo/validation";
 import { getDb } from "../lib/prisma";
 import { getDuckDB } from "../services/data/duckdb";
-import { ingestTelemetryEvents, updateTelemetryEventDuration } from "@repo/data";
+import { ingestTelemetryEvents, updateTelemetryEvent } from "@repo/data";
 import { wsManager } from "../services/websocket/server";
 import type { TelemetryEvent } from "@repo/telemetry";
 
@@ -134,7 +134,7 @@ const handleTelemetryBatch: RequestHandler = async (request, response, next) => 
       try {
         const duckdb = await getDuckDB();
         for (const u of updateEvents) {
-          await updateTelemetryEventDuration(duckdb, userId, u.eventId, u.durationMs);
+          await updateTelemetryEvent(duckdb, userId, u.eventId, u.durationMs, u.data);
         }
       } catch (duckdbErr) {
         console.error("[DuckDB Update Projection Error]:", duckdbErr);
