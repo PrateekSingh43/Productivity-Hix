@@ -29,6 +29,19 @@ export const SOURCE_PRIORITY: Record<string, number> = {
   unknown: 3,
 };
 
+export function telemetryProvenanceSource(
+  source: TimelineSegment["source"],
+): string {
+  switch (source) {
+    case "desktop":
+      return "desktop_telemetry";
+    case "browser":
+      return "browser_telemetry";
+    case "unknown":
+      return "unknown_telemetry";
+  }
+}
+
 export function compareSegmentsForPrimary(
   a: TimelineSegment,
   b: TimelineSegment,
@@ -295,9 +308,8 @@ export function buildEvidenceTimeline(options: BuildEvidenceOptions): EvidenceTi
       // Option B: Multi-source telemetry preservation
       // Preserve provenance for ALL overlapping telemetry sources while retaining dominant primary observation
       for (const seg of overlappingSegments) {
-        const src = seg.source === "browser" ? "browser_telemetry" : "desktop_telemetry";
         provenance.push({
-          source: src,
+          source: telemetryProvenanceSource(seg.source),
           authority: "SYSTEM",
         });
       }

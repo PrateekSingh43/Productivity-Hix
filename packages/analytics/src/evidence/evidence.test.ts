@@ -1183,4 +1183,155 @@ describe("Phase 3: Evidence & Observation Model Invariants", () => {
     // In block 2 (10:15-11:00), outcome is task-1
     assert.equal(runA.blocks[1]!.outcome?.taskId, "task-1", "Stable tie-breaker selects task-1 deterministically");
   });
+
+  it("Test E: Unknown telemetry source provenance — source 'unknown' is mapped to 'unknown_telemetry', never falsely to desktop", () => {
+    const segUnknown: TimelineSegment = {
+      id: "seg-unk-1",
+      start: "2026-09-14T10:00:00.000Z",
+      end: "2026-09-14T10:30:00.000Z",
+      durationMs: 1800000,
+      durationSeconds: 1800,
+      source: "unknown",
+      type: "application",
+      application: "UnknownApp",
+      title: "Unknown Window",
+      category: "focused",
+    };
+
+    const timeline = buildEvidenceTimeline({
+      windowStart,
+      windowEnd,
+      segments: [segUnknown],
+    });
+
+    assert.equal(timeline.blocks.length, 2); // 10:00-10:30 observed, 10:30-11:00 unknown
+    const block0 = timeline.blocks[0]!;
+    assert.equal(block0.coverage, "OBSERVED");
+    assert.ok(
+      block0.provenance.some((p) => p.source === "unknown_telemetry"),
+      "Must map unknown source to unknown_telemetry provenance",
+    );
+    assert.strictEqual(
+      block0.provenance.some((p) => p.source === "desktop_telemetry"),
+      false,
+      "Unknown telemetry must NOT be mislabeled as desktop_telemetry",
+    );
+  });
+
+  it("Test F: Provenance order invariance with unknown source — desktop and unknown overlapping segments produce identical output regardless of input order", () => {
+    const segDesktop: TimelineSegment = {
+      id: "seg-desk-1",
+      start: "2026-09-14T10:00:00.000Z",
+      end: "2026-09-14T10:30:00.000Z",
+      durationMs: 1800000,
+      durationSeconds: 1800,
+      source: "desktop",
+      type: "application",
+      application: "VSCode",
+      title: "index.ts",
+      category: "focused",
+    };
+
+    const segUnknown: TimelineSegment = {
+      id: "seg-unk-2",
+      start: "2026-09-14T10:00:00.000Z",
+      end: "2026-09-14T10:30:00.000Z",
+      durationMs: 1800000,
+      durationSeconds: 1800,
+      source: "unknown",
+      type: "application",
+      application: "GenericProcess",
+      title: "Worker",
+      category: "focused",
+    };
+
+    const timelineA = buildEvidenceTimeline({
+      windowStart,
+      windowEnd,
+      segments: [segDesktop, segUnknown],
+    });
+
+    const timelineB = buildEvidenceTimeline({
+      windowStart,
+      windowEnd,
+      segments: [segUnknown, segDesktop],
+    });
+
+    assert.deepEqual(timelineA, timelineB, "Timeline output must be order-invariant with desktop and unknown segments");
+    const prov = timelineA.blocks[0]!.provenance;
+    const sources = prov.map((p) => p.source);
+    assert.ok(sources.includes("desktop_telemetry"), "Must represent desktop_telemetry in provenance");
+    assert.ok(sources.includes("unknown_telemetry"), "Must represent unknown_telemetry in provenance");
+    assert.equal(timelineA.blocks[0]!.observation?.application, "VSCode", "Desktop retains source priority over unknown");
+  });
+
+  it("Test G: Three-source provenance — desktop, browser, and unknown covering the same interval preserve all 3 source identities and remain order-invariant", () => {
+    const segDesktop: TimelineSegment = {
+      id: "seg-desk-3",
+      start: "2026-09-14T10:00:00.000Z",
+      end: "2026-09-14T10:30:00.000Z",
+      durationMs: 1800000,
+      durationSeconds: 1800,
+      source: "desktop",
+      type: "application",
+      application: "Code.exe",
+      title: "Project",
+      category: "focused",
+    };
+
+    const segBrowser: TimelineSegment = {
+      id: "seg-brow-3",
+      start: "2026-09-14T10:00:00.000Z",
+      end: "2026-09-14T10:30:00.000Z",
+      durationMs: 1800000,
+      durationSeconds: 1800,
+      source: "browser",
+      type: "browser",
+      application: "Google Chrome",
+      title: "Documentation",
+      domain: "github.com",
+      category: "browser",
+    };
+
+    const segUnknown: TimelineSegment = {
+      id: "seg-unk-3",
+      start: "2026-09-14T10:00:00.000Z",
+      end: "2026-09-14T10:30:00.000Z",
+      durationMs: 1800000,
+      durationSeconds: 1800,
+      source: "unknown",
+      type: "application",
+      application: "SystemDaemon",
+      title: "Sync",
+      category: "focused",
+    };
+
+    const timeline1 = buildEvidenceTimeline({
+      windowStart,
+      windowEnd,
+      segments: [segDesktop, segBrowser, segUnknown],
+    });
+
+    const timeline2 = buildEvidenceTimeline({
+      windowStart,
+      windowEnd,
+      segments: [segUnknown, segDesktop, segBrowser],
+    });
+
+    const timeline3 = buildEvidenceTimeline({
+      windowStart,
+      windowEnd,
+      segments: [segBrowser, segUnknown, segDesktop],
+    });
+
+    assert.deepEqual(timeline1, timeline2, "Timeline 1 and 2 must be identical");
+    assert.deepEqual(timeline1, timeline3, "Timeline 1 and 3 must be identical");
+
+    const sources = timeline1.blocks[0]!.provenance.map((p) => p.source).sort();
+    assert.deepEqual(
+      sources,
+      ["browser_telemetry", "desktop_telemetry", "unknown_telemetry"].sort(),
+      "Provenance must contain exactly the 3 source-level telemetry identities",
+    );
+  });
 });
