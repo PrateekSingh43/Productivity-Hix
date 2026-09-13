@@ -1,5 +1,6 @@
 export type {
   AIConfig,
+  AIGenerationPolicy,
   AIProvider,
   AIProviderName,
   ChatMessage,
@@ -22,7 +23,7 @@ export { GroqProvider } from "./provider/groq";
 export type { GroqClientLike } from "./provider/groq";
 export { createAIProvider } from "./provider/factory";
 export type { ProviderDependencies } from "./provider/factory";
-export { loadAIConfig, DEFAULT_MODELS } from "./config/load";
+export { loadAIConfig, loadAIGenerationPolicy, DEFAULT_MODELS } from "./config/load";
 export { generateRequestSchema, chatMessageSchema } from "./config/schema";
 export type { GenerateRequestInput } from "./config/schema";
 export { AIRuntime } from "./runtime/runtime";

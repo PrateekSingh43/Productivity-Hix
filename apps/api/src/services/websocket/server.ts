@@ -1,8 +1,7 @@
 import type { Server as HttpServer } from "node:http";
 import { WebSocketServer, WebSocket } from "ws";
-import { parse } from "node:url";
-import { env } from "../../config/env";
-import { validateDeviceToken } from "../auth/device-auth";
+import { authenticateWSConnection } from "./auth";
+import { routeWSMessage } from "./router";
 
 export class WebSocketManager {
   private wss: WebSocketServer | null = null;
@@ -12,28 +11,15 @@ export class WebSocketManager {
     this.wss = new WebSocketServer({ server, path: "/ws" });
 
     this.wss.on("connection", async (ws: WebSocket, req) => {
-      const parsed = parse(req.url || "", true);
-      const queryUserId = parsed.query.userId as string | undefined;
-      const queryToken = parsed.query.token as string | undefined;
+      const auth = await authenticateWSConnection(req);
 
-      // Extract user ID (from query, token, or dev auth)
-      let userId = queryUserId;
-      if (!userId && queryToken && queryToken.startsWith("phix_dt_")) {
-        const validated = await validateDeviceToken(queryToken);
-        if (validated) {
-          userId = validated.userId;
-        }
-      }
-      if (!userId && env.ALLOW_DEV_AUTH) {
-        userId = "00000000-0000-0000-0000-000000000001";
-      }
-
-      if (!userId) {
+      if (!auth) {
         ws.send(JSON.stringify({ type: "error", message: "Authentication required" }));
         ws.close(1008, "Authentication required");
         return;
       }
 
+      const { userId } = auth;
       this.registerSocket(userId, ws);
 
       ws.send(
@@ -43,6 +29,11 @@ export class WebSocketManager {
           timestamp: new Date().toISOString(),
         }),
       );
+
+      ws.on("message", (data) => {
+        const raw = typeof data === "string" ? data : data.toString("utf8");
+        routeWSMessage(ws, userId, raw);
+      });
 
       ws.on("close", () => {
         this.unregisterSocket(userId, ws);
@@ -77,6 +68,11 @@ export class WebSocketManager {
         client.send(message);
       }
     }
+  }
+
+  /** Visible for testing — number of sockets registered for a user. */
+  getSocketCount(userId: string): number {
+    return this.userSockets.get(userId)?.size ?? 0;
   }
 
   private registerSocket(userId: string, ws: WebSocket): void {

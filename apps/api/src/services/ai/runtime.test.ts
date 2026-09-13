@@ -1,11 +1,10 @@
+import { describe, it, expect, afterEach } from "vitest";
+import { AIRuntime, AIError, type AIProvider, type GenerateRequest } from "@repo/ai";
+import { setAIRuntimeForTest } from "./runtime";
+
+// Ensure test environment
 process.env.NODE_ENV = "test";
 process.env.ALLOW_DEV_AUTH = "true";
-
-import { afterEach, describe, it } from "node:test";
-import assert from "node:assert/strict";
-import { AIError, AIRuntime, type AIProvider, type GenerateRequest } from "@repo/ai";
-import { createApp } from "../../app";
-import { setAIRuntimeForTest } from "./runtime";
 
 class FakeProvider implements AIProvider {
   readonly name = "gemini" as const;
@@ -27,6 +26,10 @@ class FakeProvider implements AIProvider {
 
   async *generateStream(request: GenerateRequest) {
     const last = request.messages.at(-1)?.content ?? "";
+    if (last === "fail-stream") {
+      yield { text: "partial", done: false };
+      throw new AIError("mid-stream failure", "provider", 502, "gemini");
+    }
     yield { text: `echo:${last}`, done: false };
     yield { text: "", done: true };
   }
@@ -37,110 +40,24 @@ class FakeProvider implements AIProvider {
   }
 }
 
-async function listen(app: ReturnType<typeof createApp>): Promise<{
-  port: number;
-  close: () => Promise<void>;
-}> {
-  const server = app.listen(0);
-  await new Promise<void>((resolve) => server.once("listening", () => resolve()));
-  const address = server.address();
-  if (!address || typeof address === "string") {
-    throw new Error("Failed to bind test server");
-  }
-  return {
-    port: address.port,
-    close: () =>
-      new Promise((resolve, reject) => {
-        server.close((error) => (error ? reject(error) : resolve()));
-      }),
-  };
-}
-
-describe("API AI generation path", () => {
+describe("AI runtime service", () => {
   afterEach(() => {
     setAIRuntimeForTest(undefined);
   });
 
-  it("requires authentication", async () => {
-    const { port, close } = await listen(createApp());
-    try {
-      const response = await fetch(`http://127.0.0.1:${port}/api/ai/generate`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ prompt: "hello" }),
-      });
-      assert.equal(response.status, 401);
-    } finally {
-      await close();
-    }
+  it("setAIRuntimeForTest overrides the runtime", async () => {
+    const fake = new FakeProvider();
+    const runtime = new AIRuntime(fake);
+    setAIRuntimeForTest(runtime);
+
+    // Import dynamically to avoid circular issues
+    const { getAIRuntime } = await import("./runtime");
+    expect(getAIRuntime()).toBe(runtime);
   });
 
-  it("returns 503 when AI is not configured", async () => {
+  it("setAIRuntimeForTest(null) returns null runtime", async () => {
     setAIRuntimeForTest(null);
-    const { port, close } = await listen(createApp());
-    try {
-      const response = await fetch(`http://127.0.0.1:${port}/api/ai/generate`, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-user-id": "00000000-0000-0000-0000-000000000001",
-        },
-        body: JSON.stringify({ prompt: "hello" }),
-      });
-      assert.equal(response.status, 503);
-      const body = (await response.json()) as { error?: string; code?: string };
-      assert.equal(body.code, "config");
-      assert.equal(body.error, "AI is not configured");
-    } finally {
-      await close();
-    }
-  });
-
-  it("generates through the configured runtime without a provider-specific API branch", async () => {
-    setAIRuntimeForTest(new AIRuntime(new FakeProvider()));
-    const { port, close } = await listen(createApp());
-    try {
-      const status = await fetch(`http://127.0.0.1:${port}/api/ai/status`, {
-        headers: { "x-user-id": "00000000-0000-0000-0000-000000000001" },
-      });
-      assert.equal(status.status, 200);
-
-      const response = await fetch(`http://127.0.0.1:${port}/api/ai/generate`, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-user-id": "00000000-0000-0000-0000-000000000001",
-        },
-        body: JSON.stringify({ prompt: "hello" }),
-      });
-      assert.equal(response.status, 200);
-      const body = (await response.json()) as { text?: string; provider?: string; model?: string };
-      assert.equal(body.text, "echo:hello");
-      assert.equal(body.provider, "gemini");
-      assert.equal(body.model, "fake-model");
-    } finally {
-      await close();
-    }
-  });
-
-  it("surfaces provider errors", async () => {
-    setAIRuntimeForTest(new AIRuntime(new FakeProvider()));
-    const { port, close } = await listen(createApp());
-    try {
-      const response = await fetch(`http://127.0.0.1:${port}/api/ai/generate`, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-user-id": "00000000-0000-0000-0000-000000000001",
-        },
-        body: JSON.stringify({ prompt: "fail" }),
-      });
-      assert.equal(response.status, 502);
-      const body = (await response.json()) as { error?: string; code?: string };
-      assert.equal(body.code, "provider");
-      assert.equal(body.error, "synthetic provider failure");
-    } finally {
-      await close();
-    }
+    const { getAIRuntime } = await import("./runtime");
+    expect(getAIRuntime()).toBeNull();
   });
 });

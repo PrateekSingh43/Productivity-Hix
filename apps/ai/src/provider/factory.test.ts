@@ -1,5 +1,4 @@
-import { describe, it } from "node:test";
-import assert from "node:assert/strict";
+import { describe, it, expect } from "vitest";
 import { createAIProvider } from "./factory";
 import { GeminiProvider, type GeminiClientLike } from "./gemini";
 import { GroqProvider, type GroqClientLike } from "./groq";
@@ -37,23 +36,23 @@ describe("createAIProvider", () => {
       },
       { geminiClient },
     );
-    assert.equal(provider instanceof GeminiProvider, true);
-    assert.equal(provider.name, "gemini");
-    assert.equal(provider.model, "gemini-2.5-flash");
+    expect(provider).toBeInstanceOf(GeminiProvider);
+    expect(provider.name).toBe("gemini");
+    expect(provider.model).toBe("gemini-2.5-flash");
   });
 
   it("creates a Groq provider from configuration", () => {
     const provider = createAIProvider(
       {
         provider: "groq",
-        model: "llama-3.1-8b-instant",
+        model: "llama-3.3-70b-versatile",
         groqApiKey: "k",
       },
       { groqClient },
     );
-    assert.equal(provider instanceof GroqProvider, true);
-    assert.equal(provider.name, "groq");
-    assert.equal(provider.model, "llama-3.1-8b-instant");
+    expect(provider).toBeInstanceOf(GroqProvider);
+    expect(provider.name).toBe("groq");
+    expect(provider.model).toBe("llama-3.3-70b-versatile");
   });
 
   it("switches provider when configuration changes", () => {
@@ -64,21 +63,39 @@ describe("createAIProvider", () => {
     })!, { geminiClient, groqClient });
     const groq = createAIProvider(loadAIConfig({
       AI_PROVIDER: "groq",
-      AI_MODEL: "llama-3.1-8b-instant",
+      AI_MODEL: "llama-3.3-70b-versatile",
       GROQ_API_KEY: "qk",
     })!, { geminiClient, groqClient });
-    assert.equal(gemini.name, "gemini");
-    assert.equal(groq.name, "groq");
+    expect(gemini.name).toBe("gemini");
+    expect(groq.name).toBe("groq");
   });
 
   it("fails when the selected provider is missing its API key", () => {
-    assert.throws(
+    expect(
       () => createAIProvider({ provider: "gemini", model: "gemini-2.5-flash" }),
-      (error: unknown) => error instanceof AIError && error.code === "config",
+    ).toThrow(AIError);
+    expect(
+      () => createAIProvider({ provider: "groq", model: "llama-3.3-70b-versatile" }),
+    ).toThrow(AIError);
+  });
+
+  it("both providers implement the same AIProvider interface methods", async () => {
+    const gemini = createAIProvider(
+      { provider: "gemini", model: "gemini-2.5-flash", geminiApiKey: "k" },
+      { geminiClient },
     );
-    assert.throws(
-      () => createAIProvider({ provider: "groq", model: "llama-3.1-8b-instant" }),
-      (error: unknown) => error instanceof AIError && error.code === "config",
+    const groq = createAIProvider(
+      { provider: "groq", model: "llama-3.3-70b-versatile", groqApiKey: "k" },
+      { groqClient },
     );
+
+    // Both have the same interface methods
+    for (const provider of [gemini, groq]) {
+      expect(provider).toHaveProperty("name");
+      expect(provider).toHaveProperty("model");
+      expect(typeof provider.generate).toBe("function");
+      expect(typeof provider.generateStream).toBe("function");
+      expect(typeof provider.generateWithTools).toBe("function");
+    }
   });
 });

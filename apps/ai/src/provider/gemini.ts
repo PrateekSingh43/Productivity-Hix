@@ -38,7 +38,18 @@ export type GeminiGenerateContentResponse = {
     promptTokenCount?: number;
     candidatesTokenCount?: number;
   };
-  candidates?: Array<{ finishReason?: string }>;
+  candidates?: Array<{
+    finishReason?: string;
+    content?: {
+      parts?: Array<{
+        functionCall?: {
+          id?: string;
+          name?: string;
+          args?: Record<string, unknown>;
+        };
+      }>;
+    };
+  }>;
 };
 
 export interface GeminiClientLike {
@@ -165,13 +176,20 @@ export class GeminiProvider implements AIProvider {
   }
 
   private toToolCalls(response: GeminiGenerateContentResponse): ToolCallRequest[] {
-    const calls = response.functionCalls ?? [];
+    const candidateParts =
+      response.candidates?.[0]?.content?.parts
+        ?.filter((p) => Boolean(p.functionCall))
+        .map((p) => p.functionCall!) ?? [];
+    const calls =
+      response.functionCalls && response.functionCalls.length > 0
+        ? response.functionCalls
+        : candidateParts;
     return calls
-      .filter((call) => Boolean(call.name))
+      .filter((call) => Boolean(call?.name))
       .map((call, index) => ({
         id: call.id || `gemini_call_${index}`,
         name: call.name as string,
-        arguments: call.args ?? {},
+        arguments: (call.args as Record<string, unknown>) ?? {},
       }));
   }
 }

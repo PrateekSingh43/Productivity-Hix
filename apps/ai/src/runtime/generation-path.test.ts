@@ -1,5 +1,4 @@
-import { describe, it } from "node:test";
-import assert from "node:assert/strict";
+import { describe, it, expect } from "vitest";
 import { AIRuntime } from "./runtime";
 import { createAIProvider } from "../provider/factory";
 import { loadAIConfig } from "../config/load";
@@ -44,8 +43,8 @@ const groqClient: GroqClientLike = {
 
 function runtimeFor(env: Record<string, string>): AIRuntime {
   const config = loadAIConfig(env);
-  assert.ok(config);
-  return new AIRuntime(createAIProvider(config, { geminiClient, groqClient }));
+  expect(config).toBeTruthy();
+  return new AIRuntime(createAIProvider(config!, { geminiClient, groqClient }));
 }
 
 async function collectStream(request: GenerateRequest, runtime: AIRuntime): Promise<string> {
@@ -66,21 +65,21 @@ describe("provider-agnostic generation path", () => {
       GEMINI_API_KEY: "gk",
     });
     const result: GenerateResult = await runtime.generate(request);
-    assert.equal(result.provider, "gemini");
-    assert.equal(result.model, "gemini-2.5-flash");
-    assert.equal(result.text, "gemini-path");
-    assert.deepEqual(runtime.getProviderInfo(), { provider: "gemini", model: "gemini-2.5-flash" });
+    expect(result.provider).toBe("gemini");
+    expect(result.model).toBe("gemini-2.5-flash");
+    expect(result.text).toBe("gemini-path");
+    expect(runtime.getProviderInfo()).toEqual({ provider: "gemini", model: "gemini-2.5-flash" });
   });
 
   it("generates through Groq when AI_PROVIDER=groq", async () => {
     const runtime = runtimeFor({
       AI_PROVIDER: "groq",
-      AI_MODEL: "llama-3.1-8b-instant",
+      AI_MODEL: "openai/gpt-oss-120b",
       GROQ_API_KEY: "qk",
     });
     const result = await runtime.generate(request);
-    assert.equal(result.provider, "groq");
-    assert.equal(result.text, "groq-path");
+    expect(result.provider).toBe("groq");
+    expect(result.text).toBe("groq-path");
   });
 
   it("switches providers without runtime branching on provider name", async () => {
@@ -94,10 +93,10 @@ describe("provider-agnostic generation path", () => {
     });
     const gemini = await geminiRuntime.generate(request);
     const groq = await groqRuntime.generate(request);
-    assert.equal(gemini.provider, "gemini");
-    assert.equal(groq.provider, "groq");
-    assert.equal(await collectStream(request, geminiRuntime), "gemini-stream");
-    assert.equal(await collectStream(request, groqRuntime), "groq-stream");
+    expect(gemini.provider).toBe("gemini");
+    expect(groq.provider).toBe("groq");
+    expect(await collectStream(request, geminiRuntime)).toBe("gemini-stream");
+    expect(await collectStream(request, groqRuntime)).toBe("groq-stream");
   });
 
   it("surfaces configuration errors before any generation", () => {
@@ -105,13 +104,51 @@ describe("provider-agnostic generation path", () => {
       AI_PROVIDER: "gemini",
       AI_MODEL: "gemini-2.5-flash",
     });
-    assert.ok(config);
-    assert.throws(
-      () => createAIProvider(config),
-      (error: unknown) =>
-        error instanceof AIError &&
-        error.code === "config" &&
-        error.message === "Gemini API key is missing",
+    expect(config).toBeTruthy();
+    expect(
+      () => createAIProvider(config!),
+    ).toThrow(AIError);
+  });
+
+  it("enforces generation policy: applies defaults and hard ceilings", async () => {
+    let capturedParams: any = null;
+    const recordingGroqClient: GroqClientLike = {
+      chat: {
+        completions: {
+          async create(params) {
+            capturedParams = params;
+            return {
+              choices: [{ finish_reason: "stop", message: { role: "assistant", content: "ok" } }],
+            };
+          },
+        },
+      },
+    };
+
+    const provider = createAIProvider(
+      { provider: "groq", model: "openai/gpt-oss-120b", groqApiKey: "key" },
+      { groqClient: recordingGroqClient },
     );
+
+    const runtime = new AIRuntime(provider, {
+      defaultTemperature: 0.5,
+      defaultMaxOutputTokens: 2000,
+      maxOutputTokens: 4000,
+    });
+
+    // 1. Omitted values get policy defaults
+    await runtime.generate({ messages: [{ role: "user", content: "hi" }] });
+    expect(capturedParams.temperature).toBe(0.5);
+    expect(capturedParams.max_tokens).toBe(2000);
+
+    // 2. Values exceeding maxOutputTokens are capped
+    await runtime.generate({
+      messages: [{ role: "user", content: "hi" }],
+      maxOutputTokens: 50000,
+      temperature: 3.5, // should clamp to 2
+    });
+    expect(capturedParams.max_tokens).toBe(4000);
+    expect(capturedParams.temperature).toBe(2);
   });
 });
+

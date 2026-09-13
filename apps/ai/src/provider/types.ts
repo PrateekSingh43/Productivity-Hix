@@ -65,4 +65,13 @@ export interface AIConfig {
   model: string;
   geminiApiKey?: string;
   groqApiKey?: string;
+  defaultTemperature?: number;
+  defaultMaxOutputTokens?: number;
 }
+
+export interface AIGenerationPolicy {
+  defaultTemperature: number;
+  defaultMaxOutputTokens: number;
+  maxOutputTokens: number;
+}
+

@@ -1,3 +1,4 @@
+import "dotenv/config";
 import { z } from "zod";
 
 const envSchema = z.object({
@@ -18,8 +19,13 @@ const envSchema = z.object({
   AI_PROVIDER: z.string().optional(),
   AI_MODEL: z.string().optional(),
   GEMINI_API_KEY: z.string().optional(),
-  GEMINI_KEY: z.string().optional(),
-  GROQ_API_KEY: z.string().optional(),
+  GROQ_API_KEY: z
+    .string()
+    .optional()
+    .transform((value) => value || process.env.GROQ_API_Key),
+  AI_TEMPERATURE: z.coerce.number().min(0).max(2).optional(),
+  AI_MAX_OUTPUT_TOKENS: z.coerce.number().int().positive().max(8192).optional(),
 });
 
 export const env = envSchema.parse(process.env);
+

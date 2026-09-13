@@ -15,8 +15,9 @@ function envForAI(): Record<string, string | undefined> {
     AI_PROVIDER: env.AI_PROVIDER,
     AI_MODEL: env.AI_MODEL,
     GEMINI_API_KEY: env.GEMINI_API_KEY,
-    GEMINI_KEY: env.GEMINI_KEY,
     GROQ_API_KEY: env.GROQ_API_KEY,
+    AI_TEMPERATURE: env.AI_TEMPERATURE?.toString(),
+    AI_MAX_OUTPUT_TOKENS: env.AI_MAX_OUTPUT_TOKENS?.toString(),
   };
 }
 

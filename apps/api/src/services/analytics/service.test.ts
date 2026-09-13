@@ -1,6 +1,6 @@
 process.env.NODE_ENV = "test";
 
-import { describe, it, afterEach } from "node:test";
+import { describe, it, afterEach } from "vitest";
 import assert from "node:assert/strict";
 import { dailyAnalytics } from "./service";
 import { setTestDb, resetTestDb } from "../../lib/prisma";

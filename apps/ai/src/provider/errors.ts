@@ -21,7 +21,7 @@ export class AIError extends Error {
     statusCode: number,
     provider?: AIProviderName,
   ) {
-    super(message);
+    super(sanitizeErrorMessage(message, []));
     this.code = code;
     this.statusCode = statusCode;
     this.status = statusCode;
