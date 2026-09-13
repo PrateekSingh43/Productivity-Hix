@@ -6,5 +6,5 @@ import type { AIProviderName } from "../provider/types";
  */
 export const DEFAULT_MODELS: Record<AIProviderName, string> = {
   gemini: "gemini-2.5-flash",
-  groq: "llama-3.1-8b-instant",
+  groq: "meta-llama/llama-prompt-guard-2-86m",
 };
