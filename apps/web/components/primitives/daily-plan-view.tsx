@@ -13,6 +13,7 @@ import {
   Clock,
   ArrowRight,
   Info,
+  X,
 } from "lucide-react";
 import type { DailyGoal, GoalOutcome, Task } from "@repo/types";
 import { formatProductiveDateLabel } from "@repo/types";
@@ -24,7 +25,7 @@ export interface DailyPlanViewProps {
   goals: DailyGoal[];
   independentTasks?: Task[];
   isLoading?: boolean;
-  onSavePlan: (goals: Array<{ id?: string; title: string; order: number; outcome?: GoalOutcome | null }>) => Promise<void> | void;
+  onSavePlan: (goals: Array<{ id?: string; title: string; order: number; outcome?: GoalOutcome | null; newTasks?: string[] }>) => Promise<void> | void;
   onAssessOutcome?: (goalId: string, outcome: GoalOutcome) => Promise<void> | void;
   onToggleTask?: (task: Task) => Promise<void> | void;
   className?: string;
@@ -44,7 +45,7 @@ export function DailyPlanView({
   const [isEditing, setIsEditing] = useState(false);
   const [isAssessing, setIsAssessing] = useState(false);
   const [expandedGoals, setExpandedGoals] = useState<Record<string, boolean>>({});
-  const [draftGoals, setDraftGoals] = useState<Array<{ id?: string; title: string }>>([]);
+  const [draftGoals, setDraftGoals] = useState<Array<{ id?: string; title: string, newTasks: string[] }>>([]);
 
   const formattedDate = date ? formatProductiveDateLabel(date) : "";
 
@@ -55,14 +56,14 @@ export function DailyPlanView({
   const startEditing = () => {
     setDraftGoals(
       goals.length > 0
-        ? goals.map((g) => ({ id: g.id, title: g.title }))
-        : [{ title: "" }]
+        ? goals.map((g) => ({ id: g.id, title: g.title, newTasks: [] }))
+        : [{ title: "", newTasks: [] }]
     );
     setIsEditing(true);
   };
 
   const addDraftGoal = () => {
-    setDraftGoals((prev) => [...prev, { title: "" }]);
+    setDraftGoals((prev) => [...prev, { title: "", newTasks: [] }]);
   };
 
   const updateDraftGoal = (index: number, title: string) => {
@@ -77,10 +78,43 @@ export function DailyPlanView({
     setDraftGoals((prev) => prev.filter((_, i) => i !== index));
   };
 
+  const addTaskToDraftGoal = (goalIndex: number) => {
+    setDraftGoals((prev) => {
+      const next = [...prev];
+      next[goalIndex] = { ...next[goalIndex], newTasks: [...(next[goalIndex].newTasks || []), ""] };
+      return next;
+    });
+  };
+
+  const updateDraftGoalTask = (goalIndex: number, taskIndex: number, title: string) => {
+    setDraftGoals((prev) => {
+      const next = [...prev];
+      const tasks = [...(next[goalIndex].newTasks || [])];
+      tasks[taskIndex] = title;
+      next[goalIndex] = { ...next[goalIndex], newTasks: tasks };
+      return next;
+    });
+  };
+
+  const removeDraftGoalTask = (goalIndex: number, taskIndex: number) => {
+    setDraftGoals((prev) => {
+      const next = [...prev];
+      const tasks = [...(next[goalIndex].newTasks || [])];
+      tasks.splice(taskIndex, 1);
+      next[goalIndex] = { ...next[goalIndex], newTasks: tasks };
+      return next;
+    });
+  };
+
   const handleSave = async () => {
     const cleaned = draftGoals
       .filter((g) => g.title.trim().length > 0)
-      .map((g, idx) => ({ id: g.id, title: g.title.trim(), order: idx }));
+      .map((g, idx) => ({ 
+        id: g.id, 
+        title: g.title.trim(), 
+        order: idx,
+        newTasks: (g.newTasks || []).filter(t => t.trim().length > 0)
+      }));
     await onSavePlan(cleaned);
     setIsEditing(false);
   };
@@ -125,30 +159,91 @@ export function DailyPlanView({
             </span>
           </div>
 
-          <div className="space-y-2">
+          <div className="space-y-4">
             {draftGoals.map((g, idx) => (
-              <div key={idx} className="flex items-center gap-2">
-                <span className="font-mono text-xs text-text-muted w-7 shrink-0 text-center py-1.5 rounded bg-bg-secondary border border-border-subtle">
-                  {(idx + 1).toString().padStart(2, "0")}
-                </span>
-                <input
-                  type="text"
-                  value={g.title}
-                  onChange={(e) => updateDraftGoal(idx, e.target.value)}
-                  placeholder={`Objective ${idx + 1} (e.g. Ship v2 Auth, Prepare Q3 review)`}
-                  className="flex-1 text-sm bg-bg-secondary border border-border-subtle rounded-md px-3 py-2 text-text-primary placeholder:text-text-muted focus-visible:outline-none focus-visible:border-border-hover"
-                  autoFocus={idx === draftGoals.length - 1}
-                />
-                {draftGoals.length > 1 && (
+              <div key={idx} className="flex flex-col gap-2.5 p-3.5 bg-bg-secondary/30 border border-border-subtle rounded-xl transition-colors focus-within:border-border-hover">
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-xs text-text-muted w-7 shrink-0 text-center py-1.5 rounded bg-bg-secondary border border-border-subtle">
+                    {(idx + 1).toString().padStart(2, "0")}
+                  </span>
+                  <input
+                    type="text"
+                    value={g.title}
+                    onChange={(e) => updateDraftGoal(idx, e.target.value)}
+                    placeholder={`Objective ${idx + 1} (e.g. Ship v2 Auth, Prepare Q3 review)`}
+                    className="flex-1 text-sm bg-bg-card border border-border-subtle rounded-md px-3 py-2 text-text-primary placeholder:text-text-muted focus-visible:outline-none focus-visible:border-text-muted shadow-xs"
+                    autoFocus={idx === draftGoals.length - 1 && (g.newTasks?.length || 0) === 0}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        if (e.shiftKey) {
+                          addTaskToDraftGoal(idx);
+                        } else {
+                          addDraftGoal();
+                        }
+                      }
+                    }}
+                  />
+                  {draftGoals.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => removeDraftGoal(idx)}
+                      className="p-2 text-text-muted hover:text-rose-500 rounded hover:bg-bg-secondary transition-colors"
+                      title="Remove objective"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  )}
+                </div>
+
+                {/* Subtasks List */}
+                {g.newTasks && g.newTasks.length > 0 && (
+                  <div className="ml-[36px] flex flex-col gap-2">
+                    {g.newTasks.map((taskTitle, tIdx) => (
+                      <div key={tIdx} className="flex items-center gap-2 group">
+                        <Circle size={10} className="text-text-muted shrink-0" />
+                        <input
+                          type="text"
+                          value={taskTitle}
+                          onChange={(e) => updateDraftGoalTask(idx, tIdx, e.target.value)}
+                          placeholder="Sub-task title..."
+                          className="flex-1 text-xs bg-bg-card border border-border-subtle rounded-md px-2.5 py-1.5 text-text-primary placeholder:text-text-muted focus-visible:outline-none focus-visible:border-text-muted transition-colors"
+                          autoFocus={tIdx === g.newTasks!.length - 1}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              if (taskTitle.trim() === "") {
+                                removeDraftGoalTask(idx, tIdx);
+                                addDraftGoal();
+                              } else {
+                                addTaskToDraftGoal(idx);
+                              }
+                            }
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removeDraftGoalTask(idx, tIdx)}
+                          className="p-1.5 text-text-muted hover:text-rose-500 rounded hover:bg-bg-secondary transition-colors opacity-0 group-hover:opacity-100"
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                
+                {/* Add Subtask Button */}
+                <div className="ml-[36px]">
                   <button
                     type="button"
-                    onClick={() => removeDraftGoal(idx)}
-                    className="p-2 text-text-muted hover:text-rose-500 rounded hover:bg-bg-secondary transition-colors"
-                    title="Remove objective"
+                    onClick={() => addTaskToDraftGoal(idx)}
+                    className="inline-flex items-center gap-1.5 text-[11px] font-medium text-text-muted hover:text-text-primary px-2 py-1 rounded bg-bg-secondary/50 hover:bg-bg-secondary transition-colors"
                   >
-                    <Trash2 size={14} />
+                    <Plus size={11} />
+                    <span>Add task (Shift+Enter)</span>
                   </button>
-                )}
+                </div>
               </div>
             ))}
           </div>
@@ -350,10 +445,10 @@ export function DailyPlanView({
                                     onToggleTask(task);
                                   }}
                                   aria-label={isDone ? `Mark incomplete: ${task.title}` : `Mark complete: ${task.title}`}
-                                  className="text-text-muted hover:text-emerald-500 transition-colors shrink-0 p-0.5 cursor-pointer"
+                                  className="text-text-muted hover:text-text-primary transition-colors shrink-0 p-0.5 cursor-pointer"
                                 >
                                   {isDone ? (
-                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 fill-emerald-500/20" />
+                                    <CheckCircle2 className="w-3.5 h-3.5 text-text-primary fill-text-primary/20" />
                                   ) : (
                                     <Circle className="w-3.5 h-3.5" />
                                   )}
@@ -448,10 +543,10 @@ export function DailyPlanView({
                           onToggleTask(task);
                         }}
                         aria-label={isDone ? `Mark incomplete: ${task.title}` : `Mark complete: ${task.title}`}
-                        className="text-text-muted hover:text-emerald-500 transition-colors shrink-0 p-0.5 cursor-pointer"
+                        className="text-text-muted hover:text-text-primary transition-colors shrink-0 p-0.5 cursor-pointer"
                       >
                         {isDone ? (
-                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 fill-emerald-500/20" />
+                          <CheckCircle2 className="w-3.5 h-3.5 text-text-primary fill-text-primary/20" />
                         ) : (
                           <Circle className="w-3.5 h-3.5" />
                         )}

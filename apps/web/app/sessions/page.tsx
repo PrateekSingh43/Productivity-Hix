@@ -174,7 +174,7 @@ export default function SessionsPage() {
 
           <div className="p-4 sm:p-5">
             <span className="text-xs text-text-muted block mb-1">Total Focus Time</span>
-            <div className="text-xl sm:text-2xl font-semibold font-mono tabular-nums text-emerald-600 dark:text-emerald-400">
+            <div className="text-xl sm:text-2xl font-semibold font-mono tabular-nums text-text-primary">
               {totalMinutes}m
             </div>
             <p className="text-[11px] text-text-muted mt-0.5">
@@ -238,7 +238,7 @@ export default function SessionsPage() {
                     <div
                       className={`h-7 w-7 rounded-full flex items-center justify-center shrink-0 ${
                         isLive
-                          ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30"
+                          ? "bg-bg-secondary text-text-primary border border-border-strong"
                           : "bg-bg-secondary text-text-muted border border-border-subtle"
                       }`}
                     >
@@ -251,13 +251,23 @@ export default function SessionsPage() {
                           {task?.title ?? sess.notes ?? "Intentional Focus Session"}
                         </span>
                         {isLive && (
-                          <span className="text-[10px] font-mono uppercase tracking-wider text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/25 px-1.5 py-0.5 rounded">
+                          <span className="text-[10px] font-mono uppercase tracking-wider text-text-primary bg-bg-secondary border border-border-strong px-1.5 py-0.5 rounded">
                             Live
                           </span>
                         )}
                       </div>
                       <span className="text-xs text-text-muted font-mono">
-                        {format(new Date(sess.startedAt), "MMM d, HH:mm")}
+                        {(() => {
+                          let startDate = new Date(sess.startedAt);
+                          if (sess.endedAt && sess.durationSeconds) {
+                            const endDate = new Date(sess.endedAt);
+                            const wallClockSec = Math.round((endDate.getTime() - startDate.getTime()) / 1000);
+                            if (wallClockSec < sess.durationSeconds) {
+                              startDate = new Date(endDate.getTime() - sess.durationSeconds * 1000);
+                            }
+                          }
+                          return format(startDate, "MMM d, h:mm a");
+                        })()}
                         {sess.endedAt ? ` · ${durationMins}m` : " · Running now"}
                       </span>
                     </div>
@@ -265,7 +275,7 @@ export default function SessionsPage() {
 
                   <div className="flex items-center gap-2 shrink-0 font-mono text-xs text-text-muted">
                     {isLive ? (
-                      <span className="text-emerald-600 dark:text-emerald-400 font-semibold">Running</span>
+                      <span className="text-text-primary font-semibold">Running</span>
                     ) : (
                       <span>{durationMins}m</span>
                     )}

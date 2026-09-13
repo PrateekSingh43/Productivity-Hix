@@ -1,22 +1,27 @@
 export interface ProductiveDayOptions {
   timezone?: string; // IANA timezone, e.g. "Asia/Kolkata", "America/New_York", "UTC"
-  boundary?: string; // "HH:MM", default "04:00"
+  boundary?: string; // "HH:MM", default "00:00" (midnight)
 }
 
-export const DEFAULT_PRODUCTIVE_DAY_BOUNDARY = "04:00";
+export const DEFAULT_PRODUCTIVE_DAY_BOUNDARY = "00:00";
 
 /**
  * Resolves a date/instant into a ProductiveHix day string ("YYYY-MM-DD")
  * based on user timezone and productive day boundary.
  *
  * Rule:
- * If the local time in the specified timezone is before the boundary (e.g. 04:00),
+ * If the local time in the specified timezone is before the boundary (e.g. 04:00 if configured),
  * the timestamp belongs to the previous calendar day's productive cycle.
+ * By default (00:00 boundary), it strictly follows the user's local calendar day.
  */
 export function resolveProductiveDay(
   instant: Date | number | string = new Date(),
   options?: ProductiveDayOptions
 ): string {
+  if (typeof instant === "string" && /^\d{4}-\d{2}-\d{2}$/.test(instant.trim())) {
+    return instant.trim();
+  }
+
   const date = instant instanceof Date ? instant : new Date(instant);
   const boundary = options?.boundary ?? DEFAULT_PRODUCTIVE_DAY_BOUNDARY;
   const timezone = options?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;

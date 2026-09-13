@@ -24,15 +24,24 @@ test("checkInCreateSchema validates structured check-in", () => {
   assert.deepEqual(parsed.reasons, []);
 });
 
-test("checkInCreateSchema strictly enforces 500 character limit on note", () => {
-  const note500 = "a".repeat(500);
+test("checkInCreateSchema strictly enforces 500 character limit on note, outcome, intent, and blocker", () => {
+  const str500 = "a".repeat(500);
   assert.doesNotThrow(() => {
-    checkInCreateSchema.parse({ note: note500 });
+    checkInCreateSchema.parse({ note: str500, outcome: str500, intent: str500, blocker: str500 });
   });
 
-  const note501 = "a".repeat(501);
+  const str501 = "a".repeat(501);
   assert.throws(() => {
-    checkInCreateSchema.parse({ note: note501 });
+    checkInCreateSchema.parse({ note: str501 });
+  });
+  assert.throws(() => {
+    checkInCreateSchema.parse({ outcome: str501 });
+  });
+  assert.throws(() => {
+    checkInCreateSchema.parse({ intent: str501 });
+  });
+  assert.throws(() => {
+    checkInCreateSchema.parse({ blocker: str501 });
   });
 
   // Emotional states including sleepy and angry

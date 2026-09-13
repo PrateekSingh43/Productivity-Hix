@@ -1,4 +1,4 @@
-import type { Task, TaskWithSessions } from "@repo/types";
+import type { Task, TaskWithSessions, TaskObservedActivityItem } from "@repo/types";
 import { apiFetch, jsonBody } from "./client";
 
 export function getTasks() {
@@ -10,7 +10,7 @@ export function getTask(id: string) {
 }
 
 export function getTaskObservedActivity(id: string) {
-  return apiFetch<Array<{ application: string; durationSeconds: number }>>(`/api/tasks/${id}/activity`);
+  return apiFetch<TaskObservedActivityItem[]>(`/api/tasks/${id}/activity`);
 }
 
 export function createTask(input: {

@@ -27,6 +27,27 @@ export type TaskWithSessions = Task & {
     startedAt: string;
     endedAt: string | null;
     durationSeconds: number | null;
+    isPaused?: boolean;
+    lastResumedAt?: string | null;
     notes?: string | null;
   }>;
+  checkIns?: Array<{
+    id: string;
+    activityAssessment?: string | null;
+    alignment?: string | null;
+    energy?: string | null;
+    focus?: string | null;
+    note?: string | null;
+    outcome?: string | null;
+    blocker?: string | null;
+    createdAt: string;
+  }>;
 };
+
+export interface TaskObservedActivityItem {
+  application: string;
+  domain?: string | null;
+  title: string;
+  durationSeconds: number;
+  percentage?: number;
+}

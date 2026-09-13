@@ -306,7 +306,7 @@ export function CheckInView({
       {/* STEP 1: Assessment */}
       {step === 1 && (
         <section className="reflect-card" style={{ padding: 14 }}>
-          <span className="section-kicker" style={{ color: "var(--accent-primary)" }}>HOURLY CHECK-IN</span>
+          <span className="section-kicker">HOURLY CHECK-IN</span>
           <h2 style={{ fontSize: 15, margin: "6px 0 12px", color: "var(--text-primary)" }}>How did the last hour go?</h2>
           {currentTask && (
             <p style={{ margin: "0 0 12px", fontSize: 11, color: "var(--text-secondary)" }}>
@@ -318,7 +318,7 @@ export function CheckInView({
               <button
                 key={item.id}
                 type="button"
-                className="secondary-button"
+                className={`filter-toggle ${assessment === item.id ? "active" : ""}`}
                 onClick={() => handleAssessmentSelect(item.id)}
                 style={{
                   marginTop: 0,
@@ -326,9 +326,6 @@ export function CheckInView({
                   fontSize: 11,
                   textAlign: "center",
                   justifyContent: "center",
-                  background: assessment === item.id ? "var(--bg-active)" : undefined,
-                  borderColor: assessment === item.id ? "var(--accent-primary)" : undefined,
-                  color: assessment === item.id ? "var(--accent-primary)" : undefined,
                 }}
               >
                 {item.label}
@@ -341,14 +338,8 @@ export function CheckInView({
               <button
                 type="button"
                 onClick={onSwitchToInactivity}
-                style={{
-                  background: "transparent",
-                  border: 0,
-                  color: "var(--text-secondary)",
-                  fontSize: 11,
-                  cursor: "pointer",
-                  textDecoration: "underline",
-                }}
+                className="text-button"
+                style={{ fontSize: 10.5 }}
               >
                 Were you away from the computer? Review inactivity
               </button>
@@ -360,7 +351,7 @@ export function CheckInView({
       {/* STEP 2: Alignment */}
       {step === 2 && (
         <section className="reflect-card" style={{ padding: 14 }}>
-          <span className="section-kicker" style={{ color: "var(--accent-primary)" }}>INTENTIONALITY</span>
+          <span className="section-kicker">INTENTIONALITY</span>
           <h2 style={{ fontSize: 15, margin: "6px 0 12px", color: "var(--text-primary)" }}>
             {currentTask ? "Were you working on what you intended?" : "Did this block feel intentional?"}
           </h2>
@@ -369,7 +360,7 @@ export function CheckInView({
               <button
                 key={item.id}
                 type="button"
-                className="secondary-button"
+                className={`filter-toggle ${alignment === item.id ? "active" : ""}`}
                 onClick={() => handleAlignmentSelect(item.id)}
                 style={{
                   flex: 1,
@@ -378,9 +369,6 @@ export function CheckInView({
                   fontSize: 11,
                   textAlign: "center",
                   justifyContent: "center",
-                  background: alignment === item.id ? "var(--bg-active)" : undefined,
-                  borderColor: alignment === item.id ? "var(--accent-primary)" : undefined,
-                  color: alignment === item.id ? "var(--accent-primary)" : undefined,
                 }}
               >
                 {item.label}
@@ -463,7 +451,7 @@ export function CheckInView({
       {step === 4 && (
         <section className="reflect-card" style={{ padding: 14, display: "flex", flexDirection: "column", gap: 12 }}>
           <div>
-            <span className="section-kicker" style={{ color: "var(--accent-primary)" }}>STATE OF MIND</span>
+            <span className="section-kicker">STATE OF MIND</span>
             <h2 style={{ fontSize: 14, margin: "4px 0 8px", color: "var(--text-primary)" }}>Primary state</h2>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
               {EMOTIONAL_STATES.map((item) => {
@@ -473,14 +461,11 @@ export function CheckInView({
                     key={item.id}
                     type="button"
                     onClick={() => setState(item.id)}
+                    className={`filter-toggle ${active ? "active" : ""}`}
                     style={{
-                      padding: "5px 9px",
+                      padding: "4px 8px",
                       borderRadius: 999,
-                      border: `1px solid ${active ? "var(--accent-primary)" : "var(--border-subtle)"}`,
-                      background: active ? "var(--accent-subtle)" : "var(--bg-subtle)",
-                      color: active ? "var(--accent-primary)" : "var(--text-secondary)",
                       fontSize: 10.5,
-                      cursor: "pointer",
                     }}
                   >
                     {item.label}
@@ -491,7 +476,7 @@ export function CheckInView({
           </div>
 
           <div>
-            <span className="section-kicker" style={{ color: "var(--accent-primary)" }}>ENERGY LEVEL</span>
+            <span className="section-kicker">ENERGY LEVEL</span>
             <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
               {ENERGY_LEVELS.map((item) => {
                 const active = energy === item.id;
@@ -499,7 +484,7 @@ export function CheckInView({
                   <button
                     key={item.id}
                     type="button"
-                    className="secondary-button"
+                    className={`filter-toggle ${active ? "active" : ""}`}
                     onClick={() => setEnergy(item.id)}
                     style={{
                       flex: 1,
@@ -508,9 +493,6 @@ export function CheckInView({
                       fontSize: 10.5,
                       textAlign: "center",
                       justifyContent: "center",
-                      background: active ? "var(--bg-active)" : undefined,
-                      borderColor: active ? "var(--accent-primary)" : undefined,
-                      color: active ? "var(--accent-primary)" : undefined,
                     }}
                   >
                     {item.label}
@@ -521,7 +503,7 @@ export function CheckInView({
           </div>
 
           <div>
-            <span className="section-kicker" style={{ color: "var(--accent-primary)" }}>FOCUS LEVEL</span>
+            <span className="section-kicker">FOCUS LEVEL</span>
             <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
               {FOCUS_LEVELS.map((item) => {
                 const active = focus === item.id;
@@ -529,7 +511,7 @@ export function CheckInView({
                   <button
                     key={item.id}
                     type="button"
-                    className="secondary-button"
+                    className={`filter-toggle ${active ? "active" : ""}`}
                     onClick={() => setFocus(item.id)}
                     style={{
                       flex: 1,
@@ -538,9 +520,6 @@ export function CheckInView({
                       fontSize: 10.5,
                       textAlign: "center",
                       justifyContent: "center",
-                      background: active ? "var(--bg-active)" : undefined,
-                      borderColor: active ? "var(--accent-primary)" : undefined,
-                      color: active ? "var(--accent-primary)" : undefined,
                     }}
                   >
                     {item.label}

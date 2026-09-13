@@ -41,13 +41,26 @@ export interface AggregationOptions {
   transientThresholdMs?: number;
   /** Segments shorter than this are dropped or absorbed after grouping. Default: 30 seconds */
   minSegmentMs?: number;
+  /** Maximum duration in milliseconds for an AFK period to be treated as an active human work break.
+   * Periods exceeding this are system sleep / extended offline absence, NOT active work breaks.
+   * Default: 2 hours (7,200,000 ms)
+   */
+  maxBreakMs?: number;
+  /** Optional sleep schedule / quiet hours window (e.g. 02:00 to 08:30) */
+  sleepWindow?: {
+    start: string; // 'HH:MM'
+    end: string;   // 'HH:MM'
+    timezone?: string;
+  };
 }
 
-const DEFAULT_OPTIONS: Required<AggregationOptions> = {
+const DEFAULT_OPTIONS: Required<Omit<AggregationOptions, "sleepWindow">> & { sleepWindow?: AggregationOptions["sleepWindow"] } = {
   maxGapMs: 5 * 60 * 1000,
   minBreakMs: 5 * 60 * 1000,
   transientThresholdMs: 30_000,
   minSegmentMs: 30_000,
+  maxBreakMs: 2 * 60 * 60 * 1000, // 2 hours
+  sleepWindow: undefined,
 };
 
 const LEISURE_PATTERNS: RegExp[] = [
@@ -359,18 +372,140 @@ export function normalizeRawActivityEvents(rawRows: RawActivityInput[]): Canonic
 }
 
 /**
+ * Subtracts a list of non-overlapping break intervals from a given active event interval [ev.start, ev.end].
+ * Returns an array of remaining active event intervals strictly disjoint from all breaks.
+ */
+function carveEventAroundBreaks(
+  ev: CanonicalActivityEvent,
+  breaks: { start: number; end: number }[],
+): CanonicalActivityEvent[] {
+  let pieces: { start: number; end: number }[] = [{ start: ev.start, end: ev.end }];
+
+  for (const brk of breaks) {
+    const nextPieces: { start: number; end: number }[] = [];
+    for (const p of pieces) {
+      // Case 1: No overlap
+      if (p.end <= brk.start || p.start >= brk.end) {
+        nextPieces.push(p);
+        continue;
+      }
+      // Case 2: Piece is completely inside break -> Discard piece
+      if (p.start >= brk.start && p.end <= brk.end) {
+        continue;
+      }
+      // Case 3: Piece overlaps start of break (starts before, ends inside)
+      if (p.start < brk.start && p.end <= brk.end) {
+        if (brk.start - p.start >= 1000) {
+          nextPieces.push({ start: p.start, end: brk.start });
+        }
+        continue;
+      }
+      // Case 4: Piece overlaps end of break (starts inside, ends after)
+      if (p.start >= brk.start && p.end > brk.end) {
+        if (p.end - brk.end >= 1000) {
+          nextPieces.push({ start: brk.end, end: p.end });
+        }
+        continue;
+      }
+      // Case 5: Break is strictly inside piece (piece starts before break, ends after break)
+      // Break splits the active piece into two!
+      if (p.start < brk.start && p.end > brk.end) {
+        if (brk.start - p.start >= 1000) {
+          nextPieces.push({ start: p.start, end: brk.start });
+        }
+        if (p.end - brk.end >= 1000) {
+          nextPieces.push({ start: brk.end, end: p.end });
+        }
+        continue;
+      }
+    }
+    pieces = nextPieces;
+  }
+
+  return pieces.map((p, idx) => ({
+    ...ev,
+    id: idx === 0 ? ev.id : `${ev.id}-carved-${idx}`,
+    start: p.start,
+    end: p.end,
+    durationMs: p.end - p.start,
+  }));
+}
+
+/**
  * Phase 3 — Interval Normalization:
  * - Sorts chronologically
  * - Deduplicates identical events
  * - Merges AFK break intervals (duration >= minBreakMs)
- * - Carves active window events around AFK breaks (AFK precedence)
+ * - Carves active window events around AFK breaks (AFK takes physical human precedence)
+ * - Enriches desktop browser windows with concurrent browser extension tab details
+ * - Prevents double counting between desktop browser windows and extension tabs
+ * - Clips active overlapping events so SUM(durations) === wall-clock elapsed time
+ */
+/**
+ * Checks whether an interval [startMs, endMs] overlaps with a sleep schedule / quiet hours window.
+ */
+export function isOverlappingSleepWindow(
+  startMs: number,
+  endMs: number,
+  sleepWindow?: { start: string; end: string; timezone?: string },
+): boolean {
+  if (!sleepWindow?.start || !sleepWindow?.end) return false;
+
+  const tz = sleepWindow.timezone || "UTC";
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    hour: "numeric",
+    minute: "numeric",
+    hour12: false,
+  });
+
+  const getMinutes = (ms: number) => {
+    const parts = formatter.formatToParts(new Date(ms));
+    const h = parseInt(parts.find((p) => p.type === "hour")?.value || "0", 10);
+    const m = parseInt(parts.find((p) => p.type === "minute")?.value || "0", 10);
+    return (h === 24 ? 0 : h) * 60 + m;
+  };
+
+  const [sH, sM] = sleepWindow.start.split(":").map(Number);
+  const [eH, eM] = sleepWindow.end.split(":").map(Number);
+  const winStart = (sH ?? 0) * 60 + (sM ?? 0);
+  const winEnd = (eH ?? 0) * 60 + (eM ?? 0);
+
+  const checkTimeInWindow = (minutes: number) => {
+    if (winStart <= winEnd) {
+      return minutes >= winStart && minutes < winEnd;
+    }
+    return minutes >= winStart || minutes < winEnd;
+  };
+
+  if (checkTimeInWindow(getMinutes(startMs)) || checkTimeInWindow(getMinutes(endMs))) {
+    return true;
+  }
+
+  const durationMs = endMs - startMs;
+  if (durationMs >= 30 * 60 * 1000) {
+    const stepMs = Math.min(30 * 60 * 1000, durationMs / 4);
+    for (let t = startMs; t <= endMs; t += stepMs) {
+      if (checkTimeInWindow(getMinutes(t))) return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Phase 3 — Interval Normalization:
+ * - Sorts chronologically
+ * - Deduplicates identical events
+ * - Merges AFK break intervals (duration >= minBreakMs, duration <= maxBreakMs, outside sleepWindow)
+ * - Carves active window events around AFK breaks (AFK takes physical human precedence)
  * - Enriches desktop browser windows with concurrent browser extension tab details
  * - Prevents double counting between desktop browser windows and extension tabs
  * - Clips active overlapping events so SUM(durations) === wall-clock elapsed time
  */
 export function normalizeIntervals(
   events: CanonicalActivityEvent[],
-  options: Required<AggregationOptions> = DEFAULT_OPTIONS,
+  options: Required<Omit<AggregationOptions, "sleepWindow">> & { sleepWindow?: AggregationOptions["sleepWindow"] } = DEFAULT_OPTIONS,
 ): CanonicalActivityEvent[] {
   if (events.length === 0) return [];
 
@@ -386,7 +521,9 @@ export function normalizeIntervals(
     if (ev.watcher === "input") continue;
 
     if (ev.isAfk) {
-      if (ev.durationMs >= options.minBreakMs) {
+      const isTooLong = ev.durationMs > (options.maxBreakMs ?? 2 * 60 * 60 * 1000);
+      const isSleep = isOverlappingSleepWindow(ev.start, ev.end, options.sleepWindow);
+      if (ev.durationMs >= options.minBreakMs && !isTooLong && !isSleep) {
         afkIntervals.push({ start: ev.start, end: ev.end, id: ev.id });
       }
       continue;
@@ -423,44 +560,8 @@ export function normalizeIntervals(
 
   // 4. Carve desktop active events around AFK breaks (AFK takes physical human precedence)
   const carvedActiveEvents: CanonicalActivityEvent[] = [];
-
   for (const ev of desktopActiveEvents) {
-    let currentStart = ev.start;
-    const currentEnd = ev.end;
-
-    // Check collision with each AFK break
-    let isSuppressed = false;
-    for (const brk of mergedAfks) {
-      // Completely within break -> suppress active event
-      if (currentStart >= brk.start && currentEnd <= brk.end) {
-        isSuppressed = true;
-        break;
-      }
-      // Overlaps start of break
-      if (currentStart < brk.start && currentEnd > brk.start && currentEnd <= brk.end) {
-        carvedActiveEvents.push({
-          ...ev,
-          start: currentStart,
-          end: brk.start,
-          durationMs: brk.start - currentStart,
-        });
-        isSuppressed = true;
-        break;
-      }
-      // Overlaps end of break
-      if (currentStart >= brk.start && currentStart < brk.end && currentEnd > brk.end) {
-        currentStart = brk.end;
-      }
-    }
-
-    if (!isSuppressed && currentEnd - currentStart >= 1000) {
-      carvedActiveEvents.push({
-        ...ev,
-        start: currentStart,
-        end: currentEnd,
-        durationMs: currentEnd - currentStart,
-      });
-    }
+    carvedActiveEvents.push(...carveEventAroundBreaks(ev, mergedAfks));
   }
 
   // 5. Browser Extension Tab Integration & Precedence:
@@ -484,25 +585,27 @@ export function normalizeIntervals(
       if (tab.title && (!overlappingDesktopBrowser.title || overlappingDesktopBrowser.title === "Web Page" || overlappingDesktopBrowser.title === overlappingDesktopBrowser.application)) {
         overlappingDesktopBrowser.title = tab.title;
       }
-    } else {
-      // Standalone browser extension event (no desktop window agent coverage)
-      // Carve around AFK breaks
-      let isInsideAfk = false;
-      for (const brk of mergedAfks) {
-        if (tab.start >= brk.start && tab.end <= brk.end) {
-          isInsideAfk = true;
-          break;
-        }
-      }
-      if (!isInsideAfk && tab.durationMs >= 1000) {
-        standaloneTabs.push(tab);
-      }
+      continue;
     }
+
+    // If an active desktop non-browser window was in focus (e.g. VS Code, Notion),
+    // the user was physically engaged in that application, NOT this background browser tab.
+    const overlappingDesktopApp = carvedActiveEvents.find(
+      (d) => tab.start < d.end && tab.end > d.start,
+    );
+    if (overlappingDesktopApp) {
+      // Background browser tab while user was working in a desktop application; ignore.
+      continue;
+    }
+
+    // Standalone browser extension event (no desktop window agent coverage)
+    // Carve around AFK breaks
+    standaloneTabs.push(...carveEventAroundBreaks(tab, mergedAfks));
   }
 
   const allActive = [...carvedActiveEvents, ...standaloneTabs];
 
-  // 6. Chronological Non-Overlapping Clipping
+  // 6. Chronological Non-Overlapping Clipping among active events
   allActive.sort((a, b) => a.start - b.start);
   for (let i = 0; i < allActive.length - 1; i++) {
     const curr = allActive[i]!;
@@ -535,8 +638,18 @@ export function normalizeIntervals(
     });
   }
 
+  // 8. Invariant Guard: Strict non-overlapping chronological ordering across ALL intervals (active + breaks)
   combined.sort((a, b) => a.start - b.start);
-  return combined;
+  for (let i = 0; i < combined.length - 1; i++) {
+    const curr = combined[i]!;
+    const next = combined[i + 1]!;
+    if (curr.end > next.start) {
+      curr.end = next.start;
+      curr.durationMs = Math.max(0, curr.end - curr.start);
+    }
+  }
+
+  return combined.filter((e) => e.durationMs >= 1000);
 }
 
 /**
@@ -551,11 +664,13 @@ export function aggregateActivitySegments(
   rawRows: RawActivityInput[],
   options?: AggregationOptions,
 ): TimelineSegment[] {
-  const opts: Required<AggregationOptions> = {
+  const opts: Required<Omit<AggregationOptions, "sleepWindow">> & { sleepWindow?: AggregationOptions["sleepWindow"] } = {
     maxGapMs: options?.maxGapMs ?? DEFAULT_OPTIONS.maxGapMs,
     minBreakMs: options?.minBreakMs ?? DEFAULT_OPTIONS.minBreakMs,
     transientThresholdMs: options?.transientThresholdMs ?? DEFAULT_OPTIONS.transientThresholdMs,
     minSegmentMs: options?.minSegmentMs ?? DEFAULT_OPTIONS.minSegmentMs,
+    maxBreakMs: options?.maxBreakMs ?? DEFAULT_OPTIONS.maxBreakMs,
+    sleepWindow: options?.sleepWindow ?? DEFAULT_OPTIONS.sleepWindow,
   };
 
   const canonical = normalizeRawActivityEvents(rawRows);

@@ -17,6 +17,7 @@ import { activityRouter } from "./routes/activity";
 import { analyticsRouter } from "./routes/analytics";
 import { telemetryRouter } from "./routes/telemetry";
 import { exportRouter } from "./routes/export";
+import { userRouter } from "./routes/user";
 
 export function createApp(): Express {
   const app = express();
@@ -29,6 +30,7 @@ export function createApp(): Express {
   app.get("/", (_request, response) => response.json({ service: "productivehix-api" }));
   app.use("/api/health", healthRouter);
   app.use("/api/auth", authRouter);
+  app.use("/api/user", userRouter);
   app.use("/api/plans", plansRouter);
   app.use("/api/tasks", tasksRouter);
   app.use("/api/sessions", sessionsRouter);

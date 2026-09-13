@@ -129,7 +129,7 @@ export function TodayTasks({ tasks = [], onToggleTask, onAddTask }: TodayTasksPr
                   type="button"
                   className={`shrink-0 transition-colors ${
                     isDone
-                      ? "text-emerald-400"
+                      ? "text-text-primary"
                       : isInProgress
                       ? "text-[#707df7]"
                       : "text-[#6b7280] group-hover:text-[#9ca3af]"
@@ -144,7 +144,7 @@ export function TodayTasks({ tasks = [], onToggleTask, onAddTask }: TodayTasksPr
 
                 <div className="flex flex-col min-w-0">
                   <span
-                    className={`text-xs font-medium truncate ${
+                    className={`text-xs font-medium break-words line-clamp-2 ${
                       isDone
                         ? "text-[#7e8597] opacity-75"
                         : "text-[#f4f4f6]"

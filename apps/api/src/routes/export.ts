@@ -82,3 +82,35 @@ exportRouter.get("/", async (request, response, next) => {
     next(error);
   }
 });
+
+exportRouter.get("/telemetry", async (request, response, next) => {
+  try {
+    const userId = userIdFrom(request);
+    const db = getDb();
+
+    const telemetryData = await db.normalizedActivity.findMany({
+      where: { userId },
+      orderBy: { timestamp: "desc" },
+    });
+
+    const exportPayload = {
+      exportVersion: "1.0",
+      exportedAt: new Date().toISOString(),
+      counts: {
+        telemetryEvents: telemetryData.length,
+      },
+      data: {
+        telemetry: telemetryData,
+      },
+    };
+
+    response.setHeader("Content-Type", "application/json");
+    response.setHeader(
+      "Content-Disposition",
+      `attachment; filename="productivehix-telemetry-${new Date().toISOString().slice(0, 10)}.json"`,
+    );
+    response.json(exportPayload);
+  } catch (error) {
+    next(error);
+  }
+});

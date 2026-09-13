@@ -19,6 +19,13 @@ describe('Phase 3A Database Invariant Tests (PostgreSQL Engine Enforcement)', ()
     }
     prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
 
+    await prisma.$executeRawUnsafe(`
+      CREATE UNIQUE INDEX IF NOT EXISTS "idx_semantic_claims_primary_modality_current"
+      ON "semantic_claims"("block_id")
+      WHERE "claim_type" = 'MODALITY_PRIMARY'
+        AND "is_current" = true;
+    `);
+
     // 1. Create test user
     await prisma.user.create({
       data: {

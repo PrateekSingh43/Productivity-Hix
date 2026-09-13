@@ -9,13 +9,11 @@ const isSchemaCommand =
   /\bstudio\b/.test(args);
 
 const databaseUrl =
-  isSchemaCommand && process.env.DIRECT_URL
-    ? process.env.DIRECT_URL
-    : process.env.DATABASE_URL;
+  isSchemaCommand && process.env.DIRECT_URL ? process.env.DIRECT_URL : process.env.DATABASE_URL;
 
 if (!databaseUrl && isSchemaCommand) {
   throw new Error(
-    "DATABASE_URL (and ideally DIRECT_URL) missing. Copy packages/db/.env.example to packages/db/.env."
+    "DATABASE_URL (and ideally DIRECT_URL) missing. Copy packages/db/.env.example to packages/db/.env.",
   );
 }
 
@@ -28,6 +26,3 @@ export default defineConfig({
     url: databaseUrl,
   },
 });
-
-
-

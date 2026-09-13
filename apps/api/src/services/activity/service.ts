@@ -70,9 +70,21 @@ export async function syncActivity(userId: string) {
   };
 }
 
+import { getDayBoundaries } from "./timeline";
+import { resolveProductiveDay } from "@repo/types";
+
+export function localDayRange(date?: Date | string, timezone = "UTC"): { from: Date; to: Date } {
+  const effectiveDateStr =
+    typeof date === "string"
+      ? resolveProductiveDay(date)
+      : resolveProductiveDay(date ?? new Date(), { timezone });
+  const { startOfDay, endOfDay } = getDayBoundaries(effectiveDateStr, timezone);
+  return { from: startOfDay, to: endOfDay };
+}
+
 export function utcDayRange(date = new Date()) {
   const from = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
   return { from, to: new Date(from.getTime() + 24 * 60 * 60 * 1000) };
 }
 
-export { getTimelineForDay } from "./timeline";
+export { getTimelineForDay, getDayBoundaries } from "./timeline";

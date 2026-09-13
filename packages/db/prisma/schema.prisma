@@ -15,7 +15,7 @@ enum TaskStatus {
 }
 
 model User {
-  id                  String                 @id @default(uuid()) @db.Uuid
+  id                  String                 @id @default(cuid())
   displayName         String?                @map("display_name")
   avatarUrl           String?                @map("avatar_url")
   createdAt           DateTime               @default(now()) @map("created_at")
@@ -43,12 +43,30 @@ model User {
   userActivityOverrides    UserActivityOverride[]
   proposedDeviceHeartbeats ProposedDeviceHeartbeat[]
 
+  preferences              UserPreference?
+
   @@map("users")
 }
 
+model UserPreference {
+  id                 String   @id @default(cuid())
+  userId             String   @unique @map("user_id")
+  dayBoundary        String   @default("00:00") @map("day_boundary")
+  quietHoursEnabled  Boolean  @default(true) @map("quiet_hours_enabled")
+  quietHoursStart    String   @default("23:58") @map("quiet_hours_start")
+  quietHoursEnd      String   @default("08:00") @map("quiet_hours_end")
+  timezone           String?  @map("timezone")
+  suppressCheckInsDuringFocus Boolean @default(true) @map("suppress_checkins_during_focus")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_preferences")
+}
+
 model DailyPlan {
-  id        String      @id @default(uuid()) @db.Uuid
-  userId    String      @map("user_id") @db.Uuid
+  id        String      @id @default(cuid())
+  userId    String      @map("user_id")
   date      String      // "YYYY-MM-DD"
   createdAt DateTime    @default(now()) @map("created_at")
   updatedAt DateTime    @updatedAt @map("updated_at")
@@ -61,9 +79,9 @@ model DailyPlan {
 }
 
 model DailyGoal {
-  id        String      @id @default(uuid()) @db.Uuid
-  planId    String      @map("plan_id") @db.Uuid
-  userId    String      @map("user_id") @db.Uuid
+  id        String      @id @default(cuid())
+  planId    String      @map("plan_id")
+  userId    String      @map("user_id")
   title     String
   order     Int         @default(0)
   outcome   String?     // "ACHIEVED" | "PARTIALLY_ACHIEVED" | "NOT_ACHIEVED" | "NOT_ASSESSED"
@@ -83,8 +101,8 @@ model DailyGoal {
 }
 
 model OAuthAccount {
-  id              String   @id @default(uuid()) @db.Uuid
-  userId          String   @map("user_id") @db.Uuid
+  id              String   @id @default(cuid())
+  userId          String   @map("user_id")
   provider        String
   providerSubject String   @map("provider_subject")
   createdAt       DateTime @default(now()) @map("created_at")
@@ -96,9 +114,9 @@ model OAuthAccount {
 }
 
 model Task {
-  id                     String        @id @default(uuid()) @db.Uuid
-  userId                 String        @map("user_id") @db.Uuid
-  goalId                 String?       @map("goal_id") @db.Uuid
+  id                     String        @id @default(cuid())
+  userId                 String        @map("user_id")
+  goalId                 String?       @map("goal_id")
   productiveDate         String?       @map("productive_date")
   title                  String
   description            String?
@@ -125,12 +143,16 @@ model Task {
 }
 
 model WorkSession {
-  id              String    @id @default(uuid()) @db.Uuid
-  userId          String    @map("user_id") @db.Uuid
-  taskId          String?   @map("task_id") @db.Uuid
+  id              String    @id @default(cuid())
+  userId          String    @map("user_id")
+  taskId          String?   @map("task_id")
   startedAt       DateTime  @default(now()) @map("started_at")
   endedAt         DateTime? @map("ended_at")
   durationSeconds  Int?      @map("duration_seconds")
+  targetDurationMinutes Int?  @map("target_duration_minutes")
+  isPaused        Boolean   @default(false) @map("is_paused")
+  pausedAt        DateTime? @map("paused_at")
+  lastResumedAt   DateTime? @map("last_resumed_at")
   source          String    @default("manual")
   notes           String?
   createdAt       DateTime  @default(now()) @map("created_at")
@@ -143,10 +165,10 @@ model WorkSession {
 }
 
 model CheckIn {
-  id                 String       @id @default(uuid()) @db.Uuid
-  userId             String       @map("user_id") @db.Uuid
-  workSessionId      String?      @map("work_session_id") @db.Uuid
-  taskId             String?      @map("task_id") @db.Uuid
+  id                 String       @id @default(cuid())
+  userId             String       @map("user_id")
+  workSessionId      String?      @map("work_session_id")
+  taskId             String?      @map("task_id")
   windowStart        DateTime?    @map("window_start")
   windowEnd          DateTime?    @map("window_end")
   activityAssessment String?      @map("activity_assessment")
@@ -155,16 +177,16 @@ model CheckIn {
   state              String?
   energy             String?
   focus              String?
-  note               String?      @db.VarChar(350)
+  note               String?      @db.VarChar(500)
   questionVersion    String       @default("v1") @map("question_version")
   source             String       @default("extension_hourly")
   deeperAnswers      Json?        @map("deeper_answers")
   eventType          String       @default("PERIODIC") @map("event_type")
-  intent             String?      @default("Hourly reflection")
+  intent             String?      @default("Hourly reflection") @db.VarChar(500)
   progress           Boolean?     @default(true)
-  blocker            String?
+  blocker            String?      @db.VarChar(500)
   productive         Boolean?
-  outcome            String?
+  outcome            String?      @db.VarChar(500)
   createdAt          DateTime     @default(now()) @map("created_at")
   user               User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   workSession        WorkSession? @relation(fields: [workSessionId], references: [id], onDelete: SetNull)
@@ -176,8 +198,8 @@ model CheckIn {
 }
 
 model LearningAssessment {
-  id          String             @id @default(uuid()) @db.Uuid
-  userId      String             @map("user_id") @db.Uuid
+  id          String             @id @default(cuid())
+  userId      String             @map("user_id")
   topic       String
   scheduledAt DateTime           @map("scheduled_at")
   completedAt DateTime?          @map("completed_at")
@@ -191,8 +213,8 @@ model LearningAssessment {
 }
 
 model LearningQuestion {
-  id             String             @id @default(uuid()) @db.Uuid
-  assessmentId   String             @map("assessment_id") @db.Uuid
+  id             String             @id @default(cuid())
+  assessmentId   String             @map("assessment_id")
   prompt         String
   expectedAnswer String?            @map("expected_answer")
   createdAt      DateTime           @default(now()) @map("created_at")
@@ -204,8 +226,8 @@ model LearningQuestion {
 }
 
 model LearningAnswer {
-  id         String          @id @default(uuid()) @db.Uuid
-  questionId String          @unique @map("question_id") @db.Uuid
+  id         String          @id @default(cuid())
+  questionId String          @unique @map("question_id")
   answer     String
   score      Float?
   answeredAt DateTime        @default(now()) @map("answered_at")
@@ -215,8 +237,8 @@ model LearningAnswer {
 }
 
 model ActivitySyncState {
-  id        String    @id @default(uuid()) @db.Uuid
-  userId    String    @map("user_id") @db.Uuid
+  id        String    @id @default(cuid())
+  userId    String    @map("user_id")
   bucketId  String    @map("bucket_id")
   cursorAt  DateTime? @map("cursor_at")
   syncedAt  DateTime  @default(now()) @map("synced_at")
@@ -227,8 +249,8 @@ model ActivitySyncState {
 }
 
 model NormalizedActivity {
-  id         String   @id @default(uuid()) @db.Uuid
-  userId     String   @map("user_id") @db.Uuid
+  id         String   @id @default(cuid())
+  userId     String   @map("user_id")
   externalId String   @map("external_id")
   bucketId   String   @map("bucket_id")
   source     String
@@ -248,8 +270,8 @@ model NormalizedActivity {
 }
 
 model DesktopDevice {
-  id             String                @id @default(uuid()) @db.Uuid
-  userId         String                @map("user_id") @db.Uuid
+  id             String                @id @default(cuid())
+  userId         String                @map("user_id")
   name           String
   platform       String                @default("windows")
   osVersion      String?               @map("os_version")
@@ -270,8 +292,8 @@ model DesktopDevice {
 }
 
 model BrowserInstallation {
-  id               String   @id @default(uuid()) @db.Uuid
-  userId           String   @map("user_id") @db.Uuid
+  id               String   @id @default(cuid())
+  userId           String   @map("user_id")
   browser          String   @default("chrome")
   extensionVersion String?  @map("extension_version")
   userAgent        String?  @map("user_agent")
@@ -284,12 +306,12 @@ model BrowserInstallation {
 }
 
 model DeviceAuthorization {
-  id         String         @id @default(uuid()) @db.Uuid
+  id         String         @id @default(cuid())
   deviceCode String         @unique @map("device_code")
   userCode   String         @unique @map("user_code")
   status     String         @default("pending")
-  userId     String?        @map("user_id") @db.Uuid
-  deviceId   String?        @map("device_id") @db.Uuid
+  userId     String?        @map("user_id")
+  deviceId   String?        @map("device_id")
   clientName String?        @map("client_name")
   expiresAt  DateTime       @map("expires_at")
   createdAt  DateTime       @default(now()) @map("created_at")
@@ -302,10 +324,10 @@ model DeviceAuthorization {
 }
 
 model DeviceToken {
-  id         String         @id @default(uuid()) @db.Uuid
+  id         String         @id @default(cuid())
   tokenHash  String         @unique @map("token_hash")
-  userId     String         @map("user_id") @db.Uuid
-  deviceId   String?        @map("device_id") @db.Uuid
+  userId     String         @map("user_id")
+  deviceId   String?        @map("device_id")
   source     String         @default("desktop")
   expiresAt  DateTime?      @map("expires_at")
   lastUsedAt DateTime       @default(now()) @map("last_used_at")
@@ -438,9 +460,9 @@ enum InputState {
 // 1. TEMPORAL ACTIVITY BLOCK (Materialized Interval Projection)
 // ----------------------------------------------------------------------------
 model TemporalActivityBlock {
-  id                        String              @id @default(uuid()) @db.Uuid
-  userId                    String              @map("user_id") @db.Uuid
-  deviceId                  String?             @map("device_id") @db.Uuid
+  id                        String              @id @default(cuid())
+  userId                    String              @map("user_id")
+  deviceId                  String?             @map("device_id")
 
   // Observation Set Identity (hash of contributing observations + contribution ranges)
   observationSetFingerprint String              @map("observation_set_fingerprint")
@@ -486,9 +508,9 @@ model TemporalActivityBlock {
 // 2. BLOCK OBSERVATION (Explicit Contributing Observations & Ranges)
 // ----------------------------------------------------------------------------
 model BlockObservation {
-  id                    String              @id @default(uuid()) @db.Uuid
-  blockId               String              @map("block_id") @db.Uuid
-  activityId            String              @map("activity_id") @db.Uuid
+  id                    String              @id @default(cuid())
+  blockId               String              @map("block_id")
+  activityId            String              @map("activity_id")
 
   // Exact Contribution Boundaries
   contributionStart     DateTime            @map("contribution_start")
@@ -507,8 +529,8 @@ model BlockObservation {
 // 3. SEMANTIC CLAIM (Family 1: Classification Claims)
 // ----------------------------------------------------------------------------
 model SemanticClaim {
-  id                    String              @id @default(uuid()) @db.Uuid
-  blockId               String              @map("block_id") @db.Uuid
+  id                    String              @id @default(cuid())
+  blockId               String              @map("block_id")
 
   claimType             ClaimType           @map("claim_type")
   value                 String              // e.g. "development", "ProductiveHix"
@@ -522,7 +544,7 @@ model SemanticClaim {
   evaluatedAt           DateTime            @default(now()) @map("evaluated_at")
   inputFingerprint      String?             @map("input_fingerprint")
   isCurrent             Boolean             @default(true) @map("is_current")
-  supersedesId          String?             @map("supersedes_id") @db.Uuid
+  supersedesId          String?             @map("supersedes_id")
 
   block                 TemporalActivityBlock @relation(fields: [blockId], references: [id], onDelete: Cascade)
   supersedes            SemanticClaim?        @relation("ClaimSupersession", fields: [supersedesId], references: [id], onDelete: SetNull)
@@ -539,10 +561,10 @@ model SemanticClaim {
 // 4. CLAIM EVIDENCE (Relational Citations of Signal Sources)
 // ----------------------------------------------------------------------------
 model ClaimEvidence {
-  id                    String              @id @default(uuid()) @db.Uuid
-  claimId               String?             @map("claim_id") @db.Uuid
-  linkId                String?             @map("link_id") @db.Uuid
-  inferenceId           String?             @map("inference_id") @db.Uuid
+  id                    String              @id @default(cuid())
+  claimId               String?             @map("claim_id")
+  linkId                String?             @map("link_id")
+  inferenceId           String?             @map("inference_id")
 
   evidenceType          String              @map("evidence_type") // e.g. "USER_RULE", "PROCESS_NAME", "WINDOW_TITLE"
   evidenceReference     String              @map("evidence_reference") // e.g. "rule:usr_123", "title:React"
@@ -562,13 +584,13 @@ model ClaimEvidence {
 // 5. ACTIVITY CONTEXT LINK (Family 2: Intent Associations)
 // ----------------------------------------------------------------------------
 model ActivityContextLink {
-  id                    String                @id @default(uuid()) @db.Uuid
-  blockId               String                @map("block_id") @db.Uuid
-  userId                String                @map("user_id") @db.Uuid
+  id                    String                @id @default(cuid())
+  blockId               String                @map("block_id")
+  userId                String                @map("user_id")
 
   targetScope           TargetScope           @default(UNLINKED) @map("target_scope")
-  taskId                String?               @map("task_id") @db.Uuid
-  goalId                String?               @map("goal_id") @db.Uuid
+  taskId                String?               @map("task_id")
+  goalId                String?               @map("goal_id")
   projectTag            String?               @map("project_tag")
 
   relevance             ContextRelevance      @default(UNKNOWN)
@@ -595,8 +617,8 @@ model ActivityContextLink {
 // 6. ATTENTION INFERENCE (Family 3: Attention Inference)
 // ----------------------------------------------------------------------------
 model AttentionInference {
-  id                    String              @id @default(uuid()) @db.Uuid
-  blockId               String              @map("block_id") @db.Uuid
+  id                    String              @id @default(cuid())
+  blockId               String              @map("block_id")
 
   focusEvidenceState    FocusEvidenceState  @default(UNKNOWN) @map("focus_evidence_state")
 
@@ -615,9 +637,9 @@ model AttentionInference {
 // 7. TELEMETRY COVERAGE GAP (Materialized Coverage Inactivity Interval)
 // ----------------------------------------------------------------------------
 model TelemetryCoverageGap {
-  id                    String              @id @default(uuid()) @db.Uuid
-  userId                String              @map("user_id") @db.Uuid
-  deviceId              String?             @map("device_id") @db.Uuid
+  id                    String              @id @default(cuid())
+  userId                String              @map("user_id")
+  deviceId              String?             @map("device_id")
 
   startTime             DateTime            @map("start_time")
   endTime               DateTime            @map("end_time")
@@ -641,9 +663,9 @@ model TelemetryCoverageGap {
 // 8. USER GAP EXPLANATION (User Truth for Offline Time — 1:N)
 // ----------------------------------------------------------------------------
 model UserGapExplanation {
-  id                    String              @id @default(uuid()) @db.Uuid
-  gapId                 String              @map("gap_id") @db.Uuid
-  userId                String              @map("user_id") @db.Uuid
+  id                    String              @id @default(cuid())
+  gapId                 String              @map("gap_id")
+  userId                String              @map("user_id")
 
   startTime             DateTime            @map("start_time")
   endTime               DateTime            @map("end_time")
@@ -652,8 +674,8 @@ model UserGapExplanation {
   description           String
   offlineWorkContext    String?             @map("offline_work_context")
 
-  associatedTaskId      String?             @map("associated_task_id") @db.Uuid
-  associatedGoalId      String?             @map("associated_goal_id") @db.Uuid
+  associatedTaskId      String?             @map("associated_task_id")
+  associatedGoalId      String?             @map("associated_goal_id")
 
   createdAt             DateTime            @default(now()) @map("created_at")
 
@@ -671,8 +693,8 @@ model UserGapExplanation {
 // 9. USER ACTIVITY RULE (Declarative Semantic Mapping Engine)
 // ----------------------------------------------------------------------------
 model UserActivityRule {
-  id                    String              @id @default(uuid()) @db.Uuid
-  userId                String              @map("user_id") @db.Uuid
+  id                    String              @id @default(cuid())
+  userId                String              @map("user_id")
 
   name                  String
   priority              Int                 @default(100) // Lower number = higher priority
@@ -702,8 +724,8 @@ model UserActivityRule {
 // 10. USER ACTIVITY OVERRIDE (Recomputation-Resilient Manual Correction)
 // ----------------------------------------------------------------------------
 model UserActivityOverride {
-  id                    String              @id @default(uuid()) @db.Uuid
-  userId                String              @map("user_id") @db.Uuid
+  id                    String              @id @default(cuid())
+  userId                String              @map("user_id")
 
   targetTimeWindowStart DateTime            @map("target_time_window_start")
   targetTimeWindowEnd   DateTime            @map("target_time_window_end")
@@ -713,7 +735,7 @@ model UserActivityOverride {
   targetClaimFamily     String              @map("target_claim_family") // "CLASSIFICATION" | "INTENT_ASSOCIATION"
   targetClaimType       String              @map("target_claim_type")   // "MODALITY_PRIMARY" | "TOPIC_CONTEXT" | "RELEVANCE"
   overriddenValue       String              @map("overridden_value")
-  associatedTaskId      String?             @map("associated_task_id") @db.Uuid
+  associatedTaskId      String?             @map("associated_task_id")
   reason                String?
 
   createdAt             DateTime            @default(now()) @map("created_at")
@@ -728,9 +750,9 @@ model UserActivityOverride {
 // [PROVISIONAL - Desktop daemon lifecycle hooks to be investigated in Phase 3]
 // ----------------------------------------------------------------------------
 model ProposedDeviceHeartbeat {
-  id                    String              @id @default(uuid()) @db.Uuid
-  userId                String              @map("user_id") @db.Uuid
-  deviceId              String              @map("device_id") @db.Uuid
+  id                    String              @id @default(cuid())
+  userId                String              @map("user_id")
+  deviceId              String              @map("device_id")
 
   timestamp             DateTime
   machinePowerState     MachinePowerState   @default(ACTIVE) @map("machine_power_state")

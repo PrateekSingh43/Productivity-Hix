@@ -120,3 +120,30 @@ test("session features: overlapping browser/desktop activity does not double cou
   assert.equal(features.contextCount, 2);
   assert.equal(features.contextSwitchCount, 1);
 });
+
+test("session features: explicit break contributes to idleDurationSeconds while unobserved gaps do not", () => {
+  // Total session: 10:00 to 11:00 (3600s)
+  // 10:00-10:20: focused (1200s)
+  // 10:20-10:25: explicit AFK break (300s)
+  // 10:25-10:30: unobserved gap (300s, no telemetry)
+  // 10:30-10:50: focused (1200s)
+  // 10:50-11:00: unobserved gap (600s, no telemetry)
+  const session = mockSession("2026-01-01T10:00:00.000Z", "2026-01-01T11:00:00.000Z", 3600);
+  const segments = [
+    mockSegment("2026-01-01T10:00:00.000Z", "2026-01-01T10:20:00.000Z", 1200, "focused", "Code", "app.ts"),
+    mockSegment("2026-01-01T10:20:00.000Z", "2026-01-01T10:25:00.000Z", 300, "break", "AFK", "Away"),
+    mockSegment("2026-01-01T10:30:00.000Z", "2026-01-01T10:50:00.000Z", 1200, "focused", "Code", "app.ts"),
+  ];
+
+  const features = extractSessionFeatures(session, segments);
+
+  assert.equal(features.durationSeconds, 3600);
+  assert.equal(features.activeDurationSeconds, 2400, "Active work is 1200 + 1200");
+  assert.equal(features.productiveDurationSeconds, 2400);
+  assert.equal(
+    features.idleDurationSeconds,
+    300,
+    "Only explicit break (300s) contributes to idleDurationSeconds; unobserved gaps (900s) do not",
+  );
+});
+

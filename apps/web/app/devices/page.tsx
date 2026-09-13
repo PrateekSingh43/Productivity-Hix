@@ -109,14 +109,14 @@ export default function DevicesPage() {
               <span
                 className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold ${
                   isRecentlyActive
-                    ? "bg-emerald-500/10 text-emerald-500 dark:text-emerald-400 border border-emerald-500/20"
+                    ? "bg-bg-secondary text-text-primary border border-border-strong"
                     : "bg-amber-500/10 text-amber-500 dark:text-amber-400 border border-amber-500/20"
                 }`}
               >
                 <span
                   className={`h-1.5 w-1.5 rounded-full ${
                     isRecentlyActive
-                      ? "bg-emerald-500 dark:bg-emerald-400 animate-pulse"
+                      ? "bg-text-primary animate-pulse"
                       : "bg-amber-500 dark:bg-amber-400"
                   }`}
                 />
@@ -189,8 +189,8 @@ export default function DevicesPage() {
                   </p>
                 </div>
               </div>
-              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-500 dark:text-emerald-400 border border-emerald-500/20">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 dark:bg-emerald-400 animate-pulse" />
+              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-bg-secondary text-text-primary border border-border-strong">
+                <span className="h-1.5 w-1.5 rounded-full bg-text-primary animate-pulse" />
                 STREAMING
               </span>
             </div>
@@ -234,7 +234,7 @@ export default function DevicesPage() {
             </p>
 
             {pairingSuccess ? (
-              <div className="flex items-center gap-2 p-3 rounded-xl bg-emerald-500/10 text-emerald-500 dark:text-emerald-400 border border-emerald-500/20 text-xs">
+              <div className="flex items-center gap-2 p-3 rounded-xl bg-bg-secondary text-text-primary border border-border-strong text-xs">
                 <CheckCircle2 size={14} />
                 <span>
                   Device authorized successfully! Telemetry stream verified.
@@ -293,7 +293,7 @@ export default function DevicesPage() {
                   size={12}
                   className={
                     isConnected
-                      ? "text-emerald-500 dark:text-emerald-400 animate-pulse"
+                      ? "text-text-primary animate-pulse"
                       : "text-text-tertiary"
                   }
                 />
@@ -314,7 +314,7 @@ export default function DevicesPage() {
                         [{ev.source}:{ev.type}]
                       </span>
                       <span className="text-text-tertiary">
-                        {new Date(ev.timestamp).toLocaleTimeString()}
+                        {new Date(ev.timestamp).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit", hour12: true })}
                       </span>
                     </div>
                     <span className="text-text-primary truncate font-medium">
@@ -341,7 +341,7 @@ export default function DevicesPage() {
 
             <div className="flex items-center justify-between text-[11px] text-text-tertiary pt-1">
               <span>Presentation: WebSocket JSON | Ingestion: HTTPS Batch</span>
-              <span className="text-emerald-500 dark:text-emerald-400 font-medium">
+              <span className="text-text-primary font-medium">
                 Durable Local Queue
               </span>
             </div>

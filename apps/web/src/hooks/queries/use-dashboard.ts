@@ -4,13 +4,13 @@ import { useQuery } from "@tanstack/react-query";
 import { getActivitySummary, getDailyAnalytics, getTasks } from "../../lib/api";
 
 export function useTasks() {
-  return useQuery({ queryKey: ["tasks"], queryFn: getTasks });
+  return useQuery({ queryKey: ["tasks"], queryFn: () => getTasks() });
 }
 export function useActivitySummary() {
-  return useQuery({ queryKey: ["activity", "summary", "today"], queryFn: getActivitySummary });
+  return useQuery({ queryKey: ["activity", "summary", "today"], queryFn: () => getActivitySummary() });
 }
 export function useDailyAnalytics() {
-  return useQuery({ queryKey: ["analytics", "daily"], queryFn: getDailyAnalytics });
+  return useQuery({ queryKey: ["analytics", "daily"], queryFn: () => getDailyAnalytics() });
 }
 
 export { useTimeline } from "./use-timeline";

@@ -23,21 +23,20 @@ import {
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTimeline } from "../../src/hooks/queries/use-timeline";
-import { useLiveTelemetry } from "../../src/hooks/use-live-telemetry";
 import type { TimelineSegment, TimelineCategory } from "@repo/types";
 
-// Animation presets
+// Animation presets: crisp, zero artificial delay
 const containerVariants = {
   hidden: { opacity: 0 },
   show: {
     opacity: 1,
-    transition: { staggerChildren: 0.03 },
+    transition: { duration: 0.15 },
   },
 };
 
 const itemVariants = {
-  hidden: { opacity: 0, y: 6 },
-  show: { opacity: 1, y: 0, transition: { duration: 0.25 } },
+  hidden: { opacity: 0, y: 4 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.15 } },
 };
 
 const categoryConfig: Record<
@@ -86,12 +85,12 @@ const categoryConfig: Record<
   communication: {
     label: "Communication",
     icon: MessageSquare,
-    color: "text-emerald-400",
-    bg: "bg-emerald-500/10",
-    border: "border-emerald-500/25",
-    badge: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
-    bar: "bg-emerald-500",
-    dot: "bg-emerald-400 ring-emerald-500/30",
+    color: "text-text-primary",
+    bg: "bg-bg-secondary",
+    border: "border-border-strong",
+    badge: "bg-bg-secondary text-text-primary border-border-strong",
+    bar: "bg-text-primary",
+    dot: "bg-text-primary ring-border-strong",
   },
   general: {
     label: "General",
@@ -126,7 +125,7 @@ function formatDuration(totalSeconds: number): string {
 function formatClockTime(isoString: string): string {
   try {
     const d = new Date(isoString);
-    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+    return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", hour12: true });
   } catch {
     return "--:--";
   }
@@ -172,24 +171,8 @@ export default function TimelinePage() {
 
   const isToday = selectedDate === getTodayString();
 
-  // Fetch real timeline from backend via React Query
+  // Fetch real timeline from backend via React Query (cached with 30s background sync for today)
   const { data, isLoading, isError, refetch, isFetching } = useTimeline(selectedDate);
-
-  // Live WebSocket connection
-  const liveTelemetry = useLiveTelemetry();
-  const lastEventCountRef = useRef(liveTelemetry.eventCount);
-
-  // When live telemetry arrives and viewing today, throttle-invalidate today's query
-  useEffect(() => {
-    if (!isToday) return;
-    if (liveTelemetry.eventCount > lastEventCountRef.current) {
-      lastEventCountRef.current = liveTelemetry.eventCount;
-      const timer = setTimeout(() => {
-        queryClient.invalidateQueries({ queryKey: ["activity", "timeline", selectedDate] });
-      }, 2000);
-      return () => clearTimeout(timer);
-    }
-  }, [liveTelemetry.eventCount, isToday, selectedDate, queryClient]);
 
   // Date Navigation Handlers
   const handlePrevDay = () => {
@@ -256,8 +239,8 @@ export default function TimelinePage() {
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold tracking-tight text-text-primary">Timeline</h1>
             {isToday && (
-              <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-500 dark:text-emerald-400 border border-emerald-500/20">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 dark:bg-emerald-400 animate-pulse" />
+              <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-bg-secondary text-text-primary border border-border-strong">
+                <span className="w-1.5 h-1.5 rounded-full bg-text-primary animate-pulse" />
                 Live Today
               </span>
             )}
@@ -337,11 +320,11 @@ export default function TimelinePage() {
               <div className="relative">
                 <div
                   className={`w-3 h-3 rounded-full ${
-                    currentActivity.isActive ? "bg-emerald-500 dark:bg-emerald-400" : "bg-amber-500 dark:bg-amber-400"
+                    currentActivity.isActive ? "bg-text-primary" : "bg-amber-500 dark:bg-amber-400"
                   }`}
                 />
                 {currentActivity.isActive && (
-                  <div className="absolute inset-0 w-3 h-3 rounded-full bg-emerald-500 dark:bg-emerald-400 animate-ping opacity-75" />
+                  <div className="absolute inset-0 w-3 h-3 rounded-full bg-text-primary animate-ping opacity-75" />
                 )}
               </div>
 
@@ -353,7 +336,7 @@ export default function TimelinePage() {
                   <span
                     className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
                       currentActivity.isActive
-                        ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-300 border-emerald-500/30"
+                        ? "bg-bg-secondary text-text-primary border-border-strong"
                         : "bg-amber-500/15 text-amber-600 dark:text-amber-300 border-amber-500/30"
                     }`}
                   >
@@ -395,12 +378,21 @@ export default function TimelinePage() {
             <span className="text-xs font-medium text-text-secondary">Total Tracked</span>
             <Clock className="w-4 h-4 text-text-tertiary" />
           </div>
-          <p className="text-2xl font-bold tracking-tight text-text-primary">
-            {summary ? formatDuration(summary.totalTrackedMs / 1000) : "0m"}
-          </p>
-          <p className="text-[11px] text-text-tertiary mt-1 font-mono">
-            {segments.length} continuous blocks
-          </p>
+          {isLoading ? (
+            <div className="space-y-1.5 py-1">
+              <div className="h-7 w-20 bg-bg-secondary animate-pulse rounded-lg" />
+              <div className="h-3 w-28 bg-bg-secondary animate-pulse rounded" />
+            </div>
+          ) : (
+            <>
+              <p className="text-2xl font-bold tracking-tight text-text-primary">
+                {summary ? formatDuration(summary.totalTrackedMs / 1000) : "0m"}
+              </p>
+              <p className="text-[11px] text-text-tertiary mt-1 font-mono">
+                {segments.length} continuous blocks
+              </p>
+            </>
+          )}
         </div>
 
         {/* Focused Work */}
@@ -409,12 +401,21 @@ export default function TimelinePage() {
             <span className="text-xs font-medium text-accent-default">Focused Work</span>
             <Code className="w-4 h-4 text-accent-default" />
           </div>
-          <p className="text-2xl font-bold tracking-tight text-text-primary">
-            {summary ? formatDuration(summary.focusedMs / 1000) : "0m"}
-          </p>
-          <p className="text-[11px] text-text-tertiary mt-1 font-mono">
-            IDEs, Terminal, Editors
-          </p>
+          {isLoading ? (
+            <div className="space-y-1.5 py-1">
+              <div className="h-7 w-20 bg-bg-secondary animate-pulse rounded-lg" />
+              <div className="h-3 w-28 bg-bg-secondary animate-pulse rounded" />
+            </div>
+          ) : (
+            <>
+              <p className="text-2xl font-bold tracking-tight text-text-primary">
+                {summary ? formatDuration(summary.focusedMs / 1000) : "0m"}
+              </p>
+              <p className="text-[11px] text-text-tertiary mt-1 font-mono">
+                IDEs, Terminal, Editors
+              </p>
+            </>
+          )}
         </div>
 
         {/* Browser & Research */}
@@ -423,12 +424,21 @@ export default function TimelinePage() {
             <span className="text-xs font-medium text-violet-500 dark:text-violet-400">Browser / Research</span>
             <Globe className="w-4 h-4 text-violet-500 dark:text-violet-400" />
           </div>
-          <p className="text-2xl font-bold tracking-tight text-text-primary">
-            {summary ? formatDuration(summary.browserMs / 1000) : "0m"}
-          </p>
-          <p className="text-[11px] text-text-tertiary mt-1 font-mono">
-            Web tabs & docs
-          </p>
+          {isLoading ? (
+            <div className="space-y-1.5 py-1">
+              <div className="h-7 w-20 bg-bg-secondary animate-pulse rounded-lg" />
+              <div className="h-3 w-28 bg-bg-secondary animate-pulse rounded" />
+            </div>
+          ) : (
+            <>
+              <p className="text-2xl font-bold tracking-tight text-text-primary">
+                {summary ? formatDuration(summary.browserMs / 1000) : "0m"}
+              </p>
+              <p className="text-[11px] text-text-tertiary mt-1 font-mono">
+                Web tabs & docs
+              </p>
+            </>
+          )}
         </div>
 
         {/* Breaks / AFK */}
@@ -437,17 +447,42 @@ export default function TimelinePage() {
             <span className="text-xs font-medium text-amber-500 dark:text-amber-400">Breaks & AFK</span>
             <Coffee className="w-4 h-4 text-amber-500 dark:text-amber-400" />
           </div>
-          <p className="text-2xl font-bold tracking-tight text-text-primary">
-            {summary ? formatDuration(summary.breakMs / 1000) : "0m"}
-          </p>
-          <p className="text-[11px] text-text-tertiary mt-1 font-mono">
-            Away from keyboard
-          </p>
+          {isLoading ? (
+            <div className="space-y-1.5 py-1">
+              <div className="h-7 w-20 bg-bg-secondary animate-pulse rounded-lg" />
+              <div className="h-3 w-28 bg-bg-secondary animate-pulse rounded" />
+            </div>
+          ) : (
+            <>
+              <p className="text-2xl font-bold tracking-tight text-text-primary">
+                {summary ? formatDuration(summary.breakMs / 1000) : "0m"}
+              </p>
+              <p className="text-[11px] text-text-tertiary mt-1 font-mono">
+                Away from keyboard
+              </p>
+            </>
+          )}
         </div>
       </motion.div>
 
       {/* 4. Daily Flow Proportional Visualization Bar (Requirement 15) */}
-      {segments.length > 0 && totalTrackedMs > 0 && (
+      {isLoading ? (
+        <div className="bg-bg-card border border-border-subtle rounded-2xl p-5 shadow-xs space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Layers className="w-4 h-4 text-text-secondary" />
+              <div className="h-3 w-20 bg-bg-secondary animate-pulse rounded" />
+            </div>
+            <div className="h-3 w-24 bg-bg-secondary animate-pulse rounded" />
+          </div>
+          <div className="h-9 w-full rounded-xl bg-bg-secondary animate-pulse" />
+          <div className="flex gap-4 pt-1">
+            <div className="h-3 w-16 bg-bg-secondary animate-pulse rounded" />
+            <div className="h-3 w-16 bg-bg-secondary animate-pulse rounded" />
+            <div className="h-3 w-16 bg-bg-secondary animate-pulse rounded" />
+          </div>
+        </div>
+      ) : segments.length > 0 && totalTrackedMs > 0 && (
         <motion.div
           variants={itemVariants}
           className="bg-bg-card border border-border-subtle rounded-2xl p-5 shadow-xs space-y-3"
@@ -541,7 +576,7 @@ export default function TimelinePage() {
             )}
             {summary && summary.communicationMs > 0 && (
               <div className="flex items-center gap-1.5">
-                <div className="w-2.5 h-2.5 rounded-sm bg-emerald-500" />
+                <div className="w-2.5 h-2.5 rounded-sm bg-text-primary" />
                 <span className="text-text-secondary">Communication:</span>
                 <span className="font-mono font-medium text-text-primary">
                   {formatDuration(summary.communicationMs / 1000)}
@@ -589,23 +624,33 @@ export default function TimelinePage() {
                 }`}
               >
                 <span>{tab.label}</span>
-                <span
-                  className={`text-[10px] font-mono px-1.5 py-0.2 rounded-md ${
-                    isActive
-                      ? "bg-accent-subtle text-accent-default"
-                      : "bg-bg-secondary text-text-tertiary"
-                  }`}
-                >
-                  {tab.count}
-                </span>
+                {isLoading ? (
+                  <span className="w-3 h-3 rounded-full bg-bg-secondary animate-pulse" />
+                ) : (
+                  <span
+                    className={`text-[10px] font-mono px-1.5 py-0.2 rounded-md ${
+                      isActive
+                        ? "bg-accent-subtle text-accent-default"
+                        : "bg-bg-secondary text-text-tertiary"
+                    }`}
+                  >
+                    {tab.count}
+                  </span>
+                )}
               </button>
             );
           })}
         </div>
 
         <div className="text-xs font-mono text-text-secondary">
-          Showing <span className="text-text-primary font-semibold">{filteredSegments.length}</span>{" "}
-          of {segments.length} continuous blocks
+          {isLoading ? (
+            <span className="inline-block w-36 h-3.5 bg-bg-secondary animate-pulse rounded" />
+          ) : (
+            <>
+              Showing <span className="text-text-primary font-semibold">{filteredSegments.length}</span>{" "}
+              of {segments.length} continuous blocks
+            </>
+          )}
         </div>
       </motion.div>
 
@@ -822,11 +867,11 @@ export default function TimelinePage() {
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1 text-text-secondary font-mono text-[11px] border-t border-border-subtle">
                           <div>
                             <span className="text-text-tertiary">Start:</span>{" "}
-                            {new Date(segment.start).toLocaleTimeString()} ({segment.start})
+                            {new Date(segment.start).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit", hour12: true })}
                           </div>
                           <div>
                             <span className="text-text-tertiary">End:</span>{" "}
-                            {new Date(segment.end).toLocaleTimeString()} ({segment.end})
+                            {new Date(segment.end).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit", hour12: true })}
                           </div>
                         </div>
                       </div>

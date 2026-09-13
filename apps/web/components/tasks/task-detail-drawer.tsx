@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   Circle,
   Play,
+  Pause,
   Square,
   Clock,
   Calendar,
@@ -16,9 +17,14 @@ import {
   Trash2,
   FileText,
   Target,
+  History,
+  AlertTriangle,
+  RotateCcw,
+  MessageSquare,
+  Zap,
 } from "lucide-react";
 import Link from "next/link";
-import type { Task, TaskPriority, TaskStatus } from "@repo/types";
+import { resolveProductiveDay, type Task, type TaskPriority, type TaskStatus } from "@repo/types";
 import {
   useTaskDetail,
   useTaskActivity,
@@ -29,7 +35,11 @@ import {
   useDeleteTaskMutation,
   useStartTaskSessionMutation,
   useEndTaskSessionMutation,
+  useDeleteSessionMutation,
+  usePauseSessionMutation,
+  useResumeSessionMutation,
 } from "../../src/hooks/mutations/use-task-mutations";
+import { FocusReflectionModal } from "./focus-reflection-modal";
 
 interface TaskDetailDrawerProps {
   task: Task | null;
@@ -81,6 +91,16 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
   const deleteTaskMutation = useDeleteTaskMutation();
   const startSessionMutation = useStartTaskSessionMutation();
   const endSessionMutation = useEndTaskSessionMutation();
+  const pauseSessionMutation = usePauseSessionMutation();
+  const resumeSessionMutation = useResumeSessionMutation();
+  const deleteSessionMutation = useDeleteSessionMutation();
+
+  const [reflectionSession, setReflectionSession] = useState<{
+    id: string;
+    taskId?: string | null;
+    taskTitle?: string | null;
+    durationSeconds?: number | null;
+  } | null>(null);
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -159,6 +179,45 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
 
   const varianceMinutes = actualMinutes - plannedDuration;
 
+  const sessions = taskDetail?.sessions || [];
+  const activeSession = sessions.find((s) => !s.endedAt);
+  const checkIns = taskDetail?.checkIns || [];
+
+  const localToday = resolveProductiveDay(new Date());
+  const createdDate = currentTask.createdAt
+    ? format(new Date(currentTask.createdAt), "MMM d, yyyy")
+    : "Unknown";
+  const createdDaysAgo = currentTask.createdAt
+    ? Math.max(
+        0,
+        Math.floor((new Date().getTime() - new Date(currentTask.createdAt).getTime()) / (1000 * 60 * 60 * 24))
+      )
+    : 0;
+
+  const dueDateStr = currentTask.dueAt ? format(new Date(currentTask.dueAt), "yyyy-MM-dd") : null;
+  const isPastDue = Boolean(
+    dueDateStr && dueDateStr < localToday && currentTask.status !== "done" && currentTask.status !== "cancelled"
+  );
+  const isScheduledToday = currentTask.productiveDate === localToday;
+  const isRolloverToToday = isPastDue && isScheduledToday;
+  const isOverdue = isPastDue && !isScheduledToday && !activeSession;
+
+  let daysOverdue = 0;
+  if (dueDateStr && isPastDue) {
+    const dueTime = new Date(dueDateStr).getTime();
+    const todayTime = new Date(localToday).getTime();
+    daysOverdue = Math.max(1, Math.round((todayTime - dueTime) / (1000 * 60 * 60 * 24)));
+  }
+
+  const handleScheduleToToday = () => {
+    updateTaskMutation.mutate({
+      id: currentTask.id,
+      input: {
+        productiveDate: localToday,
+      },
+    });
+  };
+
   // Check if draft has unsaved changes compared to baseline
   const isDirty =
     title.trim() !== baseline.title.trim() ||
@@ -204,7 +263,7 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
             dueDate: dueDate || "",
           });
           setIsSaved(true);
-          setTimeout(() => setIsSaved(false), 2500);
+          onClose(); // Close the drawer immediately after saving
         },
       },
     );
@@ -217,9 +276,6 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
       });
     }
   };
-
-  const sessions = taskDetail?.sessions || [];
-  const activeSession = sessions.find((s) => !s.endedAt);
 
   return (
     <div className="fixed inset-0 z-50 overflow-hidden flex justify-end">
@@ -239,12 +295,12 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
               type="button"
               onClick={() => setStatus(status === "done" ? "todo" : "done")}
               className={`shrink-0 transition-transform active:scale-95 cursor-pointer ${
-                isDone ? "text-emerald-500 hover:text-emerald-600" : "text-text-muted hover:text-emerald-500"
+                isDone ? "text-text-primary hover:text-text-primary" : "text-text-muted hover:text-text-primary"
               }`}
               title={isDone ? "Mark incomplete" : "Mark done"}
             >
               {isDone ? (
-                <CheckCircle2 size={20} className="fill-emerald-500/20" />
+                <CheckCircle2 size={20} className="fill-text-primary/20" />
               ) : (
                 <Circle size={20} />
               )}
@@ -312,6 +368,69 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
             />
           </div>
 
+          {/* Lifecycle & Schedule Status Banner */}
+          {isOverdue && (
+            <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/25 flex items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <AlertTriangle size={16} className="text-rose-600 dark:text-rose-400 shrink-0" />
+                <div className="min-w-0">
+                  <div className="font-semibold text-rose-600 dark:text-rose-400">
+                    Overdue by {daysOverdue} {daysOverdue === 1 ? "day" : "days"} (Due {dueDateStr ? format(new Date(currentTask.dueAt!), "MMM d") : ""})
+                  </div>
+                  <div className="text-[11px] text-text-muted mt-0.5 truncate">
+                    Reschedule to Today to align with today&apos;s execution plan.
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleScheduleToToday}
+                disabled={updateTaskMutation.isPending}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-rose-500/15 border border-rose-500/30 text-xs font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-500/25 transition-colors shrink-0 cursor-pointer"
+                title="Reschedule to Today"
+              >
+                <RotateCcw size={12} />
+                <span>To Today</span>
+              </button>
+            </div>
+          )}
+
+          {isRolloverToToday && (
+            <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 flex items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <RotateCcw size={16} className="text-amber-600 dark:text-amber-400 shrink-0" />
+                <div className="min-w-0">
+                  <div className="font-semibold text-amber-600 dark:text-amber-400">
+                    Rollover Task • Scheduled for Today
+                  </div>
+                  <div className="text-[11px] text-text-muted mt-0.5 truncate">
+                    Originally due on {dueDateStr ? format(new Date(currentTask.dueAt!), "MMM d") : ""}, rolled into today&apos;s deliberate scope.
+                  </div>
+                </div>
+              </div>
+              <span className="text-[10px] font-mono font-medium px-2 py-0.5 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 shrink-0">
+                Today
+              </span>
+            </div>
+          )}
+
+          {/* Task History & Provenance Meta Bar */}
+          <div className="px-3.5 py-2.5 rounded-lg bg-bg-secondary/50 border border-border-subtle flex items-center justify-between gap-2 text-[11px] text-text-muted flex-wrap">
+            <div className="flex items-center gap-1.5">
+              <History size={12} className="text-text-muted shrink-0" />
+              <span>
+                Created {createdDate} ({createdDaysAgo === 0 ? "Today" : `${createdDaysAgo}d ago`})
+              </span>
+            </div>
+            <div className="flex items-center gap-3 font-mono text-[10px]">
+              <span>{sessions.length} {sessions.length === 1 ? "session" : "sessions"}</span>
+              <span>•</span>
+              <span>{checkIns.length} {checkIns.length === 1 ? "reflection" : "reflections"}</span>
+              <span>•</span>
+              <span>{formatDuration(actualMinutes)} focus</span>
+            </div>
+          </div>
+
           {/* Properties Grid */}
           <div className="grid grid-cols-2 gap-3.5 p-4 rounded-xl bg-bg-secondary/40 border border-border-subtle">
             {/* Status Selector */}
@@ -370,17 +489,20 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
                 <Clock size={11} className="text-text-muted" />
                 Planned Effort
               </label>
-              <select
-                value={plannedDuration}
-                onChange={(e) => setPlannedDuration(Number(e.target.value))}
-                className="w-full bg-bg-card border border-border-subtle rounded-md px-2.5 py-1.5 text-xs text-text-primary font-mono outline-none focus:border-border-hover cursor-pointer [&>option]:bg-bg-card [&>option]:text-text-primary"
-              >
-                {DURATION_OPTIONS.map((mins) => (
-                  <option key={mins} value={mins}>
-                    {formatDuration(mins)} (planned)
-                  </option>
-                ))}
-              </select>
+              <div className="flex items-center gap-2 bg-bg-card border border-border-subtle rounded-md px-2.5 py-1.5 focus-within:border-border-hover transition-colors">
+                <input
+                  type="number"
+                  min="1"
+                  max="6000"
+                  value={plannedDuration}
+                  onChange={(e) => setPlannedDuration(parseInt(e.target.value, 10) || 0)}
+                  className="w-14 bg-transparent text-xs text-text-primary font-mono outline-none"
+                  placeholder="30"
+                />
+                <span className="text-[11px] text-text-muted font-mono whitespace-nowrap">
+                  mins ({formatDuration(plannedDuration)})
+                </span>
+              </div>
             </div>
 
             {/* Actual Duration (Derived dynamically from sessions) */}
@@ -388,12 +510,12 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
               <label className="text-xs font-medium text-text-secondary">
                 Actual Time (Recorded from sessions)
               </label>
-              <div className="px-2.5 py-1.5 rounded-md bg-bg-card border border-border-subtle text-xs font-mono font-medium text-emerald-600 dark:text-emerald-400 flex items-center justify-between">
+              <div className="px-2.5 py-1.5 rounded-md bg-bg-card border border-border-subtle text-xs font-mono font-medium text-text-primary flex items-center justify-between">
                 <span>{formatDuration(actualMinutes)}</span>
                 {varianceMinutes !== 0 && actualMinutes > 0 && (
                   <span
                     className={`text-[11px] font-normal ${
-                      varianceMinutes > 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"
+                      varianceMinutes > 0 ? "text-amber-600 dark:text-amber-400" : "text-text-primary"
                     }`}
                   >
                     {varianceMinutes > 0 ? `+${varianceMinutes}m variance` : `${varianceMinutes}m under plan`}
@@ -470,24 +592,69 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
               )}
             </div>
 
-            {/* Active Session Callout */}
+            {/* Active / Paused Session Callout */}
             {activeSession && (
-              <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-between gap-3">
+              <div
+                className={`p-3.5 rounded-xl border flex items-center justify-between gap-3 ${
+                  activeSession.isPaused
+                    ? "bg-amber-500/10 border-amber-500/30"
+                    : "bg-bg-secondary border-border-strong"
+                }`}
+              >
                 <div className="flex items-center gap-2.5">
-                  <span className="h-2 w-2 rounded-full bg-emerald-500 animate-ping" />
-                  <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
-                    Session active right now
+                  <span
+                    className={`h-2 w-2 rounded-full ${
+                      activeSession.isPaused ? "bg-amber-500" : "bg-emerald-500 animate-ping"
+                    }`}
+                  />
+                  <span className="text-xs font-semibold text-text-primary">
+                    {activeSession.isPaused ? "Focus Paused" : "Session active right now"}
                   </span>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => endSessionMutation.mutate(activeSession.id)}
-                  disabled={endSessionMutation.isPending}
-                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md bg-rose-500/15 border border-rose-500/30 text-xs font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-500/25 transition-colors cursor-pointer"
-                >
-                  <Square size={11} />
-                  <span>End Session</span>
-                </button>
+                <div className="flex items-center gap-2">
+                  {activeSession.isPaused ? (
+                    <button
+                      type="button"
+                      onClick={() => resumeSessionMutation.mutate(activeSession.id)}
+                      disabled={resumeSessionMutation.isPending}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-500/15 border border-amber-500/30 text-xs font-medium text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 transition-colors cursor-pointer"
+                    >
+                      <Play size={11} className="fill-current" />
+                      <span>Resume</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => pauseSessionMutation.mutate(activeSession.id)}
+                      disabled={pauseSessionMutation.isPending}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-border-subtle bg-bg-card text-xs font-medium text-text-secondary hover:text-text-primary hover:border-border-hover transition-colors cursor-pointer"
+                    >
+                      <Pause size={11} />
+                      <span>Pause</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const sess = activeSession;
+                      endSessionMutation.mutate(sess.id, {
+                        onSuccess: () => {
+                          setReflectionSession({
+                            id: sess.id,
+                            taskId: currentTask.id,
+                            taskTitle: currentTask.title,
+                            durationSeconds: sess.durationSeconds,
+                          });
+                        },
+                      });
+                    }}
+                    disabled={endSessionMutation.isPending}
+                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md bg-rose-500/15 border border-rose-500/30 text-xs font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-500/25 transition-colors cursor-pointer"
+                  >
+                    <Square size={11} />
+                    <span>End Session</span>
+                  </button>
+                </div>
               </div>
             )}
 
@@ -505,9 +672,17 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
               <div className="divide-y divide-border-subtle rounded-xl border border-border-subtle bg-bg-secondary/20 overflow-hidden">
                 {sessions.map((session, idx) => {
                   const isOngoing = !session.endedAt;
-                  const startText = format(new Date(session.startedAt), "HH:mm");
+                  let startDate = new Date(session.startedAt);
+                  if (session.endedAt && session.durationSeconds) {
+                    const endDate = new Date(session.endedAt);
+                    const wallClockSec = Math.round((endDate.getTime() - startDate.getTime()) / 1000);
+                    if (wallClockSec < session.durationSeconds) {
+                      startDate = new Date(endDate.getTime() - session.durationSeconds * 1000);
+                    }
+                  }
+                  const startText = format(startDate, "h:mm a");
                   const endText = session.endedAt
-                    ? format(new Date(session.endedAt), "HH:mm")
+                    ? format(new Date(session.endedAt), "h:mm a")
                     : "now";
                   const durationMins = session.durationSeconds
                     ? Math.round(session.durationSeconds / 60)
@@ -516,13 +691,13 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
                   return (
                     <div
                       key={session.id}
-                      className="px-3.5 py-2.5 flex items-center justify-between text-xs hover:bg-bg-secondary/40 transition-colors"
+                      className="group px-3.5 py-2.5 flex items-center justify-between text-xs hover:bg-bg-secondary/40 transition-colors"
                     >
-                      <div className="flex items-center gap-2.5">
-                        <span className="text-[11px] font-mono text-text-muted">
+                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                        <span className="text-[11px] font-mono text-text-muted shrink-0">
                           #{sessions.length - idx}
                         </span>
-                        <span className="text-text-primary font-medium">
+                        <span className="text-text-primary font-medium shrink-0">
                           {startText} – {endText}
                         </span>
                         {session.notes && (
@@ -532,9 +707,9 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
                         )}
                       </div>
 
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2.5 shrink-0">
                         {isOngoing ? (
-                          <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 rounded">
+                          <span className="text-[10px] font-semibold text-text-primary bg-bg-secondary border border-border-strong px-2 py-0.5 rounded">
                             Active
                           </span>
                         ) : (
@@ -542,6 +717,20 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
                             {durationMins !== null ? `${durationMins}m` : "0m"}
                           </span>
                         )}
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (confirm("Delete this focus session?")) {
+                              deleteSessionMutation.mutate(session.id);
+                            }
+                          }}
+                          disabled={deleteSessionMutation.isPending}
+                          className="opacity-0 group-hover:opacity-100 p-1 rounded text-text-muted hover:text-rose-500 hover:bg-bg-secondary transition-all cursor-pointer"
+                          title="Delete session"
+                        >
+                          <Trash2 size={12} />
+                        </button>
                       </div>
                     </div>
                   );
@@ -579,17 +768,45 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
                   No telemetry recorded during this task&apos;s session windows.
                 </div>
               ) : (
-                <div className="space-y-1.5 divide-y divide-border-subtle/40">
-                  {activitySummary.slice(0, 5).map((act, i) => {
+                <div className="space-y-2.5 divide-y divide-border-subtle/30">
+                  {activitySummary.slice(0, 6).map((act, i) => {
                     const mins = Math.round(act.durationSeconds / 60);
+                    const percent = act.percentage ?? 0;
                     return (
-                      <div key={i} className="pt-1.5 first:pt-0 flex items-center justify-between text-xs">
-                        <span className="font-medium text-text-primary truncate max-w-[220px]">
-                          {act.application}
-                        </span>
-                        <span className="font-mono text-text-muted">
-                          {mins > 0 ? `${mins}m` : "< 1m"}
-                        </span>
+                      <div key={i} className="pt-2 first:pt-0 space-y-1">
+                        <div className="flex items-center justify-between text-xs gap-3">
+                          <div className="min-w-0 flex-1">
+                            <div className="font-medium text-text-primary truncate" title={act.title}>
+                              {act.title || act.application}
+                            </div>
+                            <div className="flex items-center gap-1.5 text-[10px] text-text-muted mt-0.5">
+                              <span className="font-medium text-text-secondary">{act.application}</span>
+                              {act.domain && act.domain.toLowerCase() !== act.application.toLowerCase() && (
+                                <>
+                                  <span>•</span>
+                                  <span className="truncate">{act.domain}</span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            {percent > 0 && (
+                              <span className="text-[10px] font-mono text-text-muted bg-bg-secondary px-1.5 py-0.5 rounded border border-border-subtle">
+                                {percent}%
+                              </span>
+                            )}
+                            <span className="font-mono text-xs font-medium text-text-primary">
+                              {mins > 0 ? `${mins}m` : "< 1m"}
+                            </span>
+                          </div>
+                        </div>
+                        {/* Contribution Proportion Bar */}
+                        <div className="h-1 w-full bg-bg-secondary rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-text-primary/30 rounded-full transition-all duration-300"
+                            style={{ width: `${Math.max(3, Math.min(100, percent))}%` }}
+                          />
+                        </div>
                       </div>
                     );
                   })}
@@ -597,45 +814,100 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
               )}
             </div>
           </div>
+
+          {/* LINKED REFLECTIONS & CHECK-INS (50m debriefs & intentional reflections) */}
+          <div className="space-y-3 pt-1">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <MessageSquare size={13} className="text-text-muted" />
+                <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
+                  Linked Reflections & Check-Ins
+                </h3>
+                <span className="text-xs font-mono text-text-muted bg-bg-secondary px-1.5 py-0.2 rounded border border-border-subtle">
+                  {checkIns.length}
+                </span>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-xl bg-bg-secondary/30 border border-border-subtle space-y-3">
+              <p className="text-xs text-text-muted leading-relaxed">
+                50-minute debrief reflections and subjective assessments captured while working on this task.
+              </p>
+
+              {checkIns.length === 0 ? (
+                <div className="py-2 text-center text-xs text-text-muted">
+                  No reflections or check-ins logged for this task yet.
+                </div>
+              ) : (
+                <div className="space-y-3 divide-y divide-border-subtle/40">
+                  {checkIns.map((ci) => (
+                    <div key={ci.id} className="pt-3 first:pt-0 space-y-2">
+                      <div className="flex items-center justify-between text-xs">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-[11px] text-text-muted">
+                            {format(new Date(ci.createdAt), "MMM d, h:mm a")}
+                          </span>
+                          {ci.alignment && (
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-bg-secondary border border-border-subtle text-text-secondary">
+                              {ci.alignment}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {ci.energy && (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-mono text-text-muted bg-bg-secondary px-1.5 py-0.5 rounded border border-border-subtle">
+                              <Zap size={9} className="text-amber-500" />
+                              Energy: {ci.energy}
+                            </span>
+                          )}
+                          {ci.focus && (
+                            <span className="text-[10px] font-mono text-text-muted bg-bg-secondary px-1.5 py-0.5 rounded border border-border-subtle">
+                              Focus: {ci.focus}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {(ci.outcome || ci.note) && (
+                        <div className="text-xs text-text-primary bg-bg-secondary/50 rounded-lg p-2.5 border border-border-subtle leading-relaxed">
+                          {ci.outcome || ci.note}
+                        </div>
+                      )}
+
+                      {ci.blocker && (
+                        <div className="inline-flex items-center gap-1.5 text-[11px] text-rose-600 dark:text-rose-400 bg-rose-500/10 border border-rose-500/20 px-2 py-1 rounded-md">
+                          <AlertTriangle size={11} className="shrink-0" />
+                          <span>Blocker: {ci.blocker}</span>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
 
-        {/* Footer actions & info */}
+        {/* Footer info (actions removed per request) */}
         <div className="px-5 py-3.5 border-t border-border-subtle bg-bg-card flex items-center justify-between gap-3">
           <div className="flex flex-col text-[11px] text-text-muted">
             <span>
-              Created: {format(new Date(currentTask.createdAt), "MMM d, HH:mm")}
+              Created: {format(new Date(currentTask.createdAt), "MMM d, h:mm a")}
             </span>
             {currentTask.completedAt && (
-              <span className="text-emerald-600 dark:text-emerald-400">
-                Completed: {format(new Date(currentTask.completedAt), "MMM d, HH:mm")}
+              <span className="text-text-primary">
+                Completed: {format(new Date(currentTask.completedAt), "MMM d, h:mm a")}
               </span>
             )}
           </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-3 py-1.5 rounded-md text-xs text-text-muted hover:text-text-primary hover:bg-bg-secondary transition-colors cursor-pointer"
-            >
-              Close
-            </button>
-            <button
-              type="button"
-              onClick={handleSaveAll}
-              disabled={!isDirty || updateTaskMutation.isPending || !title.trim()}
-              className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${
-                isDirty && title.trim()
-                  ? "bg-text-primary text-bg-default hover:opacity-90 shadow-xs"
-                  : "bg-bg-secondary text-text-muted border border-border-subtle cursor-not-allowed opacity-50"
-              }`}
-            >
-              <CheckmarkIcon size={14} />
-              <span>{updateTaskMutation.isPending ? "Saving..." : isSaved ? "Saved!" : "Save Changes"}</span>
-            </button>
-          </div>
         </div>
       </div>
+
+      <FocusReflectionModal
+        isOpen={Boolean(reflectionSession)}
+        onClose={() => setReflectionSession(null)}
+        session={reflectionSession}
+      />
     </div>
   );
 }

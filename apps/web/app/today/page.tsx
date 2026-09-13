@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { format } from "date-fns";
 import {
   Plus,
@@ -8,6 +8,7 @@ import {
   Circle,
   Clock,
   Play,
+  Pause,
   ArrowRight,
   Target,
   ListTodo,
@@ -15,6 +16,7 @@ import {
   Calendar,
   Check,
   Radio,
+  Trash2,
 } from "lucide-react";
 import Link from "next/link";
 import { PageContainer } from "../../components/layout/page-container";
@@ -25,7 +27,9 @@ import { DailyPlanView } from "../../components/primitives/daily-plan-view";
 import { EmptyState } from "../../components/primitives/empty-state";
 import { PriorityBadge } from "../../components/primitives/data-badge";
 import { TaskDetailDrawer } from "../../components/tasks/task-detail-drawer";
+import { ConfirmDiscardModal } from "../../components/tasks/confirm-discard-modal";
 import { useTasks, useActivitySummary } from "../../src/hooks/queries/use-dashboard";
+import { useActiveSession } from "../../src/hooks/queries/use-tasks";
 import {
   useTodayPlan,
   useSavePlan,
@@ -33,12 +37,14 @@ import {
 } from "../../src/hooks/queries/use-plans";
 import { useLiveTelemetry } from "../../src/hooks/use-live-telemetry";
 import { createTask, updateTask } from "../../src/lib/api/tasks";
-import { createSession, finishSession } from "../../src/lib/api/sessions";
+import { createSession, finishSession, pauseSession, resumeSession, deleteSession } from "../../src/lib/api/sessions";
 import { resolveProductiveDay, formatProductiveDateLabel, type Task } from "@repo/types";
 import { useQueryClient } from "@tanstack/react-query";
 
 export default function TodayPage() {
   const queryClient = useQueryClient();
+  const [showDiscardModal, setShowDiscardModal] = useState(false);
+  const hasNotifiedRef = useRef<string | null>(null);
 
   // Queries
   const planQuery = useTodayPlan();
@@ -53,9 +59,13 @@ export default function TodayPage() {
   // Focus Session execution state
   const [sessionActive, setSessionActive] = useState(false);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [isPaused, setIsPaused] = useState(false);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+
+  const activeSessionQuery = useActiveSession();
+  const serverActiveSession = activeSessionQuery.data;
 
   // Quick Add Task state
   const [isAddingTask, setIsAddingTask] = useState(false);
@@ -64,15 +74,103 @@ export default function TodayPage() {
   const [newTaskGoalId, setNewTaskGoalId] = useState<string>("");
   const [newTaskDueDate, setNewTaskDueDate] = useState<string>("");
 
-  const tasks = tasksQuery.data ?? [];
   const plan = planQuery.data;
   const goals = plan?.goals ?? [];
   const independentTasks = plan?.independentTasks ?? [];
 
-  // Elapsed timer ticker
+  // Date context
+  const localTodayDate = resolveProductiveDay(new Date());
+  const targetDate = plan?.date && plan.date >= localTodayDate ? plan.date : localTodayDate;
+  const dateFormatted = formatProductiveDateLabel(targetDate);
+
+  const rawTasks = tasksQuery.data ?? [];
+
+  // Overdue / Missed tasks from previous days
+  const overdueTasks = React.useMemo(() => {
+    return rawTasks.filter((t) => {
+      if (t.status === "done" || t.status === "cancelled") return false;
+      // Active session or today's goal always surfaces in Today, not in overdue rollover prompt
+      if (t.hasActiveSession) return false;
+      if (goals.some((g) => g.id === t.goalId)) return false;
+      // If task is scheduled for targetDate or later, it is handled in Today or future
+      if (t.productiveDate && t.productiveDate >= targetDate) return false;
+
+      if (t.dueAt) {
+        const dueDateStr = format(new Date(t.dueAt), "yyyy-MM-dd");
+        return dueDateStr < targetDate;
+      }
+      return Boolean(t.productiveDate && t.productiveDate < targetDate);
+    });
+  }, [rawTasks, targetDate, goals]);
+
+  // Tasks belonging specifically to Today
+  const tasks = React.useMemo(() => {
+    const priorityWeight = { high: 3, medium: 2, low: 1, none: 0 };
+    return rawTasks
+      .filter((t) => {
+        // Active session always surfaces in Today
+        if (t.hasActiveSession) return true;
+        // Belongs to one of today's goals
+        if (goals.some((g) => g.id === t.goalId)) return true;
+        // Specifically assigned to today's productive day
+        if (t.productiveDate === targetDate) return true;
+        // Due today
+        if (t.dueAt) {
+          const dueDateStr = format(new Date(t.dueAt), "yyyy-MM-dd");
+          if (dueDateStr === targetDate) return true;
+        }
+        return false;
+      })
+      .sort((a, b) => {
+        const pDiff = (priorityWeight[b.priority || "none"] || 0) - (priorityWeight[a.priority || "none"] || 0);
+        if (pDiff !== 0) return pDiff;
+        return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+      });
+  }, [rawTasks, targetDate, goals]);
+
+  // Handler to roll over overdue tasks to today
+  const handleRollOverOverdue = async () => {
+    for (const t of overdueTasks) {
+      await updateTask(t.id, { productiveDate: targetDate });
+    }
+    queryClient.invalidateQueries({ queryKey: ["tasks"] });
+    queryClient.invalidateQueries({ queryKey: ["plans"] });
+  };
+
+  // Sync with server active session state (cross-synced with extension)
+  useEffect(() => {
+    if (serverActiveSession && !serverActiveSession.endedAt) {
+      setSessionActive(true);
+      setActiveSessionId(serverActiveSession.id);
+      setIsPaused(Boolean(serverActiveSession.isPaused));
+
+      if (serverActiveSession.taskId) {
+        const found = rawTasks.find((t) => t.id === serverActiveSession.taskId);
+        if (found) setSelectedTask(found);
+      }
+
+      if (serverActiveSession.isPaused) {
+        setElapsedSeconds(serverActiveSession.durationSeconds ?? 0);
+      } else {
+        const segment = Math.max(
+          0,
+          Math.round((Date.now() - new Date(serverActiveSession.startedAt).getTime()) / 1000)
+        );
+        setElapsedSeconds((serverActiveSession.durationSeconds ?? 0) + segment);
+      }
+    } else if (serverActiveSession === null && sessionActive) {
+      setSessionActive(false);
+      setActiveSessionId(null);
+      setSelectedTask(null);
+      setElapsedSeconds(0);
+      setIsPaused(false);
+    }
+  }, [serverActiveSession, rawTasks]);
+
+  // Elapsed timer ticker (only ticks when active and not paused)
   useEffect(() => {
     let interval: NodeJS.Timeout | null = null;
-    if (sessionActive) {
+    if (sessionActive && !isPaused) {
       interval = setInterval(() => {
         setElapsedSeconds((prev) => prev + 1);
       }, 1000);
@@ -80,11 +178,7 @@ export default function TodayPage() {
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [sessionActive]);
-
-  // Date context
-  const targetDate = plan?.date || resolveProductiveDay();
-  const dateFormatted = formatProductiveDateLabel(targetDate);
+  }, [sessionActive, isPaused]);
 
   // Initialize due date to today's productive date when targetDate is ready
   useEffect(() => {
@@ -104,10 +198,34 @@ export default function TodayPage() {
   const nextUpTask = tasks.find((t) => t.status !== "done");
 
   const formatElapsed = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
+    const s = Math.abs(seconds);
+    const hours = Math.floor(s / 3600);
+    const mins = Math.floor((s % 3600) / 60);
+    const secs = s % 60;
+    if (hours > 0) {
+      return `${hours}:${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+    }
     return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
   };
+
+  // Trigger web notification when target is reached
+  useEffect(() => {
+    if (!sessionActive || isPaused) return;
+    const targetMinutes = serverActiveSession?.targetDurationMinutes ?? selectedTask?.plannedDurationMinutes ?? 25;
+    const targetSec = targetMinutes * 60;
+    if (elapsedSeconds >= targetSec && activeSessionId && hasNotifiedRef.current !== activeSessionId) {
+      hasNotifiedRef.current = activeSessionId;
+      if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted") {
+        const title = selectedTask?.title || "Focus Session";
+        try {
+          new Notification("Focus Target Reached!", {
+            body: `Completed planned ${targetMinutes}m on "${title}". Continue in flow or wrap up & reflect.`,
+            icon: "/icon.png",
+          });
+        } catch {}
+      }
+    }
+  }, [sessionActive, isPaused, elapsedSeconds, activeSessionId, serverActiveSession, selectedTask]);
 
   // Handler to toggle task done/todo
   const handleToggleTask = async (task: Task) => {
@@ -121,19 +239,39 @@ export default function TodayPage() {
   const handleStartTaskFocus = async (task: Task) => {
     setSelectedTask(task);
     try {
+      const targetDurationMinutes = task.plannedDurationMinutes ?? 30;
       const session = await createSession({
         taskId: task.id,
+        targetDurationMinutes,
         notes: `Focus on ${task.title}`,
         startedAt: new Date().toISOString(),
       });
       setActiveSessionId(session.id);
       setSessionActive(true);
+      setIsPaused(false);
       setElapsedSeconds(0);
       await updateTask(task.id, { status: "in_progress" });
       queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
     } catch {
       setSessionActive(true);
     }
+  };
+
+  // Handler to pause focus
+  const handlePauseFocus = async () => {
+    if (!activeSessionId) return;
+    setIsPaused(true);
+    await pauseSession(activeSessionId);
+    queryClient.invalidateQueries({ queryKey: ["sessions"] });
+  };
+
+  // Handler to resume focus
+  const handleResumeFocus = async () => {
+    if (!activeSessionId) return;
+    setIsPaused(false);
+    await resumeSession(activeSessionId);
+    queryClient.invalidateQueries({ queryKey: ["sessions"] });
   };
 
   // Handler to complete focus session
@@ -147,11 +285,35 @@ export default function TodayPage() {
     setSessionActive(false);
     setActiveSessionId(null);
     setSelectedTask(null);
+    setIsPaused(false);
     setElapsedSeconds(0);
     queryClient.invalidateQueries({ queryKey: ["tasks"] });
     queryClient.invalidateQueries({ queryKey: ["sessions"] });
     queryClient.invalidateQueries({ queryKey: ["plans"] });
     queryClient.invalidateQueries({ queryKey: ["activity"] });
+  };
+
+  // Handler to prompt discard focus session
+  const handleDiscardFocus = () => {
+    if (!activeSessionId) return;
+    setShowDiscardModal(true);
+  };
+
+  const handleConfirmDiscard = async () => {
+    if (!activeSessionId) return;
+    try {
+      await deleteSession(activeSessionId);
+    } catch (e) {
+      console.error("Failed to discard session:", e);
+    }
+    setShowDiscardModal(false);
+    setSessionActive(false);
+    setActiveSessionId(null);
+    setSelectedTask(null);
+    setIsPaused(false);
+    setElapsedSeconds(0);
+    queryClient.invalidateQueries({ queryKey: ["tasks"] });
+    queryClient.invalidateQueries({ queryKey: ["sessions"] });
   };
 
   // Quick Add Task for Today handler
@@ -188,6 +350,33 @@ export default function TodayPage() {
         ]}
       />
 
+      {/* Overdue Tasks Alert Strip */}
+      {overdueTasks.length > 0 && (
+        <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-amber-700 dark:text-amber-300">
+          <div className="flex items-center gap-2">
+            <Clock size={14} className="text-amber-500 shrink-0" />
+            <span>
+              You have <strong>{overdueTasks.length} incomplete {overdueTasks.length === 1 ? "task" : "tasks"}</strong> from previous days.
+            </span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={handleRollOverOverdue}
+              className="px-2.5 py-1 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-800 dark:text-amber-200 font-medium transition-colors cursor-pointer"
+            >
+              Reschedule all to Today
+            </button>
+            <Link
+              href="/tasks"
+              className="px-2.5 py-1 rounded border border-amber-500/30 hover:bg-amber-500/15 text-amber-800 dark:text-amber-200 font-medium transition-colors"
+            >
+              View in Tasks →
+            </Link>
+          </div>
+        </div>
+      )}
+
       {/* 2. DAILY PLAN (0..N Goals, associated Tasks, independent Tasks) */}
       <Section>
         <DailyPlanView
@@ -212,15 +401,15 @@ export default function TodayPage() {
       {/* 3. EXECUTION STRIP (Active Focus Session or Next Up Quick Focus) */}
       {sessionActive ? (
         <Section>
-          <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="rounded-xl border border-border-strong bg-bg-secondary p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div className="flex items-center gap-3 min-w-0">
               <span className="relative flex h-3 w-3 shrink-0">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500" />
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-text-primary opacity-75" />
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-text-primary" />
               </span>
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                  <span className="text-xs font-semibold text-text-primary">
                     Focus Session Active
                   </span>
                   {selectedTask && (
@@ -237,29 +426,82 @@ export default function TodayPage() {
                 </h3>
                 {(telemetry.activeDomain || telemetry.activeApp) && (
                   <div className="flex items-center gap-1.5 text-xs text-text-muted mt-1">
-                    <Radio size={11} className="text-emerald-500 animate-pulse shrink-0" />
+                    <Radio size={11} className="text-text-primary animate-pulse shrink-0" />
                     <span className="truncate">Observed: {telemetry.activeDomain || telemetry.activeApp}</span>
                   </div>
                 )}
               </div>
             </div>
 
-            <div className="flex items-center gap-4 self-end sm:self-center shrink-0">
+            <div className="flex items-center gap-3 self-end sm:self-center shrink-0">
               <div className="text-right">
-                <span className="text-[11px] font-mono text-text-muted block">
-                  Elapsed
+                <span className={`text-[11px] font-mono block ${
+                  isPaused ? "text-amber-500" : (elapsedSeconds > ((serverActiveSession?.targetDurationMinutes ?? selectedTask?.plannedDurationMinutes ?? 25) * 60)) ? "text-amber-500 font-semibold" : "text-text-muted"
+                }`}>
+                  {isPaused
+                    ? "Paused"
+                    : elapsedSeconds > ((serverActiveSession?.targetDurationMinutes ?? selectedTask?.plannedDurationMinutes ?? 25) * 60)
+                    ? "Overtime (Flow)"
+                    : `Target ${serverActiveSession?.targetDurationMinutes ?? selectedTask?.plannedDurationMinutes ?? 25}m`}
                 </span>
-                <span className="text-2xl font-semibold font-mono tabular-nums text-text-primary">
-                  {formatElapsed(elapsedSeconds)}
+                <span className={`text-2xl font-semibold font-mono tabular-nums ${
+                  isPaused
+                    ? "text-amber-500"
+                    : elapsedSeconds > ((serverActiveSession?.targetDurationMinutes ?? selectedTask?.plannedDurationMinutes ?? 25) * 60)
+                    ? "text-amber-400"
+                    : "text-text-primary"
+                }`}>
+                  {(() => {
+                    const targetSec = (serverActiveSession?.targetDurationMinutes ?? selectedTask?.plannedDurationMinutes ?? 25) * 60;
+                    const rem = targetSec - elapsedSeconds;
+                    if (rem < 0) {
+                      return `+${formatElapsed(Math.abs(rem))}`;
+                    }
+                    return formatElapsed(rem);
+                  })()}
                 </span>
               </div>
+
+              {/* Pause / Resume Button */}
+              {isPaused ? (
+                <button
+                  type="button"
+                  onClick={handleResumeFocus}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md bg-amber-500/15 border border-amber-500/30 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 text-xs font-medium transition-colors cursor-pointer"
+                  title="Resume focus session"
+                >
+                  <Play size={13} className="fill-current" />
+                  <span>Resume</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handlePauseFocus}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md bg-bg-secondary border border-border-subtle hover:border-border-hover text-text-primary text-xs font-medium transition-colors cursor-pointer"
+                  title="Pause focus session"
+                >
+                  <Pause size={13} />
+                  <span>Pause</span>
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={handleCompleteFocus}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium transition-colors cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-md bg-text-primary hover:opacity-90 text-bg-default text-xs font-medium transition-colors cursor-pointer"
               >
                 <Check size={14} />
-                <span>Complete Session</span>
+                <span>Complete</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleDiscardFocus}
+                className="inline-flex items-center gap-1 px-2.5 py-2 rounded-md border border-border-subtle hover:border-red-500/40 hover:bg-red-500/10 text-xs font-medium text-text-muted hover:text-red-400 transition-colors cursor-pointer"
+                title="Discard session"
+              >
+                <Trash2 size={13} />
+                <span className="sr-only sm:not-sr-only sm:inline text-[11px]">Discard</span>
               </button>
             </div>
           </div>
@@ -418,10 +660,10 @@ export default function TodayPage() {
                               type="button"
                               onClick={() => handleToggleTask(task)}
                               aria-label={isDone ? `Mark incomplete: ${task.title}` : `Mark complete: ${task.title}`}
-                              className="text-text-muted hover:text-emerald-500 transition-colors shrink-0 cursor-pointer"
+                              className="text-text-muted hover:text-text-primary transition-colors shrink-0 cursor-pointer"
                             >
                               {isDone ? (
-                                <CheckCircle2 className="w-4 h-4 text-emerald-500 fill-emerald-500/20" />
+                                <CheckCircle2 className="w-4 h-4 text-text-primary fill-text-primary/20" />
                               ) : (
                                 <Circle className="w-4 h-4" />
                               )}
@@ -440,18 +682,22 @@ export default function TodayPage() {
                           </div>
 
                           <div className="flex items-center gap-2.5 shrink-0 ml-3">
-                            {task.dueAt && (
-                              <span className={`inline-flex items-center gap-1 text-xs text-text-muted font-mono ${isDone ? "opacity-60" : ""}`}>
-                                <Calendar size={11} />
-                                {format(new Date(task.dueAt), "MMM d")}
-                              </span>
-                            )}
-                            {task.plannedDurationMinutes && (
-                              <span className={`text-xs font-mono text-text-muted ${isDone ? "opacity-60" : ""}`}>
-                                {task.plannedDurationMinutes}m
-                              </span>
-                            )}
-                            <div className={isDone ? "opacity-60" : ""}>
+                            <div className={`flex items-center justify-end w-[60px] sm:w-[70px] ${isDone ? "opacity-60" : ""}`}>
+                              {task.dueAt && (
+                                <span className="inline-flex items-center gap-1 text-[11px] sm:text-xs text-text-muted font-mono whitespace-nowrap">
+                                  <Calendar size={11} />
+                                  {format(new Date(task.dueAt), "MMM d")}
+                                </span>
+                              )}
+                            </div>
+                            <div className={`flex items-center justify-end w-[35px] sm:w-[45px] ${isDone ? "opacity-60" : ""}`}>
+                              {task.plannedDurationMinutes && (
+                                <span className="text-[11px] sm:text-xs font-mono text-text-muted">
+                                  {task.plannedDurationMinutes}m
+                                </span>
+                              )}
+                            </div>
+                            <div className={`flex justify-end w-[55px] sm:w-[65px] ${isDone ? "opacity-60" : ""}`}>
                               <PriorityBadge priority={task.priority} />
                             </div>
                             <button
@@ -462,16 +708,18 @@ export default function TodayPage() {
                             >
                               <Edit3 size={13} />
                             </button>
-                            {!sessionActive && !isDone && (
-                              <button
-                                type="button"
-                                onClick={() => handleStartTaskFocus(task)}
-                                className="inline-flex items-center gap-1 text-xs text-text-primary hover:text-text-secondary px-2.5 py-1 rounded bg-bg-secondary border border-border-subtle hover:border-border-hover cursor-pointer transition-colors"
-                              >
-                                <Play size={10} className="fill-current" />
-                                <span>Focus</span>
-                              </button>
-                            )}
+                            <div className="flex justify-end w-[65px] sm:w-[75px]">
+                              {!sessionActive && !isDone && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleStartTaskFocus(task)}
+                                  className="inline-flex items-center gap-1 text-xs text-text-primary hover:text-text-secondary px-2.5 py-1 rounded bg-bg-secondary border border-border-subtle hover:border-border-hover cursor-pointer transition-colors"
+                                >
+                                  <Play size={10} className="fill-current" />
+                                  <span>Focus</span>
+                                </button>
+                              )}
+                            </div>
                           </div>
                         </div>
                       );
@@ -515,10 +763,10 @@ export default function TodayPage() {
                               type="button"
                               onClick={() => handleToggleTask(task)}
                               aria-label={isDone ? `Mark incomplete: ${task.title}` : `Mark complete: ${task.title}`}
-                              className="text-text-muted hover:text-emerald-500 transition-colors shrink-0 cursor-pointer"
+                              className="text-text-muted hover:text-text-primary transition-colors shrink-0 cursor-pointer"
                             >
                               {isDone ? (
-                                <CheckCircle2 className="w-4 h-4 text-emerald-500 fill-emerald-500/20" />
+                                <CheckCircle2 className="w-4 h-4 text-text-primary fill-text-primary/20" />
                               ) : (
                                 <Circle className="w-4 h-4" />
                               )}
@@ -537,18 +785,22 @@ export default function TodayPage() {
                           </div>
 
                           <div className="flex items-center gap-2.5 shrink-0 ml-3">
-                            {task.dueAt && (
-                              <span className={`inline-flex items-center gap-1 text-xs text-text-muted font-mono ${isDone ? "opacity-60" : ""}`}>
-                                <Calendar size={11} />
-                                {format(new Date(task.dueAt), "MMM d")}
-                              </span>
-                            )}
-                            {task.plannedDurationMinutes && (
-                              <span className={`text-xs font-mono text-text-muted ${isDone ? "opacity-60" : ""}`}>
-                                {task.plannedDurationMinutes}m
-                              </span>
-                            )}
-                            <div className={isDone ? "opacity-60" : ""}>
+                            <div className={`flex items-center justify-end w-[60px] sm:w-[70px] ${isDone ? "opacity-60" : ""}`}>
+                              {task.dueAt && (
+                                <span className="inline-flex items-center gap-1 text-[11px] sm:text-xs text-text-muted font-mono whitespace-nowrap">
+                                  <Calendar size={11} />
+                                  {format(new Date(task.dueAt), "MMM d")}
+                                </span>
+                              )}
+                            </div>
+                            <div className={`flex items-center justify-end w-[35px] sm:w-[45px] ${isDone ? "opacity-60" : ""}`}>
+                              {task.plannedDurationMinutes && (
+                                <span className="text-[11px] sm:text-xs font-mono text-text-muted">
+                                  {task.plannedDurationMinutes}m
+                                </span>
+                              )}
+                            </div>
+                            <div className={`flex justify-end w-[55px] sm:w-[65px] ${isDone ? "opacity-60" : ""}`}>
                               <PriorityBadge priority={task.priority} />
                             </div>
                             <button
@@ -559,16 +811,18 @@ export default function TodayPage() {
                             >
                               <Edit3 size={13} />
                             </button>
-                            {!sessionActive && !isDone && (
-                              <button
-                                type="button"
-                                onClick={() => handleStartTaskFocus(task)}
-                                className="inline-flex items-center gap-1 text-xs text-text-primary hover:text-text-secondary px-2.5 py-1 rounded bg-bg-secondary border border-border-subtle hover:border-border-hover cursor-pointer transition-colors"
-                              >
-                                <Play size={10} className="fill-current" />
-                                <span>Focus</span>
-                              </button>
-                            )}
+                            <div className="flex justify-end w-[65px] sm:w-[75px]">
+                              {!sessionActive && !isDone && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleStartTaskFocus(task)}
+                                  className="inline-flex items-center gap-1 text-xs text-text-primary hover:text-text-secondary px-2.5 py-1 rounded bg-bg-secondary border border-border-subtle hover:border-border-hover cursor-pointer transition-colors"
+                                >
+                                  <Play size={10} className="fill-current" />
+                                  <span>Focus</span>
+                                </button>
+                              )}
+                            </div>
                           </div>
                         </div>
                       );
@@ -631,7 +885,7 @@ export default function TodayPage() {
             <span className="text-xs text-text-muted block mb-1">
               Tasks Completed
             </span>
-            <div className="text-xl sm:text-2xl font-semibold font-mono tabular-nums text-emerald-600 dark:text-emerald-400">
+            <div className="text-xl sm:text-2xl font-semibold font-mono tabular-nums text-text-primary">
               {tasksCompletedCount}
               <span className="text-xs font-normal text-text-muted ml-1.5">
                 / {tasks.length}
@@ -647,7 +901,7 @@ export default function TodayPage() {
               Realtime Signal
             </span>
             <div className="flex items-center gap-2 mt-1">
-              <span className={`w-2 h-2 rounded-full ${telemetry.connected ? "bg-emerald-500 animate-pulse" : "bg-text-muted"}`} />
+              <span className={`w-2 h-2 rounded-full ${telemetry.connected ? "bg-text-primary animate-pulse" : "bg-text-muted"}`} />
               <span className="text-sm font-semibold text-text-primary">
                 {telemetry.connected ? "Telemetry Active" : "Waiting for Signal"}
               </span>
@@ -663,6 +917,12 @@ export default function TodayPage() {
       <TaskDetailDrawer
         task={editingTask}
         onClose={() => setEditingTask(null)}
+      />
+
+      <ConfirmDiscardModal
+        isOpen={showDiscardModal}
+        onConfirm={handleConfirmDiscard}
+        onCancel={() => setShowDiscardModal(false)}
       />
     </PageContainer>
   );

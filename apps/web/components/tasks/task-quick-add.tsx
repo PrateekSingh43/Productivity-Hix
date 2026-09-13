@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Plus, Clock, Flag, AlignLeft, X, Target, Calendar } from "lucide-react";
 import { format, addDays } from "date-fns";
-import type { TaskPriority } from "@repo/types";
+import { resolveProductiveDay, type TaskPriority } from "@repo/types";
 import { useCreateTaskMutation } from "../../src/hooks/mutations/use-task-mutations";
 import { useTodayPlan } from "../../src/hooks/queries/use-plans";
 
@@ -54,7 +54,7 @@ export function TaskQuickAdd({ onSuccess }: TaskQuickAddProps) {
         plannedDurationMinutes,
         dueAt: dueDate ? new Date(`${dueDate}T23:59:59`).toISOString() : null,
         goalId: goalId ? goalId : null,
-        productiveDate: plan?.date || null,
+        productiveDate: dueDate || plan?.date || resolveProductiveDay(),
       },
       {
         onSuccess: () => {

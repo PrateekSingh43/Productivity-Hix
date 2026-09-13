@@ -62,13 +62,13 @@ export function CurrentSession({ onSessionEnded }: CurrentSessionProps) {
               isAfk
                 ? "bg-amber-400/10 text-amber-400 border border-amber-400/20"
                 : sessionActive
-                ? "bg-emerald-400/10 text-emerald-400 border border-emerald-400/20"
+                ? "bg-text-primary/10 text-text-primary border border-border-strong"
                 : "bg-[#181a23] text-[#6b7280] border border-[#262a36]"
             }`}
           >
             <span
               className={`h-1.5 w-1.5 rounded-full ${
-                isAfk ? "bg-amber-400" : sessionActive ? "bg-emerald-400 animate-pulse" : "bg-[#6b7280]"
+                isAfk ? "bg-amber-400" : sessionActive ? "bg-text-primary animate-pulse" : "bg-[#6b7280]"
               }`}
             />
             {isAfk ? "IDLE / AFK" : sessionActive ? "ACTIVE" : "PAUSED"}

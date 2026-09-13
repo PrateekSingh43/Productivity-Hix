@@ -17,25 +17,71 @@ const handleTelemetryBatch: RequestHandler = async (request, response, next) => 
     const eventIds = batch.events.map((e: { eventId: string }) => e.eventId);
 
     // 1. Check existing events in PostgreSQL for deduplication
+    // 1. First consolidate/deduplicate incoming events in batch by eventId (keep event with highest duration)
+    const dedupedBatchMap = new Map<string, (typeof batch.events)[number]>();
+    for (const ev of batch.events) {
+      const existingInBatch = dedupedBatchMap.get(ev.eventId);
+      if (!existingInBatch) {
+        dedupedBatchMap.set(ev.eventId, ev);
+      } else {
+        const existingDur = existingInBatch.durationMs || 0;
+        const incomingDur = ev.durationMs || 0;
+        if (incomingDur >= existingDur) {
+          dedupedBatchMap.set(ev.eventId, ev);
+        }
+      }
+    }
+    const dedupedEvents = Array.from(dedupedBatchMap.values());
+
+    const externalIds = dedupedEvents.map((e) => e.eventId);
     const prisma = getDb();
     const existing = await prisma.normalizedActivity.findMany({
       where: {
         userId,
-        externalId: { in: eventIds },
+        externalId: { in: externalIds },
       },
-      select: { externalId: true },
+      select: { id: true, externalId: true, duration: true },
     });
 
-    const existingSet = new Set(existing.map((e: { externalId: string }) => e.externalId));
+    const existingMap = new Map<string, { id: string; duration: number }>();
+    for (const e of existing) {
+      if (e.id && e.id.trim().length > 0) {
+        existingMap.set(e.externalId, { id: e.id, duration: e.duration });
+      }
+    }
+
     const newEvents: TelemetryEvent[] = [];
+    const updateEvents: Array<{ id: string; duration: number; data: Record<string, unknown> }> = [];
     let duplicates = 0;
 
-    for (const ev of batch.events) {
-      if (existingSet.has(ev.eventId)) {
-        duplicates++;
+    for (const ev of dedupedEvents) {
+      const match = existingMap.get(ev.eventId);
+      if (match) {
+        const incomingDurationSec = Math.max(0, (ev.durationMs || 0) / 1000);
+        if (incomingDurationSec > match.duration + 0.5) {
+          updateEvents.push({
+            id: match.id,
+            duration: incomingDurationSec,
+            data: (ev.data ?? {}) as Record<string, unknown>,
+          });
+        } else {
+          duplicates++;
+        }
       } else {
-        existingSet.add(ev.eventId);
         newEvents.push(ev as unknown as TelemetryEvent);
+      }
+    }
+
+    if (updateEvents.length > 0) {
+      for (const u of updateEvents) {
+        if (!u.id || u.id.trim() === "") continue;
+        await prisma.normalizedActivity.update({
+          where: { id: u.id },
+          data: {
+            duration: u.duration,
+            data: u.data as any,
+          },
+        });
       }
     }
 

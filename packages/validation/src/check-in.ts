@@ -28,9 +28,9 @@ export const energyLevelSchema = z.enum(["low", "medium", "high"]);
 export const focusLevelSchema = z.enum(["scattered", "mixed", "focused"]);
 
 export const checkInCreateSchema = z.object({
-  workSessionId: z.string().uuid().nullable().optional(),
-  sessionId: z.string().uuid().nullable().optional(),
-  taskId: z.string().uuid().nullable().optional(),
+  workSessionId: z.string().min(1).nullable().optional(),
+  sessionId: z.string().min(1).nullable().optional(),
+  taskId: z.string().min(1).nullable().optional(),
   windowStart: z.string().datetime().nullable().optional(),
   windowEnd: z.string().datetime().nullable().optional(),
   activityAssessment: activityAssessmentSchema.or(z.string()).nullable().optional(),
@@ -46,11 +46,11 @@ export const checkInCreateSchema = z.object({
   deeperAnswers: z.record(z.string(), z.string()).nullable().optional(),
   eventType: z.enum(["PERIODIC", "AWAY_REVIEW"]).or(z.string()).default("PERIODIC"),
   // Legacy fields
-  intent: z.string().trim().max(500).optional(),
+  intent: z.string().trim().max(500, "Intent must be at most 500 characters").optional(),
   progress: z.boolean().optional(),
-  blocker: z.string().trim().max(1000).nullable().optional(),
+  blocker: z.string().trim().max(500, "Blocker must be at most 500 characters").nullable().optional(),
   productive: z.boolean().nullable().optional(),
-  outcome: z.string().trim().max(2000).nullable().optional(),
+  outcome: z.string().trim().max(500, "Outcome must be at most 500 characters").nullable().optional(),
 });
 
 export type CheckInCreateInput = z.infer<typeof checkInCreateSchema>;

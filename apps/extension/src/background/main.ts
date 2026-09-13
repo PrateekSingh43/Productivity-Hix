@@ -12,6 +12,7 @@ import { reflectionEngine } from "./reflection-engine";
 import { inactivityEngine } from "./inactivity-engine";
 import { checkInQueue } from "./checkin-queue";
 import { showFocusEndedNotification } from "./notifications";
+import { focusGuard } from "./focus-guard";
 // Initialize engines so their constructors run
 import "./availability-manager";
 
@@ -73,6 +74,23 @@ async function initialize() {
 
   // Flush any pending offline check-ins
   void checkInQueue.flush();
+
+  // Initialize focus session tracker and 3-tab guard
+  void focusGuard.init();
+
+  // Sync preferences from backend (quiet hours & schedule)
+  void apiClient.getUserPreferences().then((prefs) => {
+    if (prefs) {
+      void reflectionEngine.updateConfig({
+        quietHoursEnabled: prefs.quietHoursEnabled,
+        quietHoursStart: prefs.quietHoursStart,
+        quietHoursEnd: prefs.quietHoursEnd,
+      });
+      void inactivityEngine.reloadConfig();
+    }
+  }).catch(() => {
+    // Backend may not be reachable immediately
+  });
 }
 
 chrome.runtime.onInstalled.addListener(() => void initialize());
@@ -123,9 +141,13 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === "productivehix-sync") {
     void syncManager.flushQueue();
     void checkInQueue.flush();
+    void focusGuard.refreshSession();
   } else if (alarm.name === "productivehix-heartbeat") {
     void recordTabEvent(tracker.handlePeriodicHeartbeat());
     activityEngine.registerDesktopActivity(); // Record desktop heartbeat as activity
+    focusGuard.checkTargetCompletion();
+  } else if (alarm.name === "focus-target-alarm") {
+    focusGuard.checkTargetCompletion();
   }
 });
 
@@ -247,6 +269,32 @@ chrome.runtime.onMessage.addListener(
         durationMinutes: message.durationMinutes,
       }).then(() => {
         sendResponse({ success: true });
+      });
+      return true;
+    }
+    if (message.type === "get-active-session") {
+      sendResponse(focusGuard.getCurrentSession());
+      return true;
+    }
+    if (message.type === "refresh-active-session") {
+      void focusGuard.refreshSession().then(sendResponse);
+      return true;
+    }
+    if (message.type === "focus-guard-swap") {
+      void focusGuard.handleSwap(message.tabId, message.targetUrl).then((success) => {
+        sendResponse({ success });
+      });
+      return true;
+    }
+    if (message.type === "focus-guard-close-tab") {
+      void focusGuard.handleCloseTab(message.tabId).then((success) => {
+        sendResponse({ success });
+      });
+      return true;
+    }
+    if (message.type === "focus-guard-allow-tab") {
+      void focusGuard.handleAllowTab(message.tabId, message.targetUrl).then((success) => {
+        sendResponse({ success });
       });
       return true;
     }

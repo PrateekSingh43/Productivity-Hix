@@ -6,6 +6,7 @@ import {
   activitySummary,
   syncActivity,
   utcDayRange,
+  localDayRange,
   getTimelineForDay,
 } from "../services/activity/service";
 
@@ -24,7 +25,9 @@ activityRouter.get("/timeline", async (request, response, next) => {
 
 activityRouter.get("/today", async (request, response, next) => {
   try {
-    const range = utcDayRange();
+    const timezone = (request.query.timezone as string) || undefined;
+    const date = (request.query.date as string) || undefined;
+    const range = localDayRange(date, timezone);
     response.json(await activityInRange(userIdFrom(request), range.from, range.to));
   } catch (error) {
     next(error);
@@ -40,10 +43,12 @@ activityRouter.get("/range", async (request, response, next) => {
 });
 activityRouter.get("/summary", async (request, response, next) => {
   try {
+    const timezone = (request.query.timezone as string) || undefined;
+    const date = (request.query.date as string) || undefined;
     const range =
       request.query.from && request.query.to
         ? activityRangeSchema.parse(request.query)
-        : utcDayRange();
+        : localDayRange(date, timezone);
     response.json(await activitySummary(userIdFrom(request), range.from, range.to));
   } catch (error) {
     next(error);
@@ -51,10 +56,12 @@ activityRouter.get("/summary", async (request, response, next) => {
 });
 activityRouter.get("/sessions", async (request, response, next) => {
   try {
+    const timezone = (request.query.timezone as string) || undefined;
+    const date = (request.query.date as string) || undefined;
     const range =
       request.query.from && request.query.to
         ? activityRangeSchema.parse(request.query)
-        : utcDayRange();
+        : localDayRange(date, timezone);
     const events = await activityInRange(userIdFrom(request), range.from, range.to);
     response.json((await import("@repo/analytics")).deriveSessions(events));
   } catch (error) {

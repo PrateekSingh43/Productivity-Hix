@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Zap, PanelLeftOpen, PanelLeftClose } from "lucide-react";
+import { Zap, PanelLeftOpen, PanelLeftClose, Menu } from "lucide-react";
 import { Sidebar } from "./sidebar";
 import { useSidebar } from "../../src/lib/sidebar-context";
 
@@ -23,10 +23,27 @@ const titles: Record<string, string> = {
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const title = titles[pathname] ?? "ProductiveHix";
-  const { isCollapsed, toggleSidebar } = useSidebar();
+  const { isCollapsed, toggleSidebar, isMobileOpen, setIsMobileOpen } = useSidebar();
 
   return (
-    <div className="flex h-screen overflow-hidden bg-bg-default text-text-primary">
+    <div className="flex h-screen overflow-hidden bg-bg-default text-text-primary relative">
+      {/* Mobile Sidebar Overlay */}
+      {isMobileOpen && (
+        <div 
+          className="fixed inset-0 bg-bg-default/80 backdrop-blur-sm z-40 lg:hidden"
+          onClick={() => setIsMobileOpen(false)}
+        />
+      )}
+
+      {/* Mobile Sidebar Drawer */}
+      <div 
+        className={`fixed inset-y-0 left-0 z-50 transform transition-transform duration-300 ease-in-out lg:hidden ${
+          isMobileOpen ? "translate-x-0" : "-translate-x-full"
+        }`}
+      >
+        <Sidebar isMobile />
+      </div>
+
       <div className="hidden lg:block shrink-0">
         <Sidebar />
       </div>
@@ -36,6 +53,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <header className="sticky top-0 z-30 h-14 shrink-0 border-b border-border-subtle bg-bg-default/85 px-4 backdrop-blur-xl sm:px-6 xl:px-10">
           <div className="mx-auto flex h-full w-full max-w-[1440px] items-center justify-between gap-4">
             <div className="flex min-w-0 items-center gap-3">
+              {/* Mobile menu trigger */}
+              <button
+                type="button"
+                onClick={() => setIsMobileOpen(true)}
+                className="lg:hidden p-1.5 -ml-1.5 rounded-md text-text-tertiary hover:text-text-primary hover:bg-bg-secondary transition-colors cursor-pointer"
+                title="Open menu"
+                aria-label="Open menu"
+              >
+                <Menu size={18} />
+              </button>
+
               {/* Mobile brand link */}
               <Link href="/" className="flex items-center gap-2 lg:hidden">
                 <span className="grid h-7 w-7 place-items-center rounded-[var(--radius-md)] border border-accent-default/30 bg-accent-default/15 text-accent-default">

@@ -104,6 +104,80 @@ export async function showFocusEndedNotification(options: {
   });
 }
 
+export async function showFocusTargetNotification(options: {
+  sessionId: string;
+  taskTitle: string;
+  targetMinutes: number;
+}): Promise<string> {
+  const notificationId = `focus-target-${options.sessionId}`;
+  const iconUrl = getNotificationIconUrl();
+
+  return new Promise((resolve) => {
+    const notificationOptions: chrome.notifications.NotificationOptions<true> = {
+      type: "basic",
+      iconUrl,
+      title: "Focus Target Reached!",
+      message: `Completed planned ${options.targetMinutes}m on "${options.taskTitle}". Continue in flow or wrap up & reflect.`,
+      buttons: [{ title: "Wrap Up & Reflect" }, { title: "Continue in Flow" }],
+      priority: 2,
+      requireInteraction: true,
+    };
+
+    chrome.notifications.create(notificationId, notificationOptions, (createdId) => {
+      if (chrome.runtime?.lastError) {
+        console.warn("[NOTIFICATION] Target creation with buttons failed, trying fallback:", chrome.runtime.lastError.message);
+        const fallbackOptions: chrome.notifications.NotificationOptions<true> = {
+          type: "basic",
+          iconUrl: FALLBACK_ICON_DATA_URL,
+          title: "Focus Target Reached!",
+          message: `Completed planned ${options.targetMinutes}m on "${options.taskTitle}". Continue in flow or wrap up & reflect.`,
+          priority: 2,
+          requireInteraction: true,
+        };
+        chrome.notifications.create(notificationId, fallbackOptions, (fallbackId) => {
+          resolve(fallbackId || notificationId);
+        });
+        return;
+      }
+      resolve(createdId || notificationId);
+    });
+  });
+}
+
+async function handleFocusTargetAction(notificationId: string) {
+  try {
+    if (typeof chrome !== "undefined" && chrome.notifications?.clear) {
+      chrome.notifications.clear(notificationId);
+    }
+  } catch {}
+
+  await chrome.storage.local.set({
+    openToTab: "focus",
+  });
+
+  try {
+    if (typeof chrome !== "undefined" && chrome.runtime?.sendMessage) {
+      chrome.runtime.sendMessage({
+        type: "NAVIGATE_POPUP",
+        tab: "focus",
+      }).catch(() => {});
+    }
+  } catch {}
+
+  try {
+    if (typeof chrome !== "undefined" && chrome.windows?.getAll) {
+      const windows = await chrome.windows.getAll({ windowTypes: ["normal"] });
+      const targetWindow = windows.find((w) => w.focused) || windows[0];
+      if (targetWindow?.id) {
+        await chrome.windows.update(targetWindow.id, { focused: true, drawAttention: true });
+        if (typeof chrome.action?.openPopup === "function") {
+          await chrome.action.openPopup({ windowId: targetWindow.id });
+        }
+      }
+    }
+  } catch {}
+}
+
 async function handleReflectAction(notificationId: string) {
   try {
     if (typeof chrome !== "undefined" && chrome.notifications?.clear) {
@@ -223,6 +297,19 @@ async function handleLaterAction(notificationId: string) {
 // Notification button click handler
 if (typeof chrome !== "undefined" && chrome.notifications?.onButtonClicked) {
   chrome.notifications.onButtonClicked.addListener((notificationId, buttonIndex) => {
+    if (notificationId.startsWith("focus-target-")) {
+      if (buttonIndex === 0) {
+        void handleFocusTargetAction(notificationId);
+      } else {
+        try {
+          if (typeof chrome !== "undefined" && chrome.notifications?.clear) {
+            chrome.notifications.clear(notificationId);
+          }
+        } catch {}
+      }
+      return;
+    }
+
     if (notificationId.startsWith(CHECKIN_NOTIFICATION_PREFIX) || notificationId === LEGACY_NOTIFICATION_ID) {
       if (buttonIndex === 0) {
         handleReflectAction(notificationId);
@@ -236,6 +323,11 @@ if (typeof chrome !== "undefined" && chrome.notifications?.onButtonClicked) {
 // Notification body click handler
 if (typeof chrome !== "undefined" && chrome.notifications?.onClicked) {
   chrome.notifications.onClicked.addListener((notificationId) => {
+    if (notificationId.startsWith("focus-target-")) {
+      void handleFocusTargetAction(notificationId);
+      return;
+    }
+
     if (notificationId.startsWith(CHECKIN_NOTIFICATION_PREFIX) || notificationId === LEGACY_NOTIFICATION_ID) {
       handleReflectAction(notificationId);
     }

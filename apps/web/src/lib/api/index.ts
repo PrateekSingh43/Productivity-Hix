@@ -7,3 +7,4 @@ export * from "./learning";
 export * from "./sessions";
 export * from "./tasks";
 export * from "./plans";
+export * from "./user";

@@ -51,6 +51,7 @@
         "icon-48.png",
         "icon-16.png",
         "popup.html",
+        "focus-guard.html",
         "*.js",
         "*.png",
         "*.css"

@@ -158,8 +158,8 @@ export default function HomePage() {
             {activeSession ? (
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
-                  <span className="h-2 w-2 rounded-full bg-emerald-500 animate-ping" />
-                  <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                  <span className="h-2 w-2 rounded-full bg-text-primary animate-ping" />
+                  <span className="text-xs font-semibold text-text-primary">
                     Active Focus Session
                   </span>
                 </div>
@@ -169,7 +169,7 @@ export default function HomePage() {
                 <div className="flex items-center gap-2 text-xs text-text-secondary pt-1">
                   <Link
                     href="/sessions"
-                    className="text-emerald-600 dark:text-emerald-400 hover:opacity-80 font-medium inline-flex items-center gap-1 cursor-pointer"
+                    className="text-text-primary hover:opacity-80 font-medium inline-flex items-center gap-1 cursor-pointer"
                   >
                     <span>Inspect active session</span>
                     <ArrowRight size={12} />
@@ -182,13 +182,7 @@ export default function HomePage() {
                   <span className="h-1.5 w-1.5 rounded-full bg-text-muted" />
                   <span>No active session</span>
                 </div>
-                <p className="text-xs text-text-secondary leading-relaxed">
-                  {telemetry.activeDomain
-                    ? `Current foreground: ${telemetry.activeDomain}`
-                    : telemetry.activeApp
-                    ? `Current foreground: ${telemetry.activeApp}`
-                    : "Desktop & browser collectors ready"}
-                </p>
+
                 <div className="pt-1">
                   <Link
                     href="/sessions"

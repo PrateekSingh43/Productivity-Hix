@@ -81,6 +81,9 @@ export class ReflectionEngine {
     if (patch.quietHoursEnd) {
       this.config.sleepEnd = patch.quietHoursEnd;
     }
+    if (patch.suppressCheckInsDuringFocus !== undefined) {
+      this.config.suppressCheckInsDuringFocus = patch.suppressCheckInsDuringFocus;
+    }
 
     if (patch.resetCooldown) {
       this.state.cooldownUntil = null;
@@ -186,6 +189,15 @@ export class ReflectionEngine {
       return;
     }
 
+    // If a focus session is active and suppression is enabled, do not accumulate periodic time and do not trigger!
+    if (this.config.suppressCheckInsDuringFocus !== false) {
+      const focusActive = await this.isFocusSessionActive();
+      if (focusActive) {
+        this.previousActivityState = activityState;
+        return;
+      }
+    }
+
     // Accumulate active time
     if (activityState === "ACTIVE") {
       this.state.activeTimeMs += dtMs;
@@ -224,26 +236,34 @@ export class ReflectionEngine {
       return;
     }
 
+    if (this.config.suppressCheckInsDuringFocus !== false) {
+      const focusActive = await this.isFocusSessionActive();
+      if (focusActive) {
+        return;
+      }
+    }
+
     await this.triggerNotification(now, false);
   }
 
   private async isFocusSessionActive(): Promise<boolean> {
     try {
-      const { apiClient } = await import("../api/client");
-      const sessions = await apiClient.getSessions();
-      const now = Date.now();
-      return sessions.some(s => {
-        if (s.endedAt) return false;
-        const startTime = new Date(s.startedAt).getTime();
-        const durationMs = (s.durationSeconds || 30 * 60) * 1000;
-        if (now - startTime > Math.max(durationMs + 5 * 60 * 1000, 4 * 60 * 60 * 1000)) {
-          return false;
-        }
+      const { focusGuard } = await import("./focus-guard");
+      const current = focusGuard.getCurrentSession();
+      if (current && !current.endedAt) {
         return true;
-      });
-    } catch {
-      return false;
-    }
+      }
+    } catch {}
+
+    try {
+      const { apiClient } = await import("../api/client");
+      const active = await apiClient.getActiveSession();
+      if (active && !active.endedAt) {
+        return true;
+      }
+    } catch {}
+
+    return false;
   }
 
   private async triggerNotification(now: number, force: boolean) {
@@ -251,7 +271,7 @@ export class ReflectionEngine {
     this.isTriggering = true;
 
     try {
-      if (!force) {
+      if (!force || this.config.suppressCheckInsDuringFocus !== false) {
         const focusActive = await this.isFocusSessionActive();
         if (focusActive) {
           console.log("[ReflectionEngine] Blocked periodic notification because a focus session is active.");

@@ -7,6 +7,7 @@ export default defineConfig((options: Options) => ({
     background: "src/background/main.ts",
     popup: "src/popup/main.tsx",
     content: "src/content/activity-monitor.ts",
+    "focus-guard": "src/focus-guard-page.ts",
   },
   clean: true,
   format: ["esm"],
@@ -33,6 +34,9 @@ export default defineConfig((options: Options) => ({
     }
     if (fs.existsSync("popup.html")) {
       fs.copyFileSync("popup.html", path.join("dist", "popup.html"));
+    }
+    if (fs.existsSync("focus-guard.html")) {
+      fs.copyFileSync("focus-guard.html", path.join("dist", "focus-guard.html"));
     }
     const iconFiles = ["icon.png", "icon-128.png", "icon-48.png", "icon-16.png"];
     for (const icon of iconFiles) {

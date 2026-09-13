@@ -15,7 +15,7 @@ export const learningAssessmentCreateSchema = z.object({
 });
 
 export const learningAnswerSchema = z.object({
-  questionId: z.string().uuid(),
+  questionId: z.string().min(1),
   answer: z.string().trim().max(2000),
   score: z.number().min(0).max(1).nullable().optional(),
 });

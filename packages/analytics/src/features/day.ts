@@ -17,10 +17,12 @@ export interface DayFeatures {
   checkInCount: number;
 }
 
+export type DayTaskInput = Pick<Task, "status"> & Partial<Pick<Task, "createdAt">>;
+
 export interface DayFeatureInput {
   date: string;
   sessionFeatures?: SessionFeatures[];
-  tasks?: Pick<Task, "status">[];
+  tasks?: DayTaskInput[];
   checkIns?: CheckIn[];
 }
 
@@ -43,7 +45,12 @@ export function extractDayFeatures(input: DayFeatureInput): DayFeatures {
     totalSessionCount > 0 ? Math.max(...sessionFeatures.map((s) => s.durationSeconds)) : 0;
 
   const completedTaskCount = tasks.filter((t) => t.status === "done").length;
-  const createdTaskCount = tasks.length;
+  const createdTaskCount = tasks.filter((t) => {
+    if (!t.createdAt) return false;
+    const ms = Date.parse(t.createdAt);
+    if (Number.isNaN(ms)) return false;
+    return new Date(ms).toISOString().slice(0, 10) === date;
+  }).length;
   const rate = taskCompletionRate(tasks);
 
   const checkInCount = checkIns.length;

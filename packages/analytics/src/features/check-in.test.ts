@@ -119,3 +119,17 @@ test("check-in features: valid window with zero activity produces 0 observedActi
     "Valid window with no active telemetry must produce 0 (distinct from null)",
   );
 });
+
+test("check-in features: outcome semantics - note != outcome", () => {
+  // outcome populated, note null -> hasOutcome = true
+  const c1 = mockCheckIn({ outcome: "completed React Query lesson", note: null });
+  assert.equal(extractCheckInFeatures(c1).hasOutcome, true);
+
+  // outcome null, note populated -> hasOutcome = false
+  const c2 = mockCheckIn({ outcome: null, note: "feeling tired" });
+  assert.equal(extractCheckInFeatures(c2).hasOutcome, false);
+
+  // outcome whitespace only, note populated -> hasOutcome = false
+  const c3 = mockCheckIn({ outcome: "   ", note: "some reflection" });
+  assert.equal(extractCheckInFeatures(c3).hasOutcome, false);
+});

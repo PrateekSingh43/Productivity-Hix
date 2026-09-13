@@ -66,6 +66,24 @@ describe("Productive Day Resolver", () => {
     );
   });
 
+  test("default boundary (00:00): 01:11 AM on Sep 12 resolves to 2026-09-12", () => {
+    // 01:11 AM on Sep 12 in Asia/Kolkata (+05:30) is 19:41 UTC on Sep 11
+    const instant = new Date("2026-09-11T19:41:00Z");
+    const today = resolveProductiveDay(instant, {
+      timezone: "Asia/Kolkata",
+    });
+    assert.equal(today, "2026-09-12");
+
+    const tomorrow = resolveTomorrowProductiveDay(instant, {
+      timezone: "Asia/Kolkata",
+    });
+    assert.equal(tomorrow, "2026-09-13");
+  });
+
+  test("YYYY-MM-DD string fast path returns unaltered date", () => {
+    assert.equal(resolveProductiveDay("2026-09-12"), "2026-09-12");
+  });
+
   test("formatProductiveDateLabel formats short readable label", () => {
     const label = formatProductiveDateLabel("2026-09-07");
     assert.match(label, /Sep 7/);

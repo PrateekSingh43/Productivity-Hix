@@ -36,7 +36,7 @@ export function LiveActivityCard() {
                 isAfk
                   ? "bg-amber-400"
                   : isConnected
-                  ? "bg-emerald-400 animate-pulse"
+                  ? "bg-text-primary animate-pulse"
                   : "bg-[#6b7280]"
               }`}
             />

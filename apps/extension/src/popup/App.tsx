@@ -20,10 +20,6 @@ import {
   X,
   Plus,
   Trash2,
-  ChevronDown,
-  ChevronRight,
-  ListTodo,
-  Radio,
 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -39,6 +35,7 @@ import {
   resolveTomorrowProductiveDay,
   formatProductiveDateLabel,
 } from "@repo/types";
+import { normalizeTimezone } from "@repo/validation";
 import { CheckInView } from "./CheckInView";
 import { SettingsView } from "./SettingsView";
 import { DiagnosticsView } from "./DiagnosticsView";
@@ -60,9 +57,13 @@ function formatDuration(seconds: number) {
 
 function formatClock(seconds: number) {
   const safe = Math.max(0, Math.floor(seconds));
-  return [Math.floor(safe / 3600), Math.floor((safe % 3600) / 60), safe % 60]
-    .map((part) => part.toString().padStart(2, "0"))
-    .join(":");
+  const hours = Math.floor(safe / 3600);
+  const minutes = Math.floor((safe % 3600) / 60);
+  const secs = safe % 60;
+  if (hours > 0) {
+    return `${hours}:${minutes.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+  }
+  return `${minutes.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
 }
 
 function openDashboard(path = "") {
@@ -86,7 +87,11 @@ function Header({
     <header className="header">
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <div className="brand-mark">
-          <img src="icon.png" alt="ProductiveHix" style={{ width: 16, height: 16, objectFit: "contain" }} />
+          <img
+            src="icon.png"
+            alt="ProductiveHix"
+            style={{ width: 16, height: 16, objectFit: "contain" }}
+          />
         </div>
         <div className="brand">ProductiveHix</div>
       </div>
@@ -129,15 +134,7 @@ function TopNav({ tab, setTab }: { tab: Tab; setTab: (t: Tab) => void }) {
   );
 }
 
-function Metric({
-  label,
-  value,
-  icon,
-}: {
-  label: string;
-  value: string;
-  icon: React.ReactNode;
-}) {
+function Metric({ label, value, icon }: { label: string; value: string; icon: React.ReactNode }) {
   return (
     <div className="metric-card">
       <div className="metric-icon">{icon}</div>
@@ -171,7 +168,7 @@ function PlanWorkflowSheet({
   onClose,
 }: PlanWorkflowSheetProps) {
   const [draftGoals, setDraftGoals] = useState<Array<{ id?: string; title: string }>>(
-    initialGoals.length > 0 ? initialGoals : [{ title: "" }]
+    initialGoals.length > 0 ? initialGoals : [{ title: "" }],
   );
   const [saving, setSaving] = useState(false);
 
@@ -253,15 +250,15 @@ function PlanWorkflowSheet({
                 margin: "2px 0 0",
               }}
             >
-              {title} {formattedDate && <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 400 }}>({formattedDate})</span>}
+              {title}{" "}
+              {formattedDate && (
+                <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 400 }}>
+                  ({formattedDate})
+                </span>
+              )}
             </h2>
           </div>
-          <button
-            type="button"
-            className="icon-button"
-            onClick={onClose}
-            aria-label="Close"
-          >
+          <button type="button" className="icon-button" onClick={onClose} aria-label="Close">
             <X size={15} />
           </button>
         </div>
@@ -366,12 +363,7 @@ function PlanWorkflowSheet({
             >
               Cancel
             </button>
-            <button
-              type="submit"
-              className="primary-button"
-              style={{ flex: 1 }}
-              disabled={saving}
-            >
+            <button type="submit" className="primary-button" style={{ flex: 1 }} disabled={saving}>
               {saving ? "Saving..." : "Save Plan"}
             </button>
           </div>
@@ -432,7 +424,16 @@ function OutcomeWorkflowSheet({
       aria-modal="true"
       aria-labelledby="outcome-sheet-title"
     >
-      <div className="hero-card" style={{ padding: 14, maxHeight: "92%", overflowY: "auto", background: "var(--bg-surface-elevated)", border: "1px solid var(--border-default)" }}>
+      <div
+        className="hero-card"
+        style={{
+          padding: 14,
+          maxHeight: "92%",
+          overflowY: "auto",
+          background: "var(--bg-surface-elevated)",
+          border: "1px solid var(--border-default)",
+        }}
+      >
         <div
           style={{
             display: "flex",
@@ -455,33 +456,31 @@ function OutcomeWorkflowSheet({
               Assess Goal Outcomes
             </h2>
           </div>
-          <button
-            type="button"
-            className="icon-button"
-            onClick={onClose}
-            aria-label="Close"
-          >
+          <button type="button" className="icon-button" onClick={onClose} aria-label="Close">
             <X size={15} />
           </button>
         </div>
 
         {goals.length > 1 && (
-          <div style={{ display: "flex", gap: 4, marginBottom: 10, overflowX: "auto", paddingBottom: 4 }}>
+          <div
+            style={{
+              display: "flex",
+              gap: 4,
+              marginBottom: 10,
+              overflowX: "auto",
+              paddingBottom: 4,
+            }}
+          >
             {goals.map((g, idx) => (
               <button
                 key={g.id}
                 type="button"
                 onClick={() => setSelectedGoalId(g.id)}
+                className={`filter-toggle ${g.id === (currentGoal?.id ?? "") ? "active" : ""}`}
                 style={{
                   fontSize: 10.5,
                   padding: "4px 8px",
-                  borderRadius: 4,
-                  border: g.id === (currentGoal?.id ?? "") ? "1px solid var(--accent-primary)" : "1px solid var(--border-subtle)",
-                  background: g.id === (currentGoal?.id ?? "") ? "var(--accent-subtle)" : "transparent",
-                  color: g.id === (currentGoal?.id ?? "") ? "var(--accent-primary)" : "var(--text-secondary)",
-                  cursor: "pointer",
                   whiteSpace: "nowrap",
-                  fontWeight: g.id === (currentGoal?.id ?? "") ? 600 : 500,
                 }}
               >
                 Goal {idx + 1}
@@ -491,7 +490,8 @@ function OutcomeWorkflowSheet({
         )}
 
         <p style={{ fontSize: 11, color: "var(--text-secondary)", margin: "0 0 10px" }}>
-          Assessing: <strong style={{ color: "var(--text-primary)" }}>{currentGoal?.title || "Goal"}</strong>
+          Assessing:{" "}
+          <strong style={{ color: "var(--text-primary)" }}>{currentGoal?.title || "Goal"}</strong>
         </p>
 
         <div style={{ display: "grid", gap: 6, marginBottom: 12 }}>
@@ -503,16 +503,20 @@ function OutcomeWorkflowSheet({
                 type="button"
                 disabled={saving}
                 onClick={() => handleSelectOutcome(o.id)}
-                className="secondary-button"
+                className={`filter-toggle ${isSel ? "active" : ""}`}
                 style={{
                   textAlign: "left",
                   display: "block",
                   padding: "8px 10px",
-                  background: isSel ? "var(--accent-subtle)" : undefined,
-                  borderColor: isSel ? "var(--accent-primary)" : undefined,
                 }}
               >
-                <strong style={{ fontSize: 11.5, color: isSel ? "var(--accent-primary)" : "var(--text-primary)", display: "block" }}>
+                <strong
+                  style={{
+                    fontSize: 11.5,
+                    color: isSel ? "var(--text-primary)" : "var(--text-primary)",
+                    display: "block",
+                  }}
+                >
                   {o.label}
                 </strong>
                 <span style={{ fontSize: 10, color: "var(--text-secondary)" }}>{o.desc}</span>
@@ -521,11 +525,7 @@ function OutcomeWorkflowSheet({
           })}
         </div>
 
-        <button
-          type="button"
-          className="secondary-button full"
-          onClick={onClose}
-        >
+        <button type="button" className="secondary-button full" onClick={onClose}>
           Dismiss
         </button>
       </div>
@@ -547,10 +547,16 @@ function TodayView({
 }) {
   const queryClient = useQueryClient();
 
+  const userTimezone =
+    typeof Intl !== "undefined"
+      ? normalizeTimezone(Intl.DateTimeFormat().resolvedOptions().timeZone) ?? undefined
+      : undefined;
+  const localDate = resolveProductiveDay(new Date(), { timezone: userTimezone });
+
   // 1. Domain Queries (Direct from backend)
   const todayPlan = useQuery({
-    queryKey: ["plan", "today"],
-    queryFn: () => apiClient.getTodayPlan(),
+    queryKey: ["plan", "today", localDate],
+    queryFn: () => apiClient.getTodayPlan(localDate, userTimezone),
     refetchOnWindowFocus: true,
   });
 
@@ -567,8 +573,8 @@ function TodayView({
   });
 
   const summary = useQuery({
-    queryKey: ["activity-summary"],
-    queryFn: apiClient.getTodaySummary.bind(apiClient),
+    queryKey: ["activity-summary", userTimezone],
+    queryFn: () => apiClient.getTodaySummary(userTimezone),
     refetchOnWindowFocus: true,
   });
 
@@ -583,9 +589,7 @@ function TodayView({
   const allTasks = tasks.data ?? [];
 
   // Incomplete tasks filter
-  const incompleteTasks = allTasks.filter(
-    (t) => t.status !== "done" && t.status !== "cancelled"
-  );
+  const incompleteTasks = allTasks.filter((t) => t.status !== "done" && t.status !== "cancelled");
 
   // Deterministic Next Up (2–3 incomplete tasks)
   const priorityRank: Record<string, number> = { high: 3, medium: 2, low: 1, none: 0 };
@@ -602,7 +606,7 @@ function TodayView({
   // Intentional work & metrics calculations
   const intentionalSeconds = (sessions.data ?? []).reduce(
     (sum, s) => sum + (s.durationSeconds ?? 0),
-    0
+    0,
   );
   const sessionsCompleted = (sessions.data ?? []).filter((s) => Boolean(s.endedAt)).length;
   const tasksCompleted = allTasks.filter((t) => t.status === "done").length;
@@ -610,13 +614,18 @@ function TodayView({
 
   const current = status?.currentActivity;
   const isEligibleForCheckIn = status?.scheduler?.eligibility?.eligible ?? false;
+  const activeSession = (sessions.data ?? []).find((s) => !s.endedAt);
 
   // Plan workflow handlers (authoritative backend mutation)
-  const handleSavePlan = async (updatedGoals: Array<{ id?: string; title: string; order: number }>) => {
+  const handleSavePlan = async (
+    updatedGoals: Array<{ id?: string; title: string; order: number }>,
+  ) => {
     const targetDate =
       activeWorkflow === "planTomorrow"
-        ? resolveTomorrowProductiveDay()
-        : plan?.date || resolveProductiveDay();
+        ? resolveTomorrowProductiveDay(new Date(), { timezone: userTimezone })
+        : plan?.date && plan.date >= localDate
+        ? plan.date
+        : localDate;
 
     await apiClient.savePlan({
       date: targetDate,
@@ -635,6 +644,69 @@ function TodayView({
 
   return (
     <main className="content">
+      {/* ACTIVE FOCUS SESSION BANNER */}
+      {activeSession && (
+        <section
+          className="hero-card"
+          style={{
+            padding: "8px 12px",
+            borderLeft: activeSession.isPaused
+              ? "3px solid var(--amber)"
+              : "3px solid var(--success)",
+            background: "var(--bg-surface-elevated)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 2,
+          }}
+        >
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 2 }}>
+              <span
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: "50%",
+                  background: activeSession.isPaused ? "var(--amber)" : "var(--success)",
+                  display: "inline-block",
+                }}
+              />
+              <span
+                style={{
+                  fontSize: 9.5,
+                  fontWeight: 700,
+                  letterSpacing: "0.05em",
+                  textTransform: "uppercase",
+                  color: activeSession.isPaused ? "var(--amber)" : "var(--success)",
+                }}
+              >
+                {activeSession.isPaused ? "Focus Paused" : "Focus Active"}
+              </span>
+            </div>
+            <div
+              style={{
+                fontSize: 11.5,
+                fontWeight: 600,
+                color: "var(--text-primary)",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {activeSession.taskTitle || activeSession.notes || "Current Focus Session"}
+            </div>
+          </div>
+          <button
+            type="button"
+            className="secondary-button"
+            style={{ fontSize: 10, padding: "4px 8px", marginTop: 0, flexShrink: 0 }}
+            onClick={() => setTab("focus")}
+          >
+            Manage
+          </button>
+        </section>
+      )}
+
       {/* 1. TODAY'S PLAN (0..N Goals with compact tasks) */}
       <section className="hero-card" style={{ padding: "12px 14px" }}>
         <div
@@ -646,17 +718,16 @@ function TodayView({
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-            <Target size={13} color="var(--accent-primary)" />
-            <span className="section-kicker" style={{ color: "var(--accent-primary)" }}>
-              TODAY&apos;S PLAN
-            </span>
+            <Target size={13} style={{ color: "var(--text-muted)" }} />
+            <span className="section-kicker">TODAY&apos;S PLAN</span>
           </div>
           {goals.length > 0 && (
             <span
               style={{
                 fontSize: 9.5,
-                color: "var(--accent-primary)",
-                background: "var(--accent-subtle)",
+                color: "var(--text-secondary)",
+                background: "var(--bg-active)",
+                border: "1px solid var(--border-subtle)",
                 padding: "2px 6px",
                 borderRadius: 4,
                 fontWeight: 600,
@@ -677,8 +748,22 @@ function TodayView({
             {goals.map((goal, idx) => {
               const goalTasks = goal.tasks ?? [];
               return (
-                <div key={goal.id} style={{ borderBottom: idx === goals.length - 1 ? "none" : "1px solid var(--border-subtle)", paddingBottom: 6 }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4 }}>
+                <div
+                  key={goal.id}
+                  style={{
+                    borderBottom:
+                      idx === goals.length - 1 ? "none" : "1px solid var(--border-subtle)",
+                    paddingBottom: 6,
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 4,
+                    }}
+                  >
                     <h2
                       style={{
                         fontSize: 12,
@@ -691,7 +776,14 @@ function TodayView({
                         whiteSpace: "nowrap",
                       }}
                     >
-                      <span style={{ color: "var(--accent-primary)", marginRight: 4, fontFamily: "ui-monospace, monospace", fontWeight: 600 }}>
+                      <span
+                        style={{
+                          color: "var(--accent-primary)",
+                          marginRight: 4,
+                          fontFamily: "ui-monospace, monospace",
+                          fontWeight: 600,
+                        }}
+                      >
                         {(idx + 1).toString().padStart(2, "0")}
                       </span>
                       {goal.title}
@@ -720,14 +812,21 @@ function TodayView({
                           key={t.id}
                           style={{
                             fontSize: 10,
-                            color: t.status === "done" ? "var(--text-muted)" : "var(--text-secondary)",
+                            color:
+                              t.status === "done" ? "var(--text-muted)" : "var(--text-secondary)",
                             opacity: t.status === "done" ? 0.75 : 1,
                             overflow: "hidden",
                             textOverflow: "ellipsis",
                             whiteSpace: "nowrap",
                           }}
                         >
-                          <span style={{ color: "var(--text-muted)", marginRight: 3, fontFamily: "ui-monospace, monospace" }}>
+                          <span
+                            style={{
+                              color: "var(--text-muted)",
+                              marginRight: 3,
+                              fontFamily: "ui-monospace, monospace",
+                            }}
+                          >
                             {tIdx === goalTasks.length - 1 ? "└──" : "├──"}
                           </span>
                           {t.title}
@@ -741,7 +840,14 @@ function TodayView({
           </div>
         ) : (
           <div style={{ padding: "6px 0 10px" }}>
-            <p style={{ fontSize: 11.5, color: "var(--text-primary)", fontWeight: 600, margin: "0 0 2px" }}>
+            <p
+              style={{
+                fontSize: 11.5,
+                color: "var(--text-primary)",
+                fontWeight: 600,
+                margin: "0 0 2px",
+              }}
+            >
               Your day hasn&apos;t been planned yet
             </p>
             <p style={{ fontSize: 10.5, color: "var(--text-secondary)", margin: 0 }}>
@@ -783,14 +889,21 @@ function TodayView({
 
       {/* 2. NEXT UP (2–3 Deterministic Tasks) */}
       <section className="hero-card" style={{ padding: "10px 12px" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 6,
+          }}
+        >
           <div className="section-kicker" style={{ margin: 0 }}>
             NEXT UP
           </div>
           <button
             type="button"
             className="text-button"
-            style={{ fontSize: 10, color: "var(--accent-primary)", display: "flex", alignItems: "center", gap: 3 }}
+            style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}
             onClick={() => openDashboard("/tasks")}
           >
             <span>View all</span>
@@ -882,11 +995,7 @@ function TodayView({
               value={String(sessionsCompleted)}
               icon={<CheckCircle2 size={13} />}
             />
-            <Metric
-              label="Tasks Done"
-              value={String(tasksCompleted)}
-              icon={<Target size={13} />}
-            />
+            <Metric label="Tasks Done" value={String(tasksCompleted)} icon={<Target size={13} />} />
             <Metric
               label="Observed"
               value={formatDuration(observedSeconds)}
@@ -910,9 +1019,7 @@ function TodayView({
           }}
         >
           <div>
-            <strong
-              style={{ fontSize: 11, color: "var(--text-primary)", display: "block" }}
-            >
+            <strong style={{ fontSize: 11, color: "var(--text-primary)", display: "block" }}>
               Hourly check-in ready
             </strong>
             <span style={{ fontSize: 10, color: "var(--text-secondary)" }}>
@@ -935,7 +1042,7 @@ function TodayView({
         <PlanWorkflowSheet
           title="Plan Today"
           subtitle="MORNING INTENTION"
-          date={plan?.date || resolveProductiveDay()}
+          date={plan?.date && plan.date >= localDate ? plan.date : localDate}
           initialGoals={goals.map((g) => ({ id: g.id, title: g.title }))}
           onSave={handleSavePlan}
           onClose={() => setActiveWorkflow("none")}
@@ -946,7 +1053,7 @@ function TodayView({
         <PlanWorkflowSheet
           title="Plan Tomorrow"
           subtitle="EVENING SHUTDOWN"
-          date={resolveTomorrowProductiveDay()}
+          date={resolveTomorrowProductiveDay(new Date(), { timezone: userTimezone })}
           initialGoals={[]}
           onSave={handleSavePlan}
           onClose={() => setActiveWorkflow("none")}
@@ -1000,11 +1107,7 @@ function FocusView({
     if (selectedTaskId) {
       return tasks.data?.find((item) => item.id === selectedTaskId) ?? null;
     }
-    return (
-      incompleteTasks.find((t) => t.status === "in_progress") ||
-      incompleteTasks[0] ||
-      null
-    );
+    return incompleteTasks.find((t) => t.status === "in_progress") || incompleteTasks[0] || null;
   }, [activeSession, selectedTaskId, tasks.data, incompleteTasks]);
 
   const [preset, setPreset] = useState<25 | 50 | "custom">(25);
@@ -1033,6 +1136,26 @@ function FocusView({
     },
   });
 
+  const pause = useMutation({
+    mutationFn: async () => {
+      if (!activeSession) return;
+      return apiClient.pauseSession(activeSession.id);
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    },
+  });
+
+  const resume = useMutation({
+    mutationFn: async () => {
+      if (!activeSession) return;
+      return apiClient.resumeSession(activeSession.id);
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    },
+  });
+
   const finish = useMutation({
     mutationFn: async ({
       markDone,
@@ -1043,7 +1166,7 @@ function FocusView({
     }) => {
       if (!activeSession) return;
       const currentTaskTitle = task?.title;
-      const elapsedMins = Math.max(1, Math.round((Date.now() - Date.parse(activeSession.startedAt)) / 60000));
+      const elapsedMins = Math.max(1, Math.round(elapsedSec / 60));
 
       if (markDone && task) {
         try {
@@ -1057,16 +1180,19 @@ function FocusView({
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });
       setShowEndDialog(false);
 
-      // Trigger curated focus-ended notification via background
-      try {
-        if (typeof chrome !== "undefined" && chrome.runtime?.sendMessage) {
-          void chrome.runtime.sendMessage({
-            type: "trigger-focus-ended-notification",
-            taskTitle: currentTaskTitle,
-            durationMinutes: elapsedMins,
-          });
-        }
-      } catch {}
+      // Only dispatch OS desktop notification if NOT opening check-in directly in popup
+      // (When user ends session inside popup and transitions to reflect, native notification is suppressed)
+      if (!openCheckIn) {
+        try {
+          if (typeof chrome !== "undefined" && chrome.runtime?.sendMessage) {
+            void chrome.runtime.sendMessage({
+              type: "trigger-focus-ended-notification",
+              taskTitle: currentTaskTitle,
+              durationMinutes: elapsedMins,
+            });
+          }
+        } catch {}
+      }
 
       if (openCheckIn) {
         onStartReflect();
@@ -1074,12 +1200,59 @@ function FocusView({
     },
   });
 
-  const elapsedSec = activeSession
-    ? Math.floor((now - Date.parse(activeSession.startedAt)) / 1000)
-    : 0;
-  const targetDurationSec =
-    preset === "custom" ? customMins * 60 : preset * 60;
-  const remainingSec = Math.max(0, targetDurationSec - elapsedSec);
+  const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
+
+  const discard = useMutation({
+    mutationFn: async () => {
+      if (!activeSession) return;
+      return apiClient.deleteSession(activeSession.id);
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      setShowEndDialog(false);
+      setShowDiscardConfirm(false);
+    },
+  });
+
+  // Automatically sync preset with task planned duration when idle
+  useEffect(() => {
+    if (task?.plannedDurationMinutes && !activeSession) {
+      if (task.plannedDurationMinutes === 25 || task.plannedDurationMinutes === 50) {
+        setPreset(task.plannedDurationMinutes as 25 | 50);
+      } else {
+        setPreset("custom");
+        setCustomMins(task.plannedDurationMinutes);
+      }
+    }
+  }, [task?.id, task?.plannedDurationMinutes, activeSession]);
+
+  const elapsedSec = useMemo(() => {
+    if (!activeSession) return 0;
+    const base = activeSession.durationSeconds ?? 0;
+    if (activeSession.isPaused) {
+      return base;
+    }
+    const currentSegment = Math.max(
+      0,
+      Math.floor((now - Date.parse(activeSession.startedAt)) / 1000),
+    );
+    return base + currentSegment;
+  }, [activeSession, now]);
+
+  const targetDurationMins = useMemo(() => {
+    if (activeSession) {
+      return activeSession.targetDurationMinutes ?? task?.plannedDurationMinutes ?? 25;
+    }
+    if (task?.plannedDurationMinutes) {
+      return task.plannedDurationMinutes;
+    }
+    return preset === "custom" ? customMins : preset;
+  }, [activeSession, task, preset, customMins]);
+
+  const targetDurationSec = targetDurationMins * 60;
+  const remainingSec = targetDurationSec - elapsedSec;
+  const isOvertime = remainingSec < 0;
 
   if (showEndDialog && activeSession) {
     return (
@@ -1094,7 +1267,10 @@ function FocusView({
         <section className="focus-card">
           <p style={{ margin: "0 0 10px", fontSize: 11.5, color: "var(--text-secondary)" }}>
             Reflect on this focus block for{" "}
-            <strong style={{ color: "var(--text-primary)" }}>{task?.title ?? "your session"}</strong>:
+            <strong style={{ color: "var(--text-primary)" }}>
+              {task?.title ?? "your session"}
+            </strong>
+            :
           </p>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -1136,8 +1312,125 @@ function FocusView({
             >
               Resume focus session
             </button>
+
+            <button
+              type="button"
+              className="text-button"
+              style={{ marginTop: 8, alignSelf: "center", fontSize: 10.5, color: "var(--danger)" }}
+              onClick={() => setShowDiscardConfirm(true)}
+              disabled={discard.isPending}
+            >
+              <Trash2 size={11} style={{ display: "inline", marginRight: 4 }} />
+              Discard session
+            </button>
           </div>
         </section>
+
+        {showDiscardConfirm && (
+          <div
+            style={{
+              position: "fixed",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              background: "rgba(0, 0, 0, 0.72)",
+              backdropFilter: "blur(2px)",
+              zIndex: 300,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 14,
+            }}
+            role="dialog"
+            aria-modal="true"
+          >
+            <div
+              className="hero-card"
+              style={{
+                padding: 16,
+                background: "var(--bg-surface-elevated)",
+                border: "1px solid var(--border-default)",
+                borderRadius: 10,
+                width: "100%",
+                display: "flex",
+                flexDirection: "column",
+                gap: 10,
+                boxShadow: "var(--shadow-overlay)",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                <div
+                  style={{
+                    width: 30,
+                    height: 30,
+                    borderRadius: 6,
+                    background: "rgba(244, 63, 94, 0.12)",
+                    border: "1px solid rgba(244, 63, 94, 0.25)",
+                    display: "grid",
+                    placeItems: "center",
+                    color: "var(--danger)",
+                    flexShrink: 0,
+                  }}
+                >
+                  <Trash2 size={15} />
+                </div>
+                <div>
+                  <h3
+                    style={{
+                      margin: 0,
+                      fontSize: 13.5,
+                      fontWeight: 650,
+                      color: "var(--text-primary)",
+                    }}
+                  >
+                    Discard Focus Session?
+                  </h3>
+                  <span style={{ fontSize: 10, color: "var(--text-muted)" }}>
+                    Accidental start or want to reset?
+                  </span>
+                </div>
+              </div>
+
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: 11,
+                  color: "var(--text-secondary)",
+                  lineHeight: 1.45,
+                }}
+              >
+                This will cancel the active session and remove the elapsed time from your history
+                and analytics. This action cannot be undone.
+              </p>
+
+              <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  style={{ flex: 1, marginTop: 0 }}
+                  onClick={() => setShowDiscardConfirm(false)}
+                  disabled={discard.isPending}
+                >
+                  Keep Working
+                </button>
+                <button
+                  type="button"
+                  className="danger-button"
+                  style={{ flex: 1, marginTop: 0 }}
+                  onClick={() => {
+                    discard.mutate();
+                    setShowDiscardConfirm(false);
+                  }}
+                  disabled={discard.isPending}
+                >
+                  <Trash2 size={12} />
+                  {discard.isPending ? "Discarding..." : "Discard Session"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
     );
   }
@@ -1146,9 +1439,7 @@ function FocusView({
     <main className="content" style={{ gap: 10 }}>
       <div className="section-heading compact">
         <div>
-          <span className="section-kicker">
-            {activeSession ? "CURRENT FOCUS" : "FOCUS BLOCK"}
-          </span>
+          <span className="section-kicker">{activeSession ? "CURRENT FOCUS" : "FOCUS BLOCK"}</span>
           <h1 style={{ fontSize: 15 }}>
             {activeSession ? "Deliberate execution." : "One thing at a time."}
           </h1>
@@ -1166,43 +1457,108 @@ function FocusView({
                     width: 6,
                     height: 6,
                     borderRadius: "50%",
-                    background: "var(--success)",
+                    background: activeSession.isPaused
+                      ? "var(--amber)"
+                      : isOvertime
+                        ? "#f59e0b"
+                        : "var(--success)",
                     display: "inline-block",
                   }}
                 />
               )}
               {activeSession
-                ? remainingSec > 0
-                  ? "Time remaining"
-                  : "Elapsed time"
+                ? activeSession.isPaused
+                  ? "Paused"
+                  : isOvertime
+                    ? "Overtime (Flow)"
+                    : "Time remaining"
                 : "Duration"}
             </span>
             <strong>
-              {formatClock(
-                activeSession
-                  ? remainingSec > 0
-                    ? remainingSec
-                    : elapsedSec
-                  : targetDurationSec
-              )}
+              {activeSession
+                ? isOvertime
+                  ? `+${formatClock(Math.abs(remainingSec))}`
+                  : formatClock(remainingSec)
+                : formatClock(targetDurationSec)}
             </strong>
           </div>
-          <Timer size={26} color="var(--accent-primary)" />
+          {activeSession?.isPaused ? (
+            <span
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: "0.06em",
+                color: "var(--amber)",
+                background: "rgba(245, 158, 11, 0.15)",
+                border: "1px solid rgba(245, 158, 11, 0.3)",
+                padding: "3px 7px",
+                borderRadius: 4,
+              }}
+            >
+              PAUSED
+            </span>
+          ) : isOvertime && activeSession ? (
+            <span
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: "0.06em",
+                color: "var(--amber)",
+                background: "rgba(245, 158, 11, 0.15)",
+                border: "1px solid rgba(245, 158, 11, 0.3)",
+                padding: "3px 7px",
+                borderRadius: 4,
+              }}
+            >
+              FLOW STATE
+            </span>
+          ) : (
+            <Timer size={22} style={{ color: "var(--text-muted)" }} />
+          )}
         </div>
 
         {/* Task Selection & Information */}
         {activeSession ? (
           <div className="focus-details">
-            {task?.goalTitle && (
-              <span className="section-kicker" style={{ color: "var(--accent-primary)" }}>
-                GOAL: {task.goalTitle}
-              </span>
-            )}
+            {task?.goalTitle && <span className="section-kicker">GOAL: {task.goalTitle}</span>}
             <h2>{task?.title ?? "Intentional work session"}</h2>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, margin: "4px 0" }}>
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 600,
+                  padding: "2px 7px",
+                  borderRadius: 4,
+                  background: "var(--bg-subtle)",
+                  color: "var(--text-secondary)",
+                  border: "1px solid var(--border-subtle)",
+                }}
+              >
+                Target: {targetDurationMins}m
+              </span>
+              {isOvertime && (
+                <span
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 600,
+                    padding: "2px 7px",
+                    borderRadius: 4,
+                    background: "var(--warning-subtle)",
+                    color: "var(--warning)",
+                    border: "1px solid var(--warning-border)",
+                  }}
+                >
+                  +{Math.floor(Math.abs(remainingSec) / 60)}m Overtime
+                </span>
+              )}
+            </div>
             <p style={{ margin: "2px 0 0" }}>
               {status?.currentActivity?.domain ? (
                 <span>
-                  Observed: <strong style={{ color: "var(--text-primary)" }}>{status.currentActivity.domain}</strong>
+                  Observed:{" "}
+                  <strong style={{ color: "var(--text-primary)" }}>
+                    {status.currentActivity.domain}
+                  </strong>
                 </span>
               ) : (
                 "Work session is active and being recorded."
@@ -1241,8 +1597,16 @@ function FocusView({
                 }}
               >
                 {incompleteTasks.map((t) => (
-                  <option key={t.id} value={t.id} style={{ background: "var(--bg-surface-elevated)", color: "var(--text-primary)" }}>
-                    {t.title} {t.goalTitle ? `· [${t.goalTitle}]` : ""} ({t.plannedDurationMinutes ?? 30}m)
+                  <option
+                    key={t.id}
+                    value={t.id}
+                    style={{
+                      background: "var(--bg-surface-elevated)",
+                      color: "var(--text-primary)",
+                    }}
+                  >
+                    {t.title} {t.goalTitle ? `· [${t.goalTitle}]` : ""} (
+                    {t.plannedDurationMinutes ?? 30}m)
                   </option>
                 ))}
               </select>
@@ -1285,17 +1649,8 @@ function FocusView({
                   key={mins}
                   type="button"
                   onClick={() => setPreset(mins as 25 | 50)}
-                  className="secondary-button"
-                  style={{
-                    flex: 1,
-                    marginTop: 0,
-                    padding: "7px 2px",
-                    fontSize: 11,
-                    background:
-                      preset === mins ? "var(--bg-active)" : undefined,
-                    borderColor: preset === mins ? "var(--accent-primary)" : undefined,
-                    color: preset === mins ? "var(--accent-primary)" : undefined,
-                  }}
+                  className={`filter-toggle ${preset === mins ? "active" : ""}`}
+                  style={{ flex: 1, padding: "6px 2px" }}
                 >
                   {mins}m
                 </button>
@@ -1303,17 +1658,8 @@ function FocusView({
               <button
                 type="button"
                 onClick={() => setPreset("custom")}
-                className="secondary-button"
-                style={{
-                  flex: 1,
-                  marginTop: 0,
-                  padding: "7px 2px",
-                  fontSize: 11,
-                  background:
-                    preset === "custom" ? "var(--bg-active)" : undefined,
-                  borderColor: preset === "custom" ? "var(--accent-primary)" : undefined,
-                  color: preset === "custom" ? "var(--accent-primary)" : undefined,
-                }}
+                className={`filter-toggle ${preset === "custom" ? "active" : ""}`}
+                style={{ flex: 1, padding: "6px 2px" }}
               >
                 Custom
               </button>
@@ -1335,9 +1681,7 @@ function FocusView({
                   max={180}
                   value={customMins}
                   onChange={(e) =>
-                    setCustomMins(
-                      Math.max(5, Math.min(180, Number(e.target.value) || 25))
-                    )
+                    setCustomMins(Math.max(5, Math.min(180, Number(e.target.value) || 25)))
                   }
                   style={{
                     width: 50,
@@ -1356,18 +1700,55 @@ function FocusView({
           </div>
         )}
 
-        {/* Start / End CTA */}
+        {/* Start / Pause / Resume / End Controls */}
         {activeSession ? (
-          <button
-            type="button"
-            className="danger-button full"
-            onClick={() => setShowEndDialog(true)}
-            disabled={finish.isPending}
-            style={{ marginTop: 12 }}
-          >
-            <Square size={13} fill="currentColor" />
-            End Session
-          </button>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 12 }}>
+            <div style={{ display: "flex", gap: 8 }}>
+              {activeSession.isPaused ? (
+                <button
+                  type="button"
+                  className="success-button"
+                  style={{ flex: 1, marginTop: 0 }}
+                  onClick={() => resume.mutate()}
+                  disabled={resume.isPending}
+                >
+                  <Play size={13} fill="currentColor" />
+                  Resume
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="warning-button"
+                  style={{ flex: 1, marginTop: 0 }}
+                  onClick={() => pause.mutate()}
+                  disabled={pause.isPending}
+                >
+                  <Pause size={13} fill="currentColor" />
+                  Pause
+                </button>
+              )}
+              <button
+                type="button"
+                className="primary-button"
+                style={{ flex: 1.2, marginTop: 0 }}
+                onClick={() => setShowEndDialog(true)}
+                disabled={finish.isPending}
+              >
+                <CheckCircle2 size={13} />
+                Wrap-Up & Reflect
+              </button>
+            </div>
+            <button
+              type="button"
+              className="text-button"
+              style={{ marginTop: 4, alignSelf: "center", fontSize: 10.5, color: "var(--danger)" }}
+              onClick={() => setShowDiscardConfirm(true)}
+              disabled={discard.isPending}
+            >
+              <Trash2 size={11} style={{ display: "inline", marginRight: 4 }} />
+              Discard session
+            </button>
+          </div>
         ) : (
           <button
             type="button"
@@ -1383,11 +1764,110 @@ function FocusView({
           </button>
         )}
       </section>
+
+      {showDiscardConfirm && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: "rgba(0, 0, 0, 0.72)",
+            backdropFilter: "blur(2px)",
+            zIndex: 300,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 14,
+          }}
+          role="dialog"
+          aria-modal="true"
+        >
+          <div
+            className="hero-card"
+            style={{
+              padding: 16,
+              background: "var(--bg-surface-elevated)",
+              border: "1px solid var(--border-default)",
+              borderRadius: 10,
+              width: "100%",
+              display: "flex",
+              flexDirection: "column",
+              gap: 10,
+              boxShadow: "var(--shadow-overlay)",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+              <div
+                style={{
+                  width: 30,
+                  height: 30,
+                  borderRadius: 6,
+                  background: "rgba(244, 63, 94, 0.12)",
+                  border: "1px solid rgba(244, 63, 94, 0.25)",
+                  display: "grid",
+                  placeItems: "center",
+                  color: "var(--danger)",
+                  flexShrink: 0,
+                }}
+              >
+                <Trash2 size={15} />
+              </div>
+              <div>
+                <h3
+                  style={{
+                    margin: 0,
+                    fontSize: 13.5,
+                    fontWeight: 650,
+                    color: "var(--text-primary)",
+                  }}
+                >
+                  Discard Focus Session?
+                </h3>
+                <span style={{ fontSize: 10, color: "var(--text-muted)" }}>
+                  Accidental start or want to reset?
+                </span>
+              </div>
+            </div>
+
+            <p
+              style={{ margin: 0, fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.45 }}
+            >
+              This will cancel the active session and remove the elapsed time from your history and
+              analytics. This action cannot be undone.
+            </p>
+
+            <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+              <button
+                type="button"
+                className="secondary-button"
+                style={{ flex: 1, marginTop: 0 }}
+                onClick={() => setShowDiscardConfirm(false)}
+                disabled={discard.isPending}
+              >
+                Keep Working
+              </button>
+              <button
+                type="button"
+                className="danger-button"
+                style={{ flex: 1, marginTop: 0 }}
+                onClick={() => {
+                  discard.mutate();
+                  setShowDiscardConfirm(false);
+                }}
+                disabled={discard.isPending}
+              >
+                <Trash2 size={12} />
+                {discard.isPending ? "Discarding..." : "Discard Session"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
-
-
 
 // -------------------------------------------------------------
 // REVIEW VIEW (Locked 4th tab: Delayed Spaced Learning Recall)
@@ -1401,14 +1881,13 @@ function ReviewView() {
 
   const due = useMemo(() => {
     return (assessments.data ?? []).filter(
-      (a) => !a.completedAt && Date.parse(a.scheduledAt) <= Date.now()
+      (a) => !a.completedAt && Date.parse(a.scheduledAt) <= Date.now(),
     );
   }, [assessments.data]);
 
   const activeAssessment = due[0];
   const activeQuestion =
-    activeAssessment?.questions?.find((q) => q.score === null) ??
-    activeAssessment?.questions?.[0];
+    activeAssessment?.questions?.find((q) => q.score === null) ?? activeAssessment?.questions?.[0];
 
   const [revealed, setRevealed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -1420,7 +1899,7 @@ function ReviewView() {
       await apiClient.submitLearningAnswer(
         activeQuestion.id,
         activeQuestion.expectedAnswer ?? "Recall review",
-        score
+        score,
       );
       void queryClient.invalidateQueries({ queryKey: ["assessments"] });
       setRevealed(false);
@@ -1438,11 +1917,7 @@ function ReviewView() {
           <span className="section-kicker">LEARNING RECALL</span>
           <h1 style={{ fontSize: 15 }}>Recall, then move on.</h1>
         </div>
-        <button
-          className="text-button"
-          onClick={() => openDashboard("/learning")}
-          type="button"
-        >
+        <button className="text-button" onClick={() => openDashboard("/learning")} type="button">
           Full view <ExternalLink size={11} />
         </button>
       </div>
@@ -1462,7 +1937,7 @@ function ReviewView() {
                 alignItems: "center",
               }}
             >
-              <span className="section-kicker" style={{ color: "var(--accent-primary)" }}>
+              <span className="section-kicker">
                 {due.length} {due.length === 1 ? "REVIEW DUE" : "REVIEWS DUE"}
               </span>
               <span style={{ fontSize: 10, color: "var(--text-secondary)" }}>
@@ -1474,7 +1949,7 @@ function ReviewView() {
               <span
                 style={{
                   fontSize: 9.5,
-                  color: "var(--accent-primary)",
+                  color: "var(--text-muted)",
                   textTransform: "uppercase",
                   letterSpacing: ".06em",
                   fontWeight: 600,
@@ -1485,16 +1960,14 @@ function ReviewView() {
               <div className="flashcard-question">{activeQuestion.prompt}</div>
 
               {revealed && activeQuestion.expectedAnswer && (
-                <div className="flashcard-answer">
-                  {activeQuestion.expectedAnswer}
-                </div>
+                <div className="flashcard-answer">{activeQuestion.expectedAnswer}</div>
               )}
             </div>
 
             {!revealed ? (
               <button
                 type="button"
-                className="secondary-button full"
+                className="primary-button full"
                 onClick={() => setRevealed(true)}
               >
                 Reveal Answer
@@ -1512,7 +1985,7 @@ function ReviewView() {
                 </button>
                 <button
                   type="button"
-                  className="primary-button"
+                  className="success-button"
                   style={{ flex: 1, marginTop: 0 }}
                   onClick={() => handleAnswer(1)}
                   disabled={submitting}
@@ -1594,9 +2067,7 @@ function MoreView({
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `productivehix-export-${new Date()
-        .toISOString()
-        .slice(0, 10)}.json`;
+      a.download = `productivehix-export-${new Date().toISOString().slice(0, 10)}.json`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -1627,19 +2098,13 @@ function MoreView({
           <div className="setting-copy">
             <strong>Account</strong>
             <span>
-              {status?.authenticated
-                ? "Connected to local operating system"
-                : "Unpaired device"}
+              {status?.authenticated ? "Connected to local operating system" : "Unpaired device"}
             </span>
           </div>
           {status?.authenticated ? (
             <span className="connection-label good">Paired</span>
           ) : (
-            <button
-              className="text-button"
-              onClick={() => authMutation.mutate()}
-              type="button"
-            >
+            <button className="text-button" onClick={() => authMutation.mutate()} type="button">
               Pair <ExternalLink size={11} />
             </button>
           )}
@@ -1668,11 +2133,7 @@ function MoreView({
           <div className="confirm-row">
             <span>Pause telemetry now?</span>
             <div>
-              <button
-                type="button"
-                className="text-button"
-                onClick={() => setConfirmPause(false)}
-              >
+              <button type="button" className="text-button" onClick={() => setConfirmPause(false)}>
                 Cancel
               </button>
               <button
@@ -1699,18 +2160,12 @@ function MoreView({
             <span>
               {status?.desktop?.connected
                 ? `Connected (${
-                    status.desktop.activityWatchRunning
-                      ? "AW Running"
-                      : "AW Inactive"
+                    status.desktop.activityWatchRunning ? "AW Running" : "AW Inactive"
                   })`
                 : "Not connected"}
             </span>
           </div>
-          <span
-            className={`connection-label ${
-              status?.desktop?.connected ? "good" : "muted"
-            }`}
-          >
+          <span className={`connection-label ${status?.desktop?.connected ? "good" : "muted"}`}>
             {status?.desktop?.connected ? "Ready" : "Offline"}
           </span>
         </div>
@@ -1777,20 +2232,12 @@ function MoreView({
             onClick={handleExportData}
             disabled={exporting}
           >
-            {exporting
-              ? "Exporting..."
-              : exportSuccess
-              ? "Downloaded!"
-              : "Export"}
+            {exporting ? "Exporting..." : exportSuccess ? "Downloaded!" : "Export"}
           </button>
         </div>
       </section>
 
-      <button
-        type="button"
-        className="secondary-button full"
-        onClick={() => openDashboard("/")}
-      >
+      <button type="button" className="secondary-button full" onClick={() => openDashboard("/")}>
         Open Web Dashboard <ExternalLink size={12} />
       </button>
     </main>
@@ -1833,7 +2280,10 @@ export function App() {
           }
         });
 
-        const handleThemeChange = (changes: { [key: string]: chrome.storage.StorageChange }, area: string) => {
+        const handleThemeChange = (
+          changes: { [key: string]: chrome.storage.StorageChange },
+          area: string,
+        ) => {
           if (area === "local" && changes.theme?.newValue) {
             document.documentElement.setAttribute("data-theme", changes.theme.newValue);
           }
@@ -1871,11 +2321,7 @@ export function App() {
     const applyRouting = (targetTab?: string, targetMode?: string) => {
       if (targetMode === "inactivity" || targetTab === "inactivity") {
         setReflectionOverlay("inactivity");
-      } else if (
-        targetMode === "hourly" ||
-        targetTab === "reflect" ||
-        targetTab === "checkin"
-      ) {
+      } else if (targetMode === "hourly" || targetTab === "reflect" || targetTab === "checkin") {
         setReflectionOverlay("hourly");
       } else if (
         targetTab === "focus" ||
@@ -1910,6 +2356,10 @@ export function App() {
       if (msg?.type === "NAVIGATE_POPUP") {
         applyRouting(msg.tab, msg.mode);
       }
+      if (msg?.type === "session:updated") {
+        void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+        void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      }
     };
 
     const handleStorageChange = (changes: { [key: string]: chrome.storage.StorageChange }) => {
@@ -1920,12 +2370,9 @@ export function App() {
       }
     };
 
-    // Clear notification badge when popup is opened
-    try {
-      if (typeof chrome !== "undefined" && chrome.action?.setBadgeText) {
-        void chrome.action.setBadgeText({ text: "" });
-      }
-    } catch {}
+    // Refresh sessions and tasks when popup is opened
+    void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    void queryClient.invalidateQueries({ queryKey: ["tasks"] });
 
     if (typeof chrome !== "undefined") {
       chrome.runtime?.onMessage?.addListener(handleMessage);
@@ -2013,10 +2460,7 @@ export function App() {
 
   return (
     <div className="app-shell">
-      <Header
-        isStandalone={isStandalone}
-        onClose={notifyCloseModal}
-      />
+      <Header isStandalone={isStandalone} onClose={notifyCloseModal} />
 
       <TopNav tab={tab} setTab={handleTabChange} />
 

@@ -14,6 +14,7 @@ export {
   normalizeAppName,
   cleanWindowTitle,
   categorizeActivity,
+  inferSiteLabel,
   normalizeRawActivityEvents,
   normalizeIntervals,
 } from "./activity/segments";

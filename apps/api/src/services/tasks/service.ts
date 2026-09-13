@@ -1,4 +1,16 @@
-import type { Task, TaskWithSessions } from "@repo/types";
+import {
+  resolveProductiveDay,
+  type Task,
+  type TaskWithSessions,
+  type TaskObservedActivityItem,
+} from "@repo/types";
+import {
+  normalizeAppName,
+  cleanWindowTitle,
+  inferSiteLabel,
+  normalizeRawActivityEvents,
+  normalizeIntervals,
+} from "@repo/analytics";
 import { getDb } from "../../lib/prisma";
 
 type TaskWithSessionRows = {
@@ -33,6 +45,10 @@ export function serializeTask(task: TaskWithSessionRows): Task {
   const actualDurationSeconds = sessions.reduce((sum, s) => sum + (s.durationSeconds ?? 0), 0);
   const hasActiveSession = sessions.some((s) => !s.endedAt);
 
+  const resolvedProductiveDate =
+    task.productiveDate ??
+    (task.dueAt ? resolveProductiveDay(task.dueAt) : resolveProductiveDay(task.createdAt));
+
   return {
     id: task.id,
     userId: task.userId,
@@ -46,7 +62,7 @@ export function serializeTask(task: TaskWithSessionRows): Task {
     completedAt: task.completedAt?.toISOString() ?? null,
     goalId: task.goalId ?? null,
     goalTitle: task.goal?.title ?? null,
-    productiveDate: task.productiveDate ?? null,
+    productiveDate: resolvedProductiveDate,
     createdAt: task.createdAt.toISOString(),
     updatedAt: task.updatedAt.toISOString(),
     sessionsCount: sessions.length,
@@ -54,9 +70,27 @@ export function serializeTask(task: TaskWithSessionRows): Task {
   };
 }
 
-export async function listTasks(userId: string): Promise<Task[]> {
+export async function listTasks(
+  userId: string,
+  filters?: {
+    productiveDate?: string;
+    status?: Task["status"];
+    goalId?: string | null;
+  }
+): Promise<Task[]> {
+  const where: any = { userId };
+  if (filters?.productiveDate) {
+    where.productiveDate = filters.productiveDate;
+  }
+  if (filters?.status) {
+    where.status = filters.status;
+  }
+  if (filters?.goalId !== undefined) {
+    where.goalId = filters.goalId;
+  }
+
   const tasks = await getDb().task.findMany({
-    where: { userId },
+    where,
     include: {
       goal: {
         select: {
@@ -99,8 +133,25 @@ export async function getTask(userId: string, id: string): Promise<TaskWithSessi
           endedAt: true,
           durationSeconds: true,
           notes: true,
+          isPaused: true,
+          lastResumedAt: true,
+          createdAt: true,
         },
         orderBy: { startedAt: "desc" },
+      },
+      checkIns: {
+        select: {
+          id: true,
+          activityAssessment: true,
+          alignment: true,
+          energy: true,
+          focus: true,
+          note: true,
+          outcome: true,
+          blocker: true,
+          createdAt: true,
+        },
+        orderBy: { createdAt: "desc" },
       },
     },
   });
@@ -108,27 +159,59 @@ export async function getTask(userId: string, id: string): Promise<TaskWithSessi
   if (!task) return null;
 
   const serialized = serializeTask(task);
-  const sessionList = (task.sessions || []).map((s) => ({
-    id: s.id,
-    startedAt: s.startedAt.toISOString(),
-    endedAt: s.endedAt?.toISOString() ?? null,
-    durationSeconds: s.durationSeconds,
-    notes: s.notes,
+  const sessionList = (task.sessions || []).map((s) => {
+    let effectiveStart = s.startedAt;
+    if (s.createdAt && s.startedAt.getTime() > s.createdAt.getTime() + 5000) {
+      effectiveStart = s.createdAt;
+    }
+    if (s.endedAt && s.durationSeconds) {
+      const wallClockSec = Math.round((s.endedAt.getTime() - effectiveStart.getTime()) / 1000);
+      if (wallClockSec < s.durationSeconds) {
+        const recoveredMs = s.endedAt.getTime() - s.durationSeconds * 1000;
+        effectiveStart = new Date(Math.min(effectiveStart.getTime(), recoveredMs));
+      }
+    }
+
+    return {
+      id: s.id,
+      startedAt: effectiveStart.toISOString(),
+      endedAt: s.endedAt?.toISOString() ?? null,
+      durationSeconds: s.durationSeconds,
+      isPaused: Boolean(s.isPaused),
+      lastResumedAt: s.lastResumedAt?.toISOString() ?? null,
+      notes: s.notes,
+    };
+  });
+
+  const checkInList = ((task as any).checkIns || []).map((c: any) => ({
+    id: c.id,
+    activityAssessment: c.activityAssessment ?? null,
+    alignment: c.alignment ?? null,
+    energy: c.energy ?? null,
+    focus: c.focus ?? null,
+    note: c.note ?? null,
+    outcome: c.outcome ?? null,
+    blocker: c.blocker ?? null,
+    createdAt: c.createdAt.toISOString(),
   }));
 
   return {
     ...serialized,
     sessions: sessionList,
+    checkIns: checkInList,
   };
 }
 
-export async function getTaskObservedActivity(userId: string, taskId: string) {
+export async function getTaskObservedActivity(
+  userId: string,
+  taskId: string,
+): Promise<TaskObservedActivityItem[]> {
   const db = getDb();
   const task = await db.task.findFirst({
     where: { id: taskId, userId },
     include: {
       sessions: {
-        select: { startedAt: true, endedAt: true },
+        select: { startedAt: true, endedAt: true, durationSeconds: true },
       },
     },
   });
@@ -137,11 +220,28 @@ export async function getTaskObservedActivity(userId: string, taskId: string) {
     return [];
   }
 
-  // Find all activities across any session interval for this task
-  const sessionRanges = task.sessions.map((s) => ({
-    start: s.startedAt,
-    end: s.endedAt || new Date(),
-  }));
+  // Calculate inclusive coverage spans for each session.
+  // If a historical session had its startedAt overwritten by a past resume bug (i.e. endedAt - startedAt < durationSeconds),
+  // recover the true window by projecting backwards from endedAt.
+  const sessionRanges = task.sessions
+    .filter((s) => (s.durationSeconds ?? 0) > 0 || !s.endedAt)
+    .map((s) => {
+      const end = s.endedAt || new Date();
+      let start = s.startedAt;
+      if (s.endedAt && s.durationSeconds) {
+        const wallClockSec = Math.round((s.endedAt.getTime() - s.startedAt.getTime()) / 1000);
+        if (wallClockSec < s.durationSeconds) {
+          // Recover true start time with 2-minute buffer
+          const recoveredMs = s.endedAt.getTime() - (s.durationSeconds + 120) * 1000;
+          start = new Date(Math.min(s.startedAt.getTime(), recoveredMs));
+        }
+      }
+      return { start, end };
+    });
+
+  if (sessionRanges.length === 0) {
+    return [];
+  }
 
   const orClauses = sessionRanges.map((r) => ({
     timestamp: {
@@ -156,26 +256,81 @@ export async function getTaskObservedActivity(userId: string, taskId: string) {
       OR: orClauses,
     },
     select: {
+      id: true,
+      externalId: true,
+      timestamp: true,
       source: true,
       watcher: true,
       duration: true,
       data: true,
     },
+    orderBy: { timestamp: "asc" },
   });
 
-  // Aggregate by app name or domain
-  const appMap = new Map<string, number>();
-  for (const act of activities) {
-    const data = (act.data ?? {}) as Record<string, unknown>;
-    const app = (data.application as string) || (data.domain as string) || act.source;
-    appMap.set(app, (appMap.get(app) ?? 0) + act.duration);
+  if (activities.length === 0) {
+    return [];
   }
 
-  return Array.from(appMap.entries())
-    .map(([application, durationSeconds]) => ({
-      application,
-      durationSeconds: Math.round(durationSeconds),
+  const canonical = normalizeRawActivityEvents(activities.map((a) => ({
+    id: a.id,
+    externalId: a.externalId,
+    timestamp: a.timestamp,
+    duration: a.duration,
+    source: a.source,
+    watcher: a.watcher,
+    data: a.data,
+  })));
+
+  const normalized = normalizeIntervals(canonical);
+
+  // Group by { application, domain, title } across all switches
+  interface ClusterItem {
+    application: string;
+    domain: string | null;
+    title: string;
+    durationSeconds: number;
+  }
+
+  const clusterMap = new Map<string, ClusterItem>();
+  let totalTrackedSeconds = 0;
+
+  for (const n of normalized) {
+    if (n.isAfk) continue;
+    const durSec = Math.max(0, Math.round(n.durationMs / 1000));
+    if (durSec < 1) continue;
+
+    const displayApp = n.application;
+    const displayTitle = n.title || displayApp;
+    const domain = n.domain || null;
+
+    const key = `${displayApp}:::${domain ?? ""}:::${displayTitle}`;
+    totalTrackedSeconds += durSec;
+
+    const existing = clusterMap.get(key);
+    if (existing) {
+      existing.durationSeconds += durSec;
+    } else {
+      clusterMap.set(key, {
+        application: displayApp,
+        domain,
+        title: displayTitle,
+        durationSeconds: durSec,
+      });
+    }
+  }
+
+  return Array.from(clusterMap.values())
+    .map((item) => ({
+      application: item.application,
+      domain: item.domain,
+      title: item.title,
+      durationSeconds: item.durationSeconds,
+      percentage:
+        totalTrackedSeconds > 0
+          ? Math.round((item.durationSeconds / totalTrackedSeconds) * 100)
+          : 0,
     }))
+    .filter((item) => item.durationSeconds >= 5) // Exclude transient blips < 5s
     .sort((a, b) => b.durationSeconds - a.durationSeconds)
     .slice(0, 10);
 }
@@ -192,6 +347,27 @@ export async function createTask(
     productiveDate?: string | null;
   },
 ) {
+  let productiveDate = input.productiveDate;
+  const dueDateStr = input.dueAt ? resolveProductiveDay(input.dueAt) : null;
+
+  if (!productiveDate && input.goalId) {
+    const goal = await getDb().dailyGoal.findUnique({
+      where: { id: input.goalId },
+      include: { plan: { select: { date: true } } },
+    });
+    if (goal?.plan?.date) {
+      // If the task's due date is later than the goal's plan date, honor the due date
+      if (dueDateStr && dueDateStr > goal.plan.date) {
+        productiveDate = dueDateStr;
+      } else {
+        productiveDate = goal.plan.date;
+      }
+    }
+  }
+  if (!productiveDate) {
+    productiveDate = dueDateStr ?? resolveProductiveDay(new Date());
+  }
+
   const created = await getDb().task.create({
     data: {
       userId,
@@ -201,7 +377,7 @@ export async function createTask(
       priority: input.priority ?? "medium",
       plannedDurationMinutes: input.plannedDurationMinutes ?? 30,
       goalId: input.goalId,
-      productiveDate: input.productiveDate,
+      productiveDate,
     },
     include: {
       goal: {
@@ -231,10 +407,15 @@ export async function updateTask(
     productiveDate?: string | null;
   },
 ) {
+  const dataToUpdate: Record<string, unknown> = { ...input };
+  if (input.dueAt !== undefined && input.productiveDate === undefined) {
+    dataToUpdate.productiveDate = input.dueAt ? resolveProductiveDay(input.dueAt) : null;
+  }
+
   const updated = await getDb().task.update({
     where: { id, userId },
     data: {
-      ...input,
+      ...dataToUpdate,
       completedAt: input.status === "done" ? new Date() : input.status ? null : undefined,
     },
     include: {

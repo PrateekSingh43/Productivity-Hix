@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle2, Circle, Clock, Play, Square, ChevronRight, Edit3, Target, Calendar } from "lucide-react";
+import { CheckCircle2, Circle, Clock, Play, Square, ChevronRight, Edit3, Target, Calendar, RotateCcw } from "lucide-react";
 import { format, isBefore, startOfDay } from "date-fns";
 import type { Task } from "@repo/types";
 import {
@@ -16,9 +16,10 @@ interface TaskItemProps {
   task: Task;
   onSelect: (task: Task) => void;
   isPrioritySection?: boolean;
+  onRescheduleToday?: (task: Task) => void;
 }
 
-export function TaskItem({ task, onSelect, isPrioritySection }: TaskItemProps) {
+export function TaskItem({ task, onSelect, isPrioritySection, onRescheduleToday }: TaskItemProps) {
   const updateTaskMutation = useUpdateTaskMutation();
   const startSessionMutation = useStartTaskSessionMutation();
   const endSessionMutation = useEndTaskSessionMutation();
@@ -64,16 +65,36 @@ export function TaskItem({ task, onSelect, isPrioritySection }: TaskItemProps) {
     return `${h}h ${m}m`;
   };
 
-  const isOverdue = task.dueAt
-    ? isBefore(new Date(task.dueAt), startOfDay(new Date()))
-    : false;
+  const todayStr = format(new Date(), "yyyy-MM-dd");
+  const isScheduledToday = task.productiveDate === todayStr;
+  const isRollover =
+    !isDone &&
+    Boolean(
+      task.productiveDate &&
+        task.productiveDate >= todayStr &&
+        task.dueAt &&
+        isBefore(new Date(task.dueAt), startOfDay(new Date()))
+    );
+
+  const isOverdue =
+    !isDone &&
+    !isRollover &&
+    (task.dueAt
+      ? isBefore(new Date(task.dueAt), startOfDay(new Date()))
+      : Boolean(task.productiveDate && task.productiveDate < todayStr));
+
+  const displayDate = task.dueAt
+    ? format(new Date(task.dueAt), "MMM d")
+    : task.productiveDate
+    ? format(new Date(`${task.productiveDate}T12:00:00`), "MMM d")
+    : null;
 
   return (
     <div
       onClick={() => onSelect(task)}
       className={`group relative flex items-center justify-between px-4 sm:px-5 py-3 transition-colors cursor-pointer ${
         hasActiveSession
-          ? "bg-emerald-500/5 hover:bg-emerald-500/10"
+          ? "bg-bg-secondary hover:bg-bg-secondary"
           : isDone
           ? "opacity-60 hover:opacity-90 hover:bg-bg-secondary/30"
           : "hover:bg-bg-secondary/40"
@@ -88,13 +109,13 @@ export function TaskItem({ task, onSelect, isPrioritySection }: TaskItemProps) {
           disabled={updateTaskMutation.isPending}
           className={`shrink-0 transition-transform active:scale-95 cursor-pointer ${
             isDone
-              ? "text-emerald-500 hover:text-emerald-600"
-              : "text-text-muted hover:text-emerald-500"
+              ? "text-text-primary hover:text-text-primary"
+              : "text-text-muted hover:text-text-primary"
           }`}
           title={isDone ? "Mark incomplete" : "Mark completed"}
         >
           {isDone ? (
-            <CheckCircle2 size={18} className="fill-emerald-500/20" />
+            <CheckCircle2 size={18} className="fill-text-primary/20" />
           ) : (
             <Circle size={18} />
           )}
@@ -104,7 +125,7 @@ export function TaskItem({ task, onSelect, isPrioritySection }: TaskItemProps) {
         <div className="flex flex-col min-w-0">
           <div className="flex items-center gap-2 flex-wrap min-w-0">
             <span
-              className={`text-sm font-medium truncate ${
+              className={`text-sm font-medium break-words line-clamp-2 ${
                 isDone
                   ? "text-text-muted line-through opacity-75"
                   : "text-text-primary hover:text-text-secondary"
@@ -123,7 +144,7 @@ export function TaskItem({ task, onSelect, isPrioritySection }: TaskItemProps) {
             )}
           </div>
           {task.description && (
-            <span className="text-xs text-text-muted truncate mt-0.5 font-normal">
+            <span className="text-xs text-text-muted break-words line-clamp-2 mt-0.5 font-normal">
               {task.description}
             </span>
           )}
@@ -132,18 +153,30 @@ export function TaskItem({ task, onSelect, isPrioritySection }: TaskItemProps) {
 
       {/* Secondary Metadata: Due Date, Priority, Planned, Actual, Sessions */}
       <div className="hidden md:flex items-center gap-3.5 text-xs shrink-0 mr-3">
-        {/* Due Date */}
-        {task.dueAt && (
+        {/* Scheduled / Due Date */}
+        {displayDate && (
           <span
             className={`inline-flex items-center gap-1 text-xs font-mono ${
               isOverdue && !isDone
                 ? "text-rose-600 dark:text-rose-400 font-medium"
+                : isRollover
+                ? "text-amber-600 dark:text-amber-400 font-medium"
                 : "text-text-muted"
             }`}
-            title={`Due: ${format(new Date(task.dueAt), "PPP")}`}
+            title={
+              isRollover
+                ? `Rollover: Originally due ${format(new Date(task.dueAt!), "PPP")}, scheduled for deliberate execution Today`
+                : task.dueAt
+                ? `Due: ${format(new Date(task.dueAt), "PPP")}`
+                : `Scheduled: ${displayDate}`
+            }
           >
-            <Calendar size={11} className="shrink-0" />
-            <span>{format(new Date(task.dueAt), "MMM d")}</span>
+            {isRollover ? (
+              <RotateCcw size={11} className="shrink-0" />
+            ) : (
+              <Calendar size={11} className="shrink-0" />
+            )}
+            <span>{isRollover ? "Rollover (Today)" : displayDate}</span>
           </span>
         )}
 
@@ -163,7 +196,7 @@ export function TaskItem({ task, onSelect, isPrioritySection }: TaskItemProps) {
 
         {/* Actual */}
         {actualMinutes > 0 && (
-          <span className={`font-mono w-10 text-right text-xs ${isDone ? "text-text-muted" : "text-emerald-600 dark:text-emerald-400 font-medium"}`}>
+          <span className={`font-mono w-10 text-right text-xs ${isDone ? "text-text-muted" : "text-text-primary font-medium"}`}>
             {formatDuration(actualMinutes)}
           </span>
         )}
@@ -180,8 +213,8 @@ export function TaskItem({ task, onSelect, isPrioritySection }: TaskItemProps) {
       <div className={`flex items-center gap-1.5 shrink-0 transition-opacity ${hasActiveSession ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
         {/* Active Session Indicator */}
         {hasActiveSession && (
-          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide uppercase bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 animate-pulse mr-1.5">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide uppercase bg-bg-secondary text-text-primary border border-border-strong animate-pulse mr-1.5">
+            <span className="h-1.5 w-1.5 rounded-full bg-text-primary" />
             Active
           </span>
         )}
@@ -213,6 +246,22 @@ export function TaskItem({ task, onSelect, isPrioritySection }: TaskItemProps) {
               </button>
             )}
           </div>
+        )}
+
+        {/* Move to Today CTA */}
+        {onRescheduleToday && !isDone && !isScheduledToday && isOverdue && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onRescheduleToday(task);
+            }}
+            className="inline-flex items-center gap-1 px-2 py-1 rounded bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 text-xs font-medium transition-colors cursor-pointer"
+            title="Reschedule to Today"
+          >
+            <Calendar size={11} />
+            <span className="hidden sm:inline">To Today</span>
+          </button>
         )}
 
         {/* Edit Button */}

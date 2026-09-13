@@ -3,6 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { DailyPlanUpsertInput } from "@repo/validation";
 import type { GoalOutcome } from "@repo/types";
+import { resolveProductiveDay, resolveTomorrowProductiveDay } from "@repo/types";
 import {
   getTodayPlan,
   getTomorrowPlan,
@@ -13,18 +14,25 @@ import {
 } from "../../lib/api/plans";
 
 export function useTodayPlan(date?: string) {
+  const timezone =
+    typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : undefined;
+  const localDate = date ?? resolveProductiveDay(new Date(), { timezone });
+
   return useQuery({
-    queryKey: ["plans", "today", date ?? "current"],
-    queryFn: () => getTodayPlan(date),
+    queryKey: ["plans", "today", localDate],
+    queryFn: () => getTodayPlan(localDate, { timezone }),
     refetchOnWindowFocus: true,
     staleTime: 15_000,
   });
 }
 
 export function useTomorrowPlan() {
+  const timezone =
+    typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : undefined;
+
   return useQuery({
     queryKey: ["plans", "tomorrow"],
-    queryFn: () => getTomorrowPlan(),
+    queryFn: () => getTomorrowPlan({ timezone }),
     refetchOnWindowFocus: true,
     staleTime: 30_000,
   });

@@ -46,7 +46,7 @@ export function TaskWorkloadHeader({ tasks }: TaskWorkloadHeaderProps) {
               Daily Workload & Intention
             </span>
             <span className="text-text-muted opacity-50">•</span>
-            <span className="text-xs text-text-primary font-medium flex items-center gap-1">
+            <span className="text-xs text-text-primary font-medium flex items-center gap-1" suppressHydrationWarning>
               <Calendar size={13} className="text-text-muted" />
               {currentDate}
             </span>
@@ -83,7 +83,7 @@ export function TaskWorkloadHeader({ tasks }: TaskWorkloadHeaderProps) {
         {/* Actual Effort */}
         <div className="p-3.5 rounded-[var(--radius-md)] bg-bg-secondary border border-border-subtle space-y-1">
           <div className="flex items-center gap-1.5 text-text-muted text-xs font-medium">
-            <Target size={13} className="text-emerald-500" />
+            <Target size={13} className="text-text-primary" />
             <span>Actual Session Time</span>
           </div>
           <div className="flex items-baseline gap-1.5">
@@ -111,7 +111,7 @@ export function TaskWorkloadHeader({ tasks }: TaskWorkloadHeaderProps) {
         {/* Completed */}
         <div className="p-3.5 rounded-[var(--radius-md)] bg-bg-secondary border border-border-subtle space-y-1">
           <div className="flex items-center gap-1.5 text-text-muted text-xs font-medium">
-            <CheckCircle2 size={13} className="text-emerald-500" />
+            <CheckCircle2 size={13} className="text-text-primary" />
             <span>Completion Rate</span>
           </div>
           <div className="flex items-baseline gap-1.5">
@@ -127,7 +127,7 @@ export function TaskWorkloadHeader({ tasks }: TaskWorkloadHeaderProps) {
       {tasks.length > 0 && (
         <div className="w-full bg-bg-secondary border border-border-subtle rounded-full h-1.5 overflow-hidden">
           <div
-            className="bg-emerald-500 h-full rounded-full transition-all duration-500 ease-out"
+            className="bg-text-primary h-full rounded-full transition-all duration-500 ease-out"
             style={{ width: `${progressPercent}%` }}
           />
         </div>

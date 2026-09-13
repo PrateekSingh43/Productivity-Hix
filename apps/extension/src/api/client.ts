@@ -1,7 +1,22 @@
-import type { LearningAssessment, Task, WorkSession, CheckIn, CheckInPatternCandidate, DayPlanResponse, DailyGoal, GoalOutcome } from "@repo/types";
+import type {
+  LearningAssessment,
+  Task,
+  WorkSession,
+  CheckIn,
+  CheckInPatternCandidate,
+  DayPlanResponse,
+  DailyGoal,
+  GoalOutcome,
+  UserPreferences,
+} from "@repo/types";
 import type { ActivitySummary } from "@repo/types";
 import type { TelemetryBatch, BatchIngestionResult } from "@repo/telemetry";
-import type { CheckInCreateInput, DailyPlanUpsertInput } from "@repo/validation";
+import {
+  type CheckInCreateInput,
+  type DailyPlanUpsertInput,
+  type UserPreferencesUpdateInput,
+  normalizeTimezone,
+} from "@repo/validation";
 import { getSettings } from "../storage/settings";
 
 export class ExtensionApiClient {
@@ -25,24 +40,44 @@ export class ExtensionApiClient {
     return response.json() as Promise<T>;
   }
 
+  getUserPreferences() {
+    return this.request<UserPreferences>("/api/user/preferences");
+  }
+
+  updateUserPreferences(data: UserPreferencesUpdateInput) {
+    return this.request<UserPreferences>("/api/user/preferences", {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
   getTasks() { return this.request<Task[]>("/api/tasks"); }
   getSessions() { return this.request<WorkSession[]>("/api/sessions"); }
   getAssessments() { return this.request<LearningAssessment[]>("/api/learning/assessments"); }
-  getTodaySummary() { return this.request<ActivitySummary>("/api/activity/summary"); }
+  getTodaySummary(timezone?: string) {
+    const rawTz =
+      timezone ??
+      (typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : undefined);
+    const tz = normalizeTimezone(rawTz);
+    const qs = tz ? `?timezone=${encodeURIComponent(tz)}` : "";
+    return this.request<ActivitySummary>(`/api/activity/summary${qs}`);
+  }
   getCheckIns() { return this.request<CheckIn[]>("/api/check-ins"); }
   getCheckInPatterns() { return this.request<CheckInPatternCandidate[]>("/api/check-ins/patterns"); }
   
   getTodayPlan(date?: string, timezone?: string) {
     const params = new URLSearchParams();
     if (date) params.set("date", date);
-    if (timezone) params.set("timezone", timezone);
+    const tz = normalizeTimezone(timezone);
+    if (tz) params.set("timezone", tz);
     const query = params.toString() ? `?${params.toString()}` : "";
     return this.request<DayPlanResponse>(`/api/plans/today${query}`);
   }
 
   getTomorrowPlan(timezone?: string) {
     const params = new URLSearchParams();
-    if (timezone) params.set("timezone", timezone);
+    const tz = normalizeTimezone(timezone);
+    if (tz) params.set("timezone", tz);
     const query = params.toString() ? `?${params.toString()}` : "";
     return this.request<DayPlanResponse>(`/api/plans/tomorrow${query}`);
   }
@@ -90,9 +125,26 @@ export class ExtensionApiClient {
       method: "POST",
       body: JSON.stringify({
         taskId: taskId ?? null,
+        targetDurationMinutes: durationMinutes ?? null,
         source: "extension_focus",
         notes: durationMinutes ? `Focus session: ${durationMinutes}m` : null,
       }),
+    });
+  }
+
+  getActiveSession() {
+    return this.request<WorkSession | null>("/api/sessions/active");
+  }
+
+  pauseSession(id: string) {
+    return this.request<WorkSession>(`/api/sessions/${id}/pause`, {
+      method: "POST",
+    });
+  }
+
+  resumeSession(id: string) {
+    return this.request<WorkSession>(`/api/sessions/${id}/resume`, {
+      method: "POST",
     });
   }
 
@@ -100,6 +152,12 @@ export class ExtensionApiClient {
     return this.request<WorkSession>(`/api/sessions/${id}`, {
       method: "PATCH",
       body: JSON.stringify({ endedAt: new Date().toISOString() }),
+    });
+  }
+
+  deleteSession(id: string) {
+    return this.request<{ success: boolean }>(`/api/sessions/${id}`, {
+      method: "DELETE",
     });
   }
 
@@ -184,6 +242,7 @@ export type ExtensionStatus = {
     quietHoursStart: string;
     quietHoursEnd: string;
     afterFocusReflection: boolean;
+    suppressCheckInsDuringFocus?: boolean;
     eligibility?: { eligible: boolean; reason: string; nextCheckInMs?: number; remainingSeconds?: number };
     pendingCheckIns?: number;
   };
@@ -228,6 +287,7 @@ export function updateSchedulerConfig(config: {
   quietHoursStart?: string;
   quietHoursEnd?: string;
   afterFocusReflection?: boolean;
+  suppressCheckInsDuringFocus?: boolean;
   resetCooldown?: boolean;
 }) {
   return chrome.runtime.sendMessage({ type: "update-scheduler-config", config }) as Promise<{

@@ -60,7 +60,7 @@ export function CheckInCard() {
 
       {submitted ? (
         <div className="p-6 rounded-[var(--radius-md)] bg-[#0c0d12] border border-[#1d212b] text-center space-y-2">
-          <div className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-emerald-400/10 text-emerald-400 border border-emerald-400/20">
+          <div className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-text-primary/10 text-text-primary border border-border-strong">
             <CheckCircle2 size={16} />
           </div>
           <h4 className="text-xs font-semibold text-[#f4f4f6]">Check-in Recorded</h4>
@@ -78,6 +78,7 @@ export function CheckInCard() {
             <input
               type="text"
               value={intent}
+              maxLength={500}
               onChange={(e) => setIntent(e.target.value)}
               className="w-full rounded-[var(--radius-sm)] border border-[#232733] bg-[#0c0d12] px-3 py-1.5 text-xs text-[#f4f4f6] outline-none focus:border-[#707df7] transition-colors"
               placeholder="What were you focused on?"
@@ -144,6 +145,7 @@ export function CheckInCard() {
             <input
               type="text"
               value={notes}
+              maxLength={500}
               onChange={(e) => setNotes(e.target.value)}
               placeholder="e.g. Switched to documentation review mid-session"
               className="w-full rounded-[var(--radius-sm)] border border-[#232733] bg-[#0c0d12] px-3 py-1.5 text-xs text-[#f4f4f6] outline-none focus:border-[#707df7] transition-colors"

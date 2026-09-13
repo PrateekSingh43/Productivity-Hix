@@ -65,31 +65,34 @@ const navGroups: NavGroup[] = [
     title: "SYSTEM",
     items: [
       { href: "/devices", label: "Devices", icon: Laptop, isLiveDevice: true },
-      { href: "/settings", label: "Settings", icon: Settings },
     ],
   },
 ];
 
-export function Sidebar() {
+export function Sidebar({ isMobile = false }: { isMobile?: boolean }) {
   const pathname = usePathname();
   const telemetry = useLiveTelemetry();
-  const { isCollapsed, toggleSidebar } = useSidebar();
+  const { isCollapsed, toggleSidebar, setIsMobileOpen } = useSidebar();
+
+  const effectiveCollapsed = isMobile ? false : isCollapsed;
 
   // Honest connection indicator: true only if WebSocket is live
   const isDeviceConnected = telemetry.connected;
 
+  const isSettingsActive = pathname === "/settings" || pathname.startsWith("/settings/");
+
   return (
     <aside
       className={`${
-        isCollapsed ? "w-16" : "w-[240px]"
+        effectiveCollapsed ? "w-16" : "w-[240px]"
       } border-r border-border-default bg-bg-inset flex flex-col h-screen sticky top-0 shrink-0 select-none z-20 transition-[width] duration-200 ease-in-out`}
       aria-label="Application Navigation"
     >
       {/* Brand Header: Standardized h-14 to align with top bar divider */}
-      <div className="h-14 px-3.5 flex items-center justify-between border-b border-border-subtle shrink-0">
+      <div className={`h-14 flex items-center border-b border-border-subtle shrink-0 ${effectiveCollapsed ? 'justify-center' : 'justify-between px-3.5'}`}>
         <Link
           href="/"
-          className="flex items-center gap-2.5 group overflow-hidden"
+          className={`flex items-center gap-2.5 group overflow-hidden ${effectiveCollapsed ? 'justify-center w-full' : ''}`}
           title="ProductiveHix"
         >
           <div className="h-6 w-6 rounded-[var(--radius-sm)] overflow-hidden flex items-center justify-center shrink-0 transition-transform group-hover:scale-105">
@@ -99,31 +102,33 @@ export function Sidebar() {
               className="w-5 h-5 rounded-[var(--radius-sm)] object-contain"
             />
           </div>
-          {!isCollapsed && (
+          {!effectiveCollapsed && (
             <span className="text-sm font-semibold tracking-tight text-text-primary truncate">
               ProductiveHix
             </span>
           )}
         </Link>
-        <button
-          type="button"
-          onClick={toggleSidebar}
-          className="p-1.5 rounded-md text-text-tertiary hover:text-text-primary hover:bg-bg-secondary transition-colors cursor-pointer"
-          title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-          aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-        >
-          {isCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
-        </button>
+        {!isMobile && !effectiveCollapsed && (
+          <button
+            type="button"
+            onClick={toggleSidebar}
+            className="p-1.5 rounded-md text-text-tertiary hover:text-text-primary hover:bg-bg-secondary transition-colors cursor-pointer"
+            title="Collapse sidebar"
+            aria-label="Collapse sidebar"
+          >
+            <PanelLeftClose size={16} />
+          </button>
+        )}
       </div>
 
       {/* Navigation Groups */}
       <nav
-        className={`flex-1 ${isCollapsed ? "px-2" : "px-2.5"} py-3 space-y-4 overflow-y-auto overflow-x-hidden`}
+        className={`flex-1 ${effectiveCollapsed ? "px-2" : "px-2.5"} py-3 space-y-4 overflow-y-auto overflow-x-hidden`}
         aria-label="Main Navigation"
       >
         {navGroups.map((group) => (
           <div key={group.title} className="space-y-0.5">
-            {!isCollapsed && (
+            {!effectiveCollapsed && (
               <div className="px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-text-tertiary truncate">
                 {group.title}
               </div>
@@ -139,9 +144,12 @@ export function Sidebar() {
                 <Link
                   key={item.href}
                   href={item.href}
-                  title={isCollapsed ? item.label : undefined}
+                  title={effectiveCollapsed ? item.label : undefined}
+                  onClick={() => {
+                    if (isMobile) setIsMobileOpen(false);
+                  }}
                   className={`group relative flex items-center ${
-                    isCollapsed ? "justify-center px-2 py-2" : "justify-between px-2.5 py-1.5"
+                    effectiveCollapsed ? "justify-center px-2 py-2" : "justify-between px-2.5 py-1.5"
                   } rounded-[var(--radius-md)] text-[13px] font-medium transition-colors ${
                     isActive
                       ? "bg-bg-tertiary text-text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
@@ -153,7 +161,7 @@ export function Sidebar() {
                     <div className="absolute left-0 top-1/2 -translate-y-1/2 h-3.5 w-[2px] rounded-r-full bg-accent-default" />
                   )}
 
-                  <div className={`flex items-center ${isCollapsed ? "justify-center" : "gap-2.5"} truncate`}>
+                  <div className={`flex items-center ${effectiveCollapsed ? "justify-center" : "gap-2.5"} truncate`}>
                     <Icon
                       size={15}
                       className={`shrink-0 transition-colors ${
@@ -162,11 +170,11 @@ export function Sidebar() {
                           : "text-text-tertiary group-hover:text-text-secondary"
                       }`}
                     />
-                    {!isCollapsed && <span className="truncate">{item.label}</span>}
+                    {!effectiveCollapsed && <span className="truncate">{item.label}</span>}
                   </div>
 
                   {/* Device live status dot or badge */}
-                  {isCollapsed ? (
+                  {effectiveCollapsed ? (
                     item.isLiveDevice ? (
                       <span
                         className={`absolute top-1.5 right-1.5 h-1.5 w-1.5 rounded-full ${
@@ -198,8 +206,8 @@ export function Sidebar() {
       </nav>
 
       {/* Bottom Profile / Quick Status */}
-      <div className={`${isCollapsed ? "p-2" : "p-3"} border-t border-border-subtle bg-bg-inset shrink-0`}>
-        {isCollapsed ? (
+      <div className={`${effectiveCollapsed ? "p-2" : "p-3"} border-t border-border-subtle bg-bg-inset shrink-0`}>
+        {effectiveCollapsed ? (
           <div className="flex flex-col items-center gap-2">
             <div
               className="h-7 w-7 rounded-full bg-bg-tertiary border border-border-strong flex items-center justify-center text-[11px] font-semibold text-text-primary"
@@ -209,7 +217,14 @@ export function Sidebar() {
             </div>
             <Link
               href="/settings"
-              className="text-text-tertiary hover:text-text-primary transition-colors p-1.5 rounded hover:bg-bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-default"
+              onClick={() => {
+                if (isMobile) setIsMobileOpen(false);
+              }}
+              className={`transition-colors p-1.5 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-default ${
+                isSettingsActive
+                  ? "bg-bg-tertiary text-accent-default shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
+                  : "text-text-tertiary hover:bg-bg-secondary hover:text-text-primary"
+              }`}
               title="Settings"
               aria-label="Settings"
             >
@@ -229,7 +244,14 @@ export function Sidebar() {
             </div>
             <Link
               href="/settings"
-              className="text-text-tertiary hover:text-text-primary transition-colors p-1 rounded hover:bg-bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-default"
+              onClick={() => {
+                if (isMobile) setIsMobileOpen(false);
+              }}
+              className={`transition-colors p-1.5 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-default ${
+                isSettingsActive
+                  ? "bg-bg-tertiary text-accent-default shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
+                  : "text-text-tertiary hover:bg-bg-secondary hover:text-text-primary"
+              }`}
               title="Settings"
               aria-label="Settings"
             >

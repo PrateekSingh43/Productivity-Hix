@@ -148,16 +148,16 @@ export async function createCheckIn(
     state: input.state || null,
     energy: input.energy || null,
     focus: input.focus || null,
-    note: input.note ? input.note.slice(0, 500) : null,
+    note: input.note ? input.note.trim().slice(0, 500) : null,
     questionVersion: input.questionVersion || "v1",
     source: input.source || "extension_hourly",
     deeperAnswers: input.deeperAnswers ? (input.deeperAnswers as any) : null,
-    // Legacy fields populated sensibly
-    intent: input.intent || (input.activityAssessment ? `Reflection: ${input.activityAssessment}` : "Hourly reflection"),
+    // Legacy fields populated sensibly (strictly capped at DB column limit 500 chars)
+    intent: (input.intent || (input.activityAssessment ? `Reflection: ${input.activityAssessment}` : "Hourly reflection")).slice(0, 500),
     progress: input.progress !== undefined ? input.progress : input.alignment !== "no",
-    blocker: input.blocker || (input.reasons && input.reasons.length > 0 ? input.reasons.join(", ") : null),
+    blocker: (input.blocker || (input.reasons && input.reasons.length > 0 ? input.reasons.join(", ") : null))?.slice(0, 500) ?? null,
     productive: input.productive !== undefined ? input.productive : input.activityAssessment === "productive" || input.activityAssessment === "deep_focus",
-    outcome: input.outcome || input.note || null,
+    outcome: (input.outcome ? input.outcome.trim() : (input.note ? input.note.trim() : null))?.slice(0, 500) ?? null,
   };
 
   const created = await getDb().checkIn.create({ data });

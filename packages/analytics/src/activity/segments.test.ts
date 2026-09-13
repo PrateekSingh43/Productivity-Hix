@@ -222,3 +222,124 @@ test("overlapping intervals clip properly and summary duration maintains invaria
     "Summary categories must sum exactly to totalTrackedMs",
   );
 });
+
+test("AFK break strictly inside an ongoing active window splits the window into non-overlapping segments", () => {
+  const baseTime = new Date("2026-09-12T20:31:00.000Z").getTime();
+  // Window: 20:31 to 20:48 (17m = 1020s)
+  // AFK Break: 20:32 to 20:37 (5m = 300s) -> strictly INSIDE window
+  const rawEvents: RawActivityInput[] = [
+    {
+      externalId: "ev-brave",
+      timestamp: new Date(baseTime).toISOString(),
+      duration: 1020,
+      watcher: "active_window",
+      data: { application: "brave.exe", windowTitle: "ProductiveHix" },
+    },
+    {
+      externalId: "ev-afk",
+      timestamp: new Date(baseTime + 60_000).toISOString(),
+      duration: 300,
+      watcher: "afk",
+      data: { status: "afk" },
+    },
+  ];
+
+  const segments = aggregateActivitySegments(rawEvents);
+  assert.equal(segments.length, 3, "Must split into before-break, AFK break, and after-break segments");
+
+  // Segment 1: Brave Browser before break (20:31 to 20:32 = 60s)
+  assert.equal(segments[0]!.application, "Brave Browser");
+  assert.equal(segments[0]!.category, "browser");
+  assert.equal(segments[0]!.durationSeconds, 60);
+
+  // Segment 2: Away from Keyboard (20:32 to 20:37 = 300s)
+  assert.equal(segments[1]!.application, "Away from Keyboard");
+  assert.equal(segments[1]!.category, "break");
+  assert.equal(segments[1]!.durationSeconds, 300);
+
+  // Segment 3: Brave Browser after break (20:37 to 20:48 = 660s)
+  assert.equal(segments[2]!.application, "Brave Browser");
+  assert.equal(segments[2]!.category, "browser");
+  assert.equal(segments[2]!.durationSeconds, 660);
+
+  // Invariant verification: Total duration must exactly equal elapsed wall-clock time
+  const summary = computeTimelineSummary(segments);
+  assert.equal(summary.totalTrackedMs, 1020_000);
+  assert.equal(summary.browserMs, 720_000); // 60s + 660s = 720s
+  assert.equal(summary.breakMs, 300_000);   // 300s
+  assert.equal(
+    summary.browserMs + summary.breakMs,
+    summary.totalTrackedMs,
+    "Categories must sum exactly to totalTrackedMs without any double counting or overlap",
+  );
+});
+
+test("extended overnight AFK (> maxBreakMs, e.g. 10h) is excluded from work breaks and summary.breakMs", () => {
+  // 12:02 AM to 10:17 AM (10h 15m = 36,949s)
+  const baseTime = new Date("2026-09-12T18:32:00.000Z").getTime();
+  const rawEvents: RawActivityInput[] = [
+    {
+      externalId: "ev-overnight-afk",
+      timestamp: new Date(baseTime).toISOString(),
+      duration: 36949, // 10h 15m
+      watcher: "afk",
+      data: { status: "afk" },
+    },
+  ];
+
+  const segments = aggregateActivitySegments(rawEvents);
+  assert.equal(segments.length, 0, "Overnight sleep / machine hibernation must NOT be treated as a work break segment");
+
+  const summary = computeTimelineSummary(segments);
+  assert.equal(summary.breakMs, 0, "breakMs must be 0 for overnight absence");
+  assert.equal(summary.totalTrackedMs, 0, "totalTrackedMs must be 0 for overnight absence");
+});
+
+test("AFK during configured sleep window (02:00 to 08:30) is excluded from work breaks", () => {
+  // 03:00 AM to 04:30 AM IST (1.5h = 5400s) -> within maxBreakMs (2h), but strictly during sleepWindow
+  // 03:00 AM IST = 21:30 UTC previous day
+  const baseTime = new Date("2026-09-12T21:30:00.000Z").getTime();
+  const rawEvents: RawActivityInput[] = [
+    {
+      externalId: "ev-sleep-afk",
+      timestamp: new Date(baseTime).toISOString(),
+      duration: 5400, // 90 min
+      watcher: "afk",
+      data: { status: "afk" },
+    },
+  ];
+
+  const segments = aggregateActivitySegments(rawEvents, {
+    sleepWindow: { start: "02:00", end: "08:30", timezone: "Asia/Kolkata" },
+  });
+  assert.equal(segments.length, 0, "Inactivity during quiet/sleep hours must not generate work break segments");
+
+  const summary = computeTimelineSummary(segments);
+  assert.equal(summary.breakMs, 0);
+});
+
+test("daytime active work break (e.g. 15m coffee break) is correctly recognized and summarized", () => {
+  // 02:00 PM to 02:15 PM IST (15m = 900s)
+  const baseTime = new Date("2026-09-13T08:30:00.000Z").getTime();
+  const rawEvents: RawActivityInput[] = [
+    {
+      externalId: "ev-coffee-break",
+      timestamp: new Date(baseTime).toISOString(),
+      duration: 900, // 15 min
+      watcher: "afk",
+      data: { status: "afk" },
+    },
+  ];
+
+  const segments = aggregateActivitySegments(rawEvents, {
+    minBreakMs: 60_000,
+    sleepWindow: { start: "02:00", end: "08:30", timezone: "Asia/Kolkata" },
+  });
+  assert.equal(segments.length, 1);
+  assert.equal(segments[0]!.category, "break");
+  assert.equal(segments[0]!.durationSeconds, 900);
+
+  const summary = computeTimelineSummary(segments);
+  assert.equal(summary.breakMs, 900_000);
+});
+

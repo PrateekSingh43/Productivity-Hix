@@ -3,9 +3,7 @@ import { test } from "node:test";
 import { extractSessionFeatures } from "./session";
 import { extractDayFeatures } from "./day";
 import { extractTransitionFeatures } from "./transitions";
-import { extractCheckInFeatures } from "./check-in";
-import { extractTaskFeatures } from "./task";
-import type { CheckIn, Task, TimelineSegment, WorkSession } from "@repo/types";
+import type { TimelineSegment, WorkSession } from "@repo/types";
 
 /**
  * Phase 2 Hypothesis Test:
@@ -69,7 +67,10 @@ test("hypothesis H2: analytical detectors operate on canonical feature model wit
   const dayFeat = extractDayFeatures({
     date: "2026-01-01",
     sessionFeatures: [sessionFeat],
-    tasks: [{ status: "done" }, { status: "todo" }],
+    tasks: [
+      { status: "done", createdAt: "2026-01-01T09:00:00.000Z" },
+      { status: "todo", createdAt: "2026-01-01T10:00:00.000Z" },
+    ],
   });
 
   // Detector 1: Focus Fragmentation Detector

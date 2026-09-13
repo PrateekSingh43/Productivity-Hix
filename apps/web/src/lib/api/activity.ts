@@ -1,8 +1,12 @@
 import type { ActivitySummary, TimelineResponse } from "@repo/types";
 import { apiFetch } from "./client";
 
-export function getActivitySummary() {
-  return apiFetch<ActivitySummary>("/api/activity/summary");
+export function getActivitySummary(timezone?: string) {
+  const tz =
+    timezone ??
+    (typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : undefined);
+  const qs = tz ? `?timezone=${encodeURIComponent(tz)}` : "";
+  return apiFetch<ActivitySummary>(`/api/activity/summary${qs}`);
 }
 
 export function syncActivity() {

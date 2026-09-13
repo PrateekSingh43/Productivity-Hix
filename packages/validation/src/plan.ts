@@ -5,10 +5,11 @@ export const goalOutcomeSchema = z
   .nullable();
 
 export const goalInputSchema = z.object({
-  id: z.string().uuid().optional(),
+  id: z.string().min(1).optional(),
   title: z.string().trim().min(1, "Goal title is required").max(300),
   order: z.number().int().optional().default(0),
   outcome: goalOutcomeSchema.optional(),
+  newTasks: z.array(z.string().trim().min(1)).optional(),
 });
 
 export const dailyPlanUpsertSchema = z.object({

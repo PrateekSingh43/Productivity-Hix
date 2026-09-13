@@ -15,6 +15,7 @@ export {
   extractDayFeatures,
   type DayFeatures,
   type DayFeatureInput,
+  type DayTaskInput,
 } from "./day";
 
 export {

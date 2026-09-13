@@ -114,8 +114,11 @@ export function extractSessionFeatures(
     .filter((i) => i.category === "leisure")
     .reduce((sum, i) => sum + i.durationSeconds, 0);
 
-  // Idle duration is total elapsed session duration minus non-idle active work
-  const idleDurationSeconds = Math.max(0, durationSeconds - activeDurationSeconds);
+  // Idle duration represents explicit AFK/break intervals within the session window.
+  // Unobserved gaps between events are NOT conflated with idle.
+  const idleDurationSeconds = intervals
+    .filter((i) => i.category === "break")
+    .reduce((sum, i) => sum + i.durationSeconds, 0);
 
   // Context counts & transitions
   const uniqueContexts = new Set(activeIntervals.map((i) => i.context));

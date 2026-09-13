@@ -27,7 +27,7 @@ function formatIso(iso?: string | null): string {
   if (!iso) return "None";
   try {
     const d = new Date(iso);
-    return `${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`;
+    return `${d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit", hour12: true })}`;
   } catch {
     return iso;
   }

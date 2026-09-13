@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { getTasks, getTask, getTaskObservedActivity, getSessions } from "../../lib/api";
+import { getTasks, getTask, getTaskObservedActivity, getSessions, getActiveSession } from "../../lib/api";
 
 export function useTasksList() {
   return useQuery({
@@ -34,5 +34,14 @@ export function useSessionsList() {
     queryFn: getSessions,
     staleTime: 5_000,
     refetchInterval: 5_000,
+  });
+}
+
+export function useActiveSession() {
+  return useQuery({
+    queryKey: ["sessions", "active"],
+    queryFn: () => getActiveSession(),
+    staleTime: 2_000,
+    refetchInterval: 3_000,
   });
 }

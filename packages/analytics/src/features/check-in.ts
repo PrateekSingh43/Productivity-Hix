@@ -33,10 +33,7 @@ export function extractCheckInFeatures(
   }
 
   const hasBlocker = Boolean(checkIn.blocker && checkIn.blocker.trim().length > 0);
-  const hasOutcome = Boolean(
-    (checkIn.outcome && checkIn.outcome.trim().length > 0) ||
-      (checkIn.note && checkIn.note.trim().length > 0),
-  );
+  const hasOutcome = Boolean(checkIn.outcome && checkIn.outcome.trim().length > 0);
 
   return {
     checkInId: checkIn.id,

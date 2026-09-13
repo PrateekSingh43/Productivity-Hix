@@ -68,16 +68,16 @@ export function CurrentFocusCard({
 
     return (
       <div
-        className={`rounded-xl border border-emerald-500/30 bg-bg-card p-6 sm:p-7 space-y-5 ${className}`}
+        className={`rounded-xl border border-border-strong bg-bg-card p-6 sm:p-7 space-y-5 ${className}`}
       >
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <span className="relative flex h-3 w-3">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500" />
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-text-primary opacity-75" />
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-text-primary" />
             </span>
             <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+              <span className="text-xs font-semibold text-text-primary">
                 Focus Session Active
               </span>
               {selectedTask.goalTitle && (
@@ -114,7 +114,7 @@ export function CurrentFocusCard({
         {/* Realtime Observed Telemetry */}
         {observedContext && (
           <div className="flex items-center gap-2 text-xs text-text-secondary bg-bg-secondary/60 border border-border-subtle px-3.5 py-2 rounded-lg">
-            <Radio size={12} className="text-emerald-500 shrink-0 animate-pulse" />
+            <Radio size={12} className="text-text-primary shrink-0 animate-pulse" />
             <span className="truncate">
               Live Observation: <strong className="text-text-primary font-medium">{observedContext}</strong>
             </span>
@@ -137,7 +137,7 @@ export function CurrentFocusCard({
             <button
               type="button"
               onClick={onComplete}
-              className="inline-flex items-center gap-1.5 text-xs font-medium bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-md transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1.5 text-xs font-medium bg-text-primary hover:opacity-90 text-bg-default px-4 py-2 rounded-md transition-colors cursor-pointer"
             >
               <CheckCircle2 size={13} />
               <span>Complete Focus</span>

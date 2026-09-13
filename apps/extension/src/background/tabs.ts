@@ -162,6 +162,25 @@ export class TabTracker {
    */
   async handlePeriodicHeartbeat(): Promise<BrowserActivityEvent | null> {
     await this.loadPersistedState();
+
+    // Verify whether the browser window is physically focused
+    try {
+      if (typeof chrome !== "undefined" && chrome.windows?.getLastFocused) {
+        const lastWin = await chrome.windows.getLastFocused();
+        if (lastWin && !lastWin.focused) {
+          if (this.windowFocused && this.currentUrl && this.currentTitle) {
+            const event = this.createEvent(this.currentUrl, this.currentTitle, this.activeStartTime, Date.now());
+            this.windowFocused = false;
+            await this.savePersistedState();
+            return event;
+          }
+          this.windowFocused = false;
+          await this.savePersistedState();
+          return null;
+        }
+      }
+    } catch {}
+
     if (!this.windowFocused || !this.currentUrl || !this.currentTitle) return null;
 
     const now = Date.now();

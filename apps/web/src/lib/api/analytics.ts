@@ -8,6 +8,10 @@ export type DailyAnalytics = {
   checkIns: number;
   patterns: ProductivityPattern[];
 };
-export function getDailyAnalytics() {
-  return apiFetch<DailyAnalytics>("/api/analytics/daily");
+export function getDailyAnalytics(timezone?: string) {
+  const tz =
+    timezone ??
+    (typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : undefined);
+  const qs = tz ? `?timezone=${encodeURIComponent(tz)}` : "";
+  return apiFetch<DailyAnalytics>(`/api/analytics/daily${qs}`);
 }

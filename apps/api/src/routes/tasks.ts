@@ -15,7 +15,12 @@ tasksRouter.use(requireAuth);
 
 tasksRouter.get("/", async (request, response, next) => {
   try {
-    response.json(await listTasks(userIdFrom(request)));
+    const filters = {
+      productiveDate: (request.query.productiveDate as string) || undefined,
+      status: (request.query.status as any) || undefined,
+      goalId: request.query.goalId === "null" ? null : (request.query.goalId as string) || undefined,
+    };
+    response.json(await listTasks(userIdFrom(request), filters));
   } catch (error) {
     next(error);
   }

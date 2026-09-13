@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { sha256Hex } from './sha256';
 import type {
   TargetScope,
   ActivityModality,
@@ -408,5 +408,6 @@ export function computeObservationSetFingerprint(input: FingerprintInput): strin
   ].join('|');
 
   // 4. Return SHA256 hex digest
-  return createHash('sha256').update(canonicalPayload, 'utf8').digest('hex');
+  return sha256Hex(canonicalPayload);
 }
+

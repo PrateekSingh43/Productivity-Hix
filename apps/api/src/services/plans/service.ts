@@ -134,6 +134,7 @@ export async function upsertPlan(
       title: string;
       order?: number;
       outcome?: GoalOutcome | null;
+      newTasks?: string[];
     }>;
   },
 ): Promise<DayPlanResponse> {
@@ -180,6 +181,8 @@ export async function upsertPlan(
   for (let i = 0; i < submittedGoals.length; i++) {
     const g = submittedGoals[i];
     const order = g.order ?? i;
+    let targetGoalId = g.id;
+
     if (g.id && existingGoals.some((eg) => eg.id === g.id)) {
       await db.dailyGoal.update({
         where: { id: g.id, userId },
@@ -190,7 +193,7 @@ export async function upsertPlan(
         },
       });
     } else {
-      await db.dailyGoal.create({
+      const newGoal = await db.dailyGoal.create({
         data: {
           planId: plan.id,
           userId,
@@ -198,6 +201,21 @@ export async function upsertPlan(
           order,
           outcome: g.outcome ?? null,
         },
+      });
+      targetGoalId = newGoal.id;
+    }
+
+    if (g.newTasks && g.newTasks.length > 0 && targetGoalId) {
+      await db.task.createMany({
+        data: g.newTasks.map((t) => ({
+          userId,
+          goalId: targetGoalId,
+          title: t,
+          productiveDate: input.date,
+          status: "todo",
+          priority: "medium",
+          plannedDurationMinutes: 30, // Default duration
+        })),
       });
     }
   }

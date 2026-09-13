@@ -49,11 +49,11 @@ export function DailyHero({
         {/* Header line */}
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center gap-2">
-            <span className="text-[11px] font-semibold uppercase tracking-widest text-[#707df7]">
+            <span className="text-[11px] font-semibold uppercase tracking-widest text-[#707df7]" suppressHydrationWarning>
               {greeting}, PRATEEK
             </span>
             <span className="text-[#4b5162] text-xs">•</span>
-            <span className="text-xs text-[#8f96a8] font-normal">{dateString}</span>
+            <span className="text-xs text-[#8f96a8] font-normal" suppressHydrationWarning>{dateString}</span>
           </div>
 
           <p className="text-sm md:text-[15px] text-[#9ca3af] mt-0.5 max-w-2xl leading-relaxed">
@@ -134,7 +134,7 @@ export function DailyHero({
               <span className="text-2xl md:text-3xl font-semibold tracking-tight text-[#f4f4f6]">
                 78%
               </span>
-              <span className="text-xs text-emerald-400 font-medium">stable</span>
+              <span className="text-xs text-text-primary font-medium">stable</span>
             </div>
             <span className="text-[10px] text-[#4b5162] mt-0.5">2 reviews due today</span>
           </div>

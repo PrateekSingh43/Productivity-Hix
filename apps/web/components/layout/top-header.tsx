@@ -26,7 +26,7 @@ export function TopHeader({ title, subtitle }: TopHeaderProps) {
             {title}
           </h1>
           <span className="text-[var(--foreground-muted)] text-xs">/</span>
-          <span className="text-xs text-[var(--foreground-muted)] font-normal">
+          <span className="text-xs text-[var(--foreground-muted)] font-normal" suppressHydrationWarning>
             {subtitle || currentDate}
           </span>
         </div>
@@ -36,11 +36,11 @@ export function TopHeader({ title, subtitle }: TopHeaderProps) {
           {isConnected ? (
             <Link
               href="/devices"
-              className="flex items-center gap-2 px-2.5 py-1 rounded-md bg-[var(--background-subtle)] border border-[var(--border-subtle)] text-xs font-medium text-[var(--foreground-primary)] hover:border-[var(--foreground-muted)] transition-colors"
+              className="hidden sm:flex items-center gap-2 px-2.5 py-1 rounded-md bg-[var(--background-subtle)] border border-[var(--border-subtle)] text-xs font-medium text-[var(--foreground-primary)] hover:border-[var(--foreground-muted)] transition-colors"
             >
               <span
                 className={`h-1.5 w-1.5 rounded-full ${
-                  isRecentlyActive ? "bg-emerald-400" : "bg-emerald-500/60"
+                  isRecentlyActive ? "bg-text-primary" : "bg-text-primary/60"
                 }`}
               />
               <span>Desktop connected</span>
@@ -55,7 +55,7 @@ export function TopHeader({ title, subtitle }: TopHeaderProps) {
           ) : (
             <Link
               href="/devices"
-              className="flex items-center gap-2 px-2.5 py-1 rounded-md bg-[var(--background-subtle)] border border-[var(--border-subtle)] text-xs font-medium text-[var(--foreground-muted)] hover:text-[var(--foreground-primary)] transition-colors"
+              className="hidden sm:flex items-center gap-2 px-2.5 py-1 rounded-md bg-[var(--background-subtle)] border border-[var(--border-subtle)] text-xs font-medium text-[var(--foreground-muted)] hover:text-[var(--foreground-primary)] transition-colors"
             >
               <span className="h-1.5 w-1.5 rounded-full bg-zinc-600" />
               <span>Desktop watcher offline</span>

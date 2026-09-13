@@ -1,9 +1,9 @@
 import { productivityPatterns, taskCompletionRate } from "@repo/analytics";
 import { getDb } from "../../lib/prisma";
-import { activityInRange, activitySummary, utcDayRange } from "../activity/service";
+import { activityInRange, activitySummary, localDayRange } from "../activity/service";
 
-export async function dailyAnalytics(userId: string) {
-  const range = utcDayRange();
+export async function dailyAnalytics(userId: string, date?: string, timezone?: string) {
+  const range = localDayRange(date, timezone);
   const [activity, tasks, checkIns] = await Promise.all([
     activitySummary(userId, range.from, range.to),
     getDb().task.findMany({

@@ -62,8 +62,8 @@ export class ActivityWatchSyncEngine {
             data: { app: raw.data?.app ?? "", title: raw.data?.title ?? "" },
           });
 
-          if (!this.dedupeFilter.has(norm.eventId)) {
-            this.dedupeFilter.add(norm.eventId);
+          if (!this.dedupeFilter.has(norm.eventId, norm.durationMs)) {
+            this.dedupeFilter.add(norm.eventId, norm.durationMs);
             eventsToEnqueue.push(norm);
           }
 
