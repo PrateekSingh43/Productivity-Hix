@@ -985,4 +985,202 @@ describe("Phase 3: Evidence & Observation Model Invariants", () => {
     );
     assert.equal(run1.blocks[0]!.observation?.application, "Alpha.exe");
   });
+
+  it("Test A: Check-in ordering — competing check-ins with identical boundaries produce deterministic output under input reversal", () => {
+    const ciA: CheckIn = {
+      id: "ci-1",
+      userId: "u1",
+      workSessionId: null,
+      taskId: null,
+      windowStart: "2026-09-14T10:00:00.000Z",
+      windowEnd: "2026-09-14T10:30:00.000Z",
+      activityAssessment: "focused",
+      alignment: "yes",
+      reasons: [],
+      state: "calm",
+      energy: "high",
+      focus: "focused",
+      note: "Note A",
+      questionVersion: "v1",
+      source: "extension",
+      intent: null,
+      progress: true,
+      blocker: null,
+      productive: true,
+      outcome: null,
+      createdAt: "2026-09-14T10:30:00.000Z",
+    };
+
+    const ciB: CheckIn = {
+      id: "ci-2",
+      userId: "u1",
+      workSessionId: null,
+      taskId: null,
+      windowStart: "2026-09-14T10:00:00.000Z",
+      windowEnd: "2026-09-14T10:30:00.000Z",
+      activityAssessment: "learning",
+      alignment: "no",
+      reasons: [],
+      state: "calm",
+      energy: "low",
+      focus: "scattered",
+      note: "Note B",
+      questionVersion: "v1",
+      source: "extension",
+      intent: null,
+      progress: false,
+      blocker: null,
+      productive: false,
+      outcome: null,
+      createdAt: "2026-09-14T10:30:00.000Z",
+    };
+
+    const runA = buildEvidenceTimeline({
+      windowStart,
+      windowEnd,
+      checkIns: [ciA, ciB],
+    });
+
+    const runB = buildEvidenceTimeline({
+      windowStart,
+      windowEnd,
+      checkIns: [ciB, ciA],
+    });
+
+    assert.deepEqual(runA, runB, "Check-in ordering must be invariant to input array order");
+    assert.equal(runA.blocks[0]!.report?.note, "Note A", "Stable tie-breaker selects ci-1 deterministically");
+  });
+
+  it("Test B: Gap explanation ordering — competing explanations with identical boundaries produce deterministic output under input reversal", () => {
+    const gapA: UserGapExplanation = {
+      id: "gap-1",
+      gapId: "g-1",
+      userId: "u1",
+      startTime: "2026-09-14T10:00:00.000Z",
+      endTime: "2026-09-14T10:30:00.000Z",
+      explanationType: "away",
+      description: "Doctor appointment",
+      offlineWorkContext: null,
+      associatedTaskId: null,
+      associatedGoalId: null,
+      createdAt: "2026-09-14T10:30:00.000Z",
+    };
+
+    const gapB: UserGapExplanation = {
+      id: "gap-2",
+      gapId: "g-2",
+      userId: "u1",
+      startTime: "2026-09-14T10:00:00.000Z",
+      endTime: "2026-09-14T10:30:00.000Z",
+      explanationType: "away",
+      description: "Phone call",
+      offlineWorkContext: null,
+      associatedTaskId: null,
+      associatedGoalId: null,
+      createdAt: "2026-09-14T10:30:00.000Z",
+    };
+
+    const runA = buildEvidenceTimeline({
+      windowStart,
+      windowEnd,
+      gapExplanations: [gapA, gapB],
+    });
+
+    const runB = buildEvidenceTimeline({
+      windowStart,
+      windowEnd,
+      gapExplanations: [gapB, gapA],
+    });
+
+    assert.deepEqual(runA, runB, "Gap explanation ordering must be invariant to input array order");
+    assert.equal(runA.blocks[0]!.report?.gapReason, "Doctor appointment", "Stable tie-breaker selects gap-1 deterministically");
+  });
+
+  it("Test C: Work-session ordering — competing sessions with identical boundaries produce deterministic intention under input reversal", () => {
+    const sessA: WorkSession = {
+      id: "sess-1",
+      userId: "u1",
+      taskId: "task-alpha",
+      taskTitle: "Alpha Task",
+      goalTitle: "Goal 1",
+      startedAt: "2026-09-14T10:00:00.000Z",
+      endedAt: "2026-09-14T10:30:00.000Z",
+      durationSeconds: 1800,
+      source: "manual",
+    };
+
+    const sessB: WorkSession = {
+      id: "sess-2",
+      userId: "u1",
+      taskId: "task-beta",
+      taskTitle: "Beta Task",
+      goalTitle: "Goal 2",
+      startedAt: "2026-09-14T10:00:00.000Z",
+      endedAt: "2026-09-14T10:30:00.000Z",
+      durationSeconds: 1800,
+      source: "manual",
+    };
+
+    const runA = buildEvidenceTimeline({
+      windowStart,
+      windowEnd,
+      sessions: [sessA, sessB],
+    });
+
+    const runB = buildEvidenceTimeline({
+      windowStart,
+      windowEnd,
+      sessions: [sessB, sessA],
+    });
+
+    assert.deepEqual(runA, runB, "Work session ordering must be invariant to input array order");
+    assert.equal(runA.blocks[0]!.intention?.taskId, "task-alpha", "Stable tie-breaker selects sess-1 deterministically");
+  });
+
+  it("Test D: Outcome ordering — multiple completed tasks with identical completion times produce deterministic outcome under input reversal", () => {
+    const taskA: Task = {
+      id: "task-1",
+      userId: "u1",
+      title: "First Task",
+      description: null,
+      status: "done",
+      priority: "high",
+      plannedDurationMinutes: 30,
+      dueAt: null,
+      completedAt: "2026-09-14T10:15:00.000Z",
+      createdAt: "2026-09-14T09:00:00.000Z",
+      updatedAt: "2026-09-14T10:15:00.000Z",
+    };
+
+    const taskB: Task = {
+      id: "task-2",
+      userId: "u1",
+      title: "Second Task",
+      description: null,
+      status: "done",
+      priority: "medium",
+      plannedDurationMinutes: 30,
+      dueAt: null,
+      completedAt: "2026-09-14T10:15:00.000Z",
+      createdAt: "2026-09-14T09:00:00.000Z",
+      updatedAt: "2026-09-14T10:15:00.000Z",
+    };
+
+    const runA = buildEvidenceTimeline({
+      windowStart,
+      windowEnd,
+      tasks: [taskA, taskB],
+    });
+
+    const runB = buildEvidenceTimeline({
+      windowStart,
+      windowEnd,
+      tasks: [taskB, taskA],
+    });
+
+    assert.deepEqual(runA, runB, "Outcome representation must be invariant to input array order");
+    // In block 1 (10:00-10:15), outcome is null
+    // In block 2 (10:15-11:00), outcome is task-1
+    assert.equal(runA.blocks[1]!.outcome?.taskId, "task-1", "Stable tie-breaker selects task-1 deterministically");
+  });
 });

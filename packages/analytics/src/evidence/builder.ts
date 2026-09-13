@@ -80,22 +80,50 @@ export function compareSegmentsForPrimary(
   return (a.id || "").localeCompare(b.id || "");
 }
 
-interface NormalizedCheckInWindow {
+export interface NormalizedCheckInWindow {
   checkIn: CheckIn;
   startMs: number;
   endMs: number;
 }
 
-interface NormalizedGapExplanation {
+export interface NormalizedGapExplanation {
   explanation: UserGapExplanation;
   startMs: number;
   endMs: number;
 }
 
-interface NormalizedSession {
+export interface NormalizedSession {
   session: WorkSession;
   startMs: number;
   endMs: number;
+}
+
+export function compareCheckIns(a: NormalizedCheckInWindow, b: NormalizedCheckInWindow): number {
+  if (a.startMs !== b.startMs) return a.startMs - b.startMs;
+  if (a.endMs !== b.endMs) return a.endMs - b.endMs;
+  return (a.checkIn.id || "").localeCompare(b.checkIn.id || "");
+}
+
+export function compareGapExplanations(
+  a: NormalizedGapExplanation,
+  b: NormalizedGapExplanation,
+): number {
+  if (a.startMs !== b.startMs) return a.startMs - b.startMs;
+  if (a.endMs !== b.endMs) return a.endMs - b.endMs;
+  return (a.explanation.id || "").localeCompare(b.explanation.id || "");
+}
+
+export function compareWorkSessions(a: NormalizedSession, b: NormalizedSession): number {
+  if (a.startMs !== b.startMs) return a.startMs - b.startMs;
+  if (a.endMs !== b.endMs) return a.endMs - b.endMs;
+  return (a.session.id || "").localeCompare(b.session.id || "");
+}
+
+export function compareTasksForOutcome(a: Task, b: Task): number {
+  const aComp = a.completedAt ? toEpochMs(a.completedAt) : Infinity;
+  const bComp = b.completedAt ? toEpochMs(b.completedAt) : Infinity;
+  if (aComp !== bComp) return aComp - bComp;
+  return (a.id || "").localeCompare(b.id || "");
 }
 
 export function buildEvidenceTimeline(options: BuildEvidenceOptions): EvidenceTimeline {
@@ -174,7 +202,7 @@ export function buildEvidenceTimeline(options: BuildEvidenceOptions): EvidenceTi
     }
   }
 
-  checkInWindows.sort((a, b) => a.startMs - b.startMs || a.endMs - b.endMs);
+  checkInWindows.sort(compareCheckIns);
 
   // 3. Normalize Gap Explanations
   const gapExplanations: NormalizedGapExplanation[] = [];
@@ -192,7 +220,7 @@ export function buildEvidenceTimeline(options: BuildEvidenceOptions): EvidenceTi
     }
   }
 
-  gapExplanations.sort((a, b) => a.startMs - b.startMs || a.endMs - b.endMs);
+  gapExplanations.sort(compareGapExplanations);
 
   // 4. Normalize Work Sessions
   const sessions: NormalizedSession[] = [];
@@ -212,14 +240,13 @@ export function buildEvidenceTimeline(options: BuildEvidenceOptions): EvidenceTi
     }
   }
 
-  sessions.sort((a, b) => a.startMs - b.startMs || a.endMs - b.endMs);
+  sessions.sort(compareWorkSessions);
 
-  // 5. Tasks Lookup Map
+  // 5. Tasks Lookup Map & Deterministically Sorted Tasks
   const taskMap = new Map<string, Task>();
-  if (options.tasks) {
-    for (const t of options.tasks) {
-      taskMap.set(t.id, t);
-    }
+  const tasks: Task[] = options.tasks ? [...options.tasks].sort(compareTasksForOutcome) : [];
+  for (const t of tasks) {
+    taskMap.set(t.id, t);
   }
 
   // 6. Slicing: Collect all boundaries and create atomic intervals
@@ -413,8 +440,8 @@ export function buildEvidenceTimeline(options: BuildEvidenceOptions): EvidenceTi
 
     // G. Outcome Evidence (Separate signal)
     let outcome: OutcomeEvidence | null = null;
-    if (options.tasks) {
-      const completedTask = options.tasks.find((t) => {
+    if (tasks.length > 0) {
+      const completedTask = tasks.find((t) => {
         if (!t.completedAt) return false;
         try {
           const compMs = toEpochMs(t.completedAt);
