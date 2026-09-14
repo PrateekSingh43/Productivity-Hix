@@ -43,7 +43,7 @@ export interface BaselineResult {
    * Availability or comparison status.
    * Does NOT mutate or emit PatternExecutionStatus.
    */
-  readonly status: "VALID" | "INSUFFICIENT_BASELINE_DATA" | "UNDEFINED_ZERO_BASELINE" | "INDETERMINATE_COVERAGE" | string;
+  readonly status: "VALID" | "INSUFFICIENT_BASELINE_DATA" | "NO_AGGREGATABLE_VALUES" | "UNDEFINED_ZERO_BASELINE" | "INDETERMINATE_COVERAGE" | string;
 }
 
 export interface BaselineEvaluationConfig<T> {
@@ -53,11 +53,15 @@ export interface BaselineEvaluationConfig<T> {
   
   /**
    * The minimum number of qualifying items required to compute a baseline.
+   * Note: The generic baseline engine does not define universal Phase 4 sufficiency thresholds.
+   * These are detector/request-specific caller-provided requirements.
    */
   minimumPopulationCount?: number;
 
   /**
    * The minimum number of distinct calendar days required to compute a baseline.
+   * Note: The generic baseline engine does not define universal Phase 4 sufficiency thresholds.
+   * These are detector/request-specific caller-provided requirements.
    */
   minimumDistinctDays?: number;
 
@@ -168,7 +172,7 @@ export function evaluateBaseline<T>(
       qualifiedPopulationCount: qualifiedCount,
       distinctCalendarDayCount: distinctDays,
       aggregatedValue: null,
-      status: "UNDEFINED_ZERO_BASELINE", // or generic error depending on aggregator
+      status: "NO_AGGREGATABLE_VALUES",
     };
   }
 

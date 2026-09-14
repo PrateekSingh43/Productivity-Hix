@@ -42,8 +42,8 @@ export function isValidBaselinePrecedence(baselineEndUTC: string, evaluationStar
 export function countDistinctCalendarDays(utcTimestamps: string[], timezone: string): number {
   if (!utcTimestamps || utcTimestamps.length === 0) return 0;
 
-  // Use Intl.DateTimeFormat to deterministically extract the local date components
-  const formatter = new Intl.DateTimeFormat("en-US", {
+  // Use Intl.DateTimeFormat with "en-CA" which guarantees YYYY-MM-DD output
+  const formatter = new Intl.DateTimeFormat("en-CA", {
     timeZone: timezone,
     year: "numeric",
     month: "2-digit",
@@ -56,7 +56,7 @@ export function countDistinctCalendarDays(utcTimestamps: string[], timezone: str
     const dateObj = new Date(timestamp);
     if (!Number.isFinite(dateObj.getTime())) continue;
 
-    // Output format is MM/DD/YYYY
+    // Output format is YYYY-MM-DD
     const formatted = formatter.format(dateObj);
     distinctDays.add(formatted);
   }

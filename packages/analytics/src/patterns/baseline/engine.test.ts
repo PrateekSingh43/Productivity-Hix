@@ -74,11 +74,11 @@ describe("Baseline: Engine", () => {
     assert.strictEqual(result.aggregatedValue, null);
   });
 
-  it("should return UNDEFINED_ZERO_BASELINE if aggregation fails or returns null", () => {
+  it("should return NO_AGGREGATABLE_VALUES if aggregation fails or returns null", () => {
     const config = { ...defaultConfig, aggregator: () => null };
     const result = evaluateBaseline(dummyPopulation, window, evalStart, config);
     
-    assert.strictEqual(result.status, "UNDEFINED_ZERO_BASELINE");
+    assert.strictEqual(result.status, "NO_AGGREGATABLE_VALUES");
     assert.strictEqual(result.aggregatedValue, null);
   });
 });

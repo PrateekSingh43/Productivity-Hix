@@ -13,12 +13,12 @@ export function percentile(values: number[], p: number): number | null {
     return null;
   }
 
-  const validValues = values.filter(isValidFinite);
-  if (validValues.length === 0) {
-    return null;
+  // Do not silently filter non-finite values. If any value is invalid, the entire result is null.
+  for (let i = 0; i < values.length; i++) {
+    if (!isValidFinite(values[i])) return null;
   }
 
-  const sorted = [...validValues].sort((a, b) => a - b);
+  const sorted = [...values].sort((a, b) => a - b);
   const N = sorted.length;
 
   if (N === 1) {
@@ -84,13 +84,14 @@ export function recurrenceFraction(satisfyingCount: number, totalQualifyingCount
 }
 
 /**
- * Computes the relative deviation of an observed metric from a baseline reference.
+ * Computes the signed relative change of an observed metric from a baseline reference.
+ * Formula: (currentValue - baselineValue) / baselineValue
  * 
  * @param currentValue The currently observed metric.
  * @param baselineValue The baseline reference metric.
- * @returns The delta ratio, or null if baseline <= 0 or if values are invalid.
+ * @returns The signed relative change, or null if baseline <= 0 or if values are invalid.
  */
-export function deltaRatio(currentValue: number | null, baselineValue: number | null): number | null {
+export function signedRelativeChange(currentValue: number | null, baselineValue: number | null): number | null {
   if (currentValue == null || baselineValue == null || baselineValue <= 0) {
     return null;
   }
