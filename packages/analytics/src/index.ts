@@ -25,4 +25,5 @@ export type {
 } from "./activity/segments";
 export * from "./features";
 export * from "./evidence";
+export * from "./patterns";
 
