@@ -4,7 +4,7 @@ import type {
   EpisodeExecutionStatus,
   PatternExecutionStatus
 } from "@repo/types";
-import { PatternExecutionContext } from "./context";
+import type { EpisodeExecutionContext, PatternLevelExecutionContext } from "./context";
 
 /**
  * Base abstraction for Episode-level detectors (Tier 1).
@@ -16,7 +16,7 @@ export interface EpisodeDetector<TMetrics = Record<string, unknown>> {
    * Enforces that the execution level is "EPISODE".
    */
   evaluateEpisode(
-    context: PatternExecutionContext,
+    context: EpisodeExecutionContext,
     evaluationId: string
   ): EpisodeMeasurementOutput<TMetrics>;
 }
@@ -31,7 +31,7 @@ export interface PatternDetector<TMetrics = Record<string, unknown>> {
    * Enforces that the execution level is "PATTERN".
    */
   evaluatePattern(
-    context: PatternExecutionContext,
+    context: PatternLevelExecutionContext,
     evaluationId: string,
     patternId: string
   ): BehavioralPatternOutput<TMetrics>;
@@ -42,7 +42,7 @@ export interface PatternDetector<TMetrics = Record<string, unknown>> {
  * or vice versa, at the type level. The generic constraints enforce this structural safety.
  */
 export function createEpisodeResult<TMetrics>(
-  context: PatternExecutionContext,
+  context: EpisodeExecutionContext,
   evaluationId: string,
   status: EpisodeExecutionStatus,
   overrides: Omit<EpisodeMeasurementOutput<TMetrics>, "metadata" | "userId" | "detectorIdentity" | "executionStatus" | "level" | "attributionMode">
@@ -66,11 +66,11 @@ export function createEpisodeResult<TMetrics>(
 }
 
 export function createPatternResult<TMetrics>(
-  context: PatternExecutionContext,
+  context: PatternLevelExecutionContext,
   evaluationId: string,
   patternId: string,
   status: PatternExecutionStatus,
-  overrides: Omit<BehavioralPatternOutput<TMetrics>, "metadata" | "userId" | "detectorIdentity" | "executionStatus" | "level" | "attributionMode">
+  overrides: Omit<BehavioralPatternOutput<TMetrics>, "metadata" | "userId" | "executionStatus" | "level" | "attributionMode">
 ): BehavioralPatternOutput<TMetrics> {
   if (context.level !== "PATTERN") {
     throw new Error("Cannot create Pattern result from a non-PATTERN context");
@@ -83,11 +83,9 @@ export function createPatternResult<TMetrics>(
       ...context.generateOperationalMetadata(),
     },
     userId: context.userId,
-    detectorIdentity: context.config.detectorIdentity, // Handled implicitly by spreading overrides if they contain it, but we assert it here to match structure. Wait, BehavioralPatternOutput doesn't strictly have detectorIdentity at the top level in some earlier drafts, but let's check patterns.ts. It's actually omitted in Pattern level in favor of patternType, but we must respect the type.
-    // Let's assert based on BehavioralPatternOutput shape:
     executionStatus: status,
     level: "PATTERN",
     attributionMode: context.config.attributionMode,
     ...overrides,
-  } as BehavioralPatternOutput<TMetrics>; 
+  }; 
 }

@@ -1,4 +1,5 @@
-import { describe, it, expect } from "vitest";
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
 import { assessCoverage } from "./evidence";
 import type { TemporalEvidenceBlock, PatternSufficiency } from "@repo/types";
 
@@ -28,9 +29,9 @@ describe("Phase 4: Evidence Qualification", () => {
   it("handles full observation", () => {
     const blocks = [createBlock(100, "OBSERVED")];
     const res = assessCoverage(blocks, baseConfig);
-    expect(res.status).toBe("SUFFICIENT");
-    expect(res.usableObservedSeconds).toBe(100);
-    expect(res.unknownFraction).toBe(0);
+    assert.equal(res.status, "SUFFICIENT");
+    assert.equal(res.usableObservedSeconds, 100);
+    assert.equal(res.unknownFraction, 0);
   });
 
   it("fails coverage if unknown fraction exceeded", () => {
@@ -39,8 +40,8 @@ describe("Phase 4: Evidence Qualification", () => {
       createBlock(15, "UNKNOWN"), // 15% unknown, threshold is 10%
     ];
     const res = assessCoverage(blocks, baseConfig);
-    expect(res.status).toBe("INDETERMINATE_COVERAGE");
-    expect(res.isCoverageSufficient).toBe(false);
+    assert.equal(res.status, "INDETERMINATE_COVERAGE");
+    assert.equal(res.isCoverageSufficient, false);
   });
 
   it("interrupts continuity on UNKNOWN if configured", () => {
@@ -50,7 +51,7 @@ describe("Phase 4: Evidence Qualification", () => {
       createBlock(5, "UNKNOWN"),
     ];
     const res = assessCoverage(blocks, config);
-    expect(res.status).toBe("INTERRUPTED");
+    assert.equal(res.status, "INTERRUPTED");
   });
 
   it("terminates episode on UNKNOWN if configured", () => {
@@ -61,8 +62,8 @@ describe("Phase 4: Evidence Qualification", () => {
       createBlock(100, "OBSERVED"), // Should be ignored
     ];
     const res = assessCoverage(blocks, config);
-    expect(res.status).toBe("TERMINATED");
-    expect(res.totalDurationSeconds).toBe(105);
+    assert.equal(res.status, "TERMINATED");
+    assert.equal(res.totalDurationSeconds, 105);
   });
 
   it("treats REPORTED as UNKNOWN if allowReportedOnly is false", () => {
@@ -76,8 +77,8 @@ describe("Phase 4: Evidence Qualification", () => {
       requiredEvidenceQuality: { ...baseConfig.requiredEvidenceQuality, maxUnknownFraction: 0.1 }
     };
     const res = assessCoverage(blocks, config);
-    expect(res.unknownSeconds).toBe(10);
-    expect(res.status).toBe("SUFFICIENT");
+    assert.equal(res.unknownSeconds, 10);
+    assert.equal(res.status, "SUFFICIENT");
   });
 
   it("accepts REPORTED if allowReportedOnly is true", () => {
@@ -90,8 +91,8 @@ describe("Phase 4: Evidence Qualification", () => {
       requiredEvidenceQuality: { ...baseConfig.requiredEvidenceQuality, maxUnknownFraction: 0.0, allowReportedOnly: true }
     };
     const res = assessCoverage(blocks, config);
-    expect(res.usableReportedSeconds).toBe(10);
-    expect(res.unknownSeconds).toBe(0);
-    expect(res.status).toBe("SUFFICIENT");
+    assert.equal(res.usableReportedSeconds, 10);
+    assert.equal(res.unknownSeconds, 0);
+    assert.equal(res.status, "SUFFICIENT");
   });
 });

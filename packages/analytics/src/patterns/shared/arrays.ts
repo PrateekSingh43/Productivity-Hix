@@ -1,6 +1,8 @@
 /**
  * Shared Array utilities for Phase 4 Analytics.
- * Enforces canonical deterministic ordering for output generation.
+ * These helpers provide deterministic ordering for currently supported string/object collections. 
+ * Full canonical structured serialization for evaluation identity and audit snapshots is 
+ * implemented only in the later evaluation-ID/audit stage.
  */
 
 export function sortStringsDeterministically(values: string[]): string[] {

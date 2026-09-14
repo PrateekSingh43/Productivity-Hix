@@ -14,7 +14,7 @@ export interface DetectorConfiguration {
   sufficiency: PatternSufficiency;
 }
 
-export interface PatternExecutionContextOptions {
+export interface BaseExecutionContextOptions {
   timeline: EvidenceTimeline;
   timezone: string;
   userId: string;
@@ -35,7 +35,7 @@ export class PatternExecutionContext {
   public readonly config: DetectorConfiguration;
   public readonly level: "EPISODE" | "PATTERN";
 
-  constructor(options: PatternExecutionContextOptions) {
+  constructor(options: BaseExecutionContextOptions) {
     if (!isValidTemporalWindow(options.timeline.windowStart, options.timeline.windowEnd)) {
       throw new Error(`Invalid timeline temporal window: [${options.timeline.windowStart}, ${options.timeline.windowEnd})`);
     }
@@ -59,4 +59,12 @@ export class PatternExecutionContext {
       generatedAt: new Date().toISOString(),
     };
   }
+}
+
+export interface EpisodeExecutionContext extends PatternExecutionContext {
+  readonly level: "EPISODE";
+}
+
+export interface PatternLevelExecutionContext extends PatternExecutionContext {
+  readonly level: "PATTERN";
 }
