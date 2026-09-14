@@ -21,3 +21,4 @@ export * from "./detectors/context-switching/sequence";
 export * from "./detectors/context-switching/episode";
 export * from "./detectors/context-switching/pattern";
 export * from "./detectors/context-switching/detector";
+export * from "./detectors/task-fragmentation";
