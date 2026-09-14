@@ -170,7 +170,7 @@ describe("Detector 1: detector.ts", () => {
 
     class SpyingBaselineProvider implements BaselinePopulationProvider<ContextSwitchingBaselineSession> {
       public readonly populationType = "completed_sessions";
-      async fetchPopulation(userId: string, window: any) {
+      async fetchPopulation(userId: string, window: { start: string; end: string }) {
         passedBaselineWindowStart = window.start;
         passedBaselineWindowEnd = window.end;
         return baselinePop;
@@ -335,6 +335,102 @@ describe("Detector 1: detector.ts", () => {
     
     // We have 5 sessions, 3 distinct local days. It should pass evidence sufficiency!
     assert.notStrictEqual(resDiff.executionStatus, "INSUFFICIENT_EVIDENCE");
+    assert.strictEqual(resDiff.executionStatus, "DETECTED");
+  });
+
+  test("evaluatePattern: Timezone regression test for baseline distinct days", async () => {
+    const episodes = [
+      createEp(10, "2023-11-15T12:00:00Z", "15"),
+      createEp(10, "2023-11-16T12:00:00Z", "16"),
+      createEp(10, "2023-11-17T12:00:00Z", "17"),
+      createEp(10, "2023-11-18T12:00:00Z", "18"),
+      createEp(10, "2023-11-19T12:00:00Z", "19"),
+    ];
+
+    // Minimum baseline days is 14. We will provide 14 distinct *local* LA days.
+    // However, two of these sessions will fall on the SAME UTC date.
+    // If the distinct day logic uses UTC, it will only count 13 days and fail.
+    // Local dates: Oct 1 through Oct 14.
+    const tzBaselinePop: ContextSwitchingBaselineSession[] = [
+      { sessionId: "h1", userId: "u1", startedAt: "2023-10-01T23:30:00Z", endedAt: "2023-10-01T23:45:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 }, // UTC: Oct 1, LA: Oct 1 (01:30 PST)
+      { sessionId: "h2", userId: "u1", startedAt: "2023-10-02T00:30:00Z", endedAt: "2023-10-02T00:45:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 }, // UTC: Oct 2, LA: Oct 1 (17:30 PST)
+      // That was 2 UTC days, but BOTH are Oct 1 in LA!
+      // To provide exactly 14 LA days, we add Oct 2 through Oct 14.
+      { sessionId: "h3", userId: "u1", startedAt: "2023-10-02T12:00:00Z", endedAt: "2023-10-02T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 }, // LA Oct 2
+      { sessionId: "h4", userId: "u1", startedAt: "2023-10-03T12:00:00Z", endedAt: "2023-10-03T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 }, // LA Oct 3
+      { sessionId: "h5", userId: "u1", startedAt: "2023-10-04T12:00:00Z", endedAt: "2023-10-04T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 }, // LA Oct 4
+      { sessionId: "h6", userId: "u1", startedAt: "2023-10-05T12:00:00Z", endedAt: "2023-10-05T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 }, // LA Oct 5
+      { sessionId: "h7", userId: "u1", startedAt: "2023-10-06T12:00:00Z", endedAt: "2023-10-06T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 }, // LA Oct 6
+      { sessionId: "h8", userId: "u1", startedAt: "2023-10-07T12:00:00Z", endedAt: "2023-10-07T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 }, // LA Oct 7
+      { sessionId: "h9", userId: "u1", startedAt: "2023-10-08T12:00:00Z", endedAt: "2023-10-08T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 }, // LA Oct 8
+      { sessionId: "h10", userId: "u1", startedAt: "2023-10-09T12:00:00Z", endedAt: "2023-10-09T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 }, // LA Oct 9
+      { sessionId: "h11", userId: "u1", startedAt: "2023-10-10T12:00:00Z", endedAt: "2023-10-10T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 }, // LA Oct 10
+      { sessionId: "h12", userId: "u1", startedAt: "2023-10-11T12:00:00Z", endedAt: "2023-10-11T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 }, // LA Oct 11
+      { sessionId: "h13", userId: "u1", startedAt: "2023-10-12T12:00:00Z", endedAt: "2023-10-12T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 }, // LA Oct 12
+      { sessionId: "h14", userId: "u1", startedAt: "2023-10-13T12:00:00Z", endedAt: "2023-10-13T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 }, // LA Oct 13
+      { sessionId: "h15", userId: "u1", startedAt: "2023-10-14T12:00:00Z", endedAt: "2023-10-14T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 }, // LA Oct 14
+    ];
+    
+    // There are 15 sessions here.
+    // In UTC, there are 14 distinct dates: Oct 1 through Oct 14.
+    // Wait, if I want UTC dates to be FEWER, I should map two LA days onto the SAME UTC date.
+    // Example: 
+    // Session A: 2023-11-01 23:30 local = 2023-11-02 06:30 UTC
+    // Session B: 2023-11-02 00:30 local = 2023-11-02 07:30 UTC
+    // These are TWO distinct local days (Nov 1 and Nov 2).
+    // But they share the SAME UTC date (Nov 2).
+    
+    // So let's build 14 sessions that are exactly 14 distinct local LA days,
+    // but some of them share the same UTC date.
+    const tzBaselinePopCorrected: ContextSwitchingBaselineSession[] = [
+      { sessionId: "h1", userId: "u1", startedAt: "2023-10-02T06:30:00Z", endedAt: "2023-10-02T07:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 }, // LA Oct 1 23:30
+      { sessionId: "h2", userId: "u1", startedAt: "2023-10-02T07:30:00Z", endedAt: "2023-10-02T08:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 }, // LA Oct 2 00:30
+      // UTC day is Oct 2 for both. Local days are Oct 1 and Oct 2.
+      // So far: 1 UTC day, 2 Local days.
+      { sessionId: "h3", userId: "u1", startedAt: "2023-10-03T12:00:00Z", endedAt: "2023-10-03T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 }, // LA Oct 3
+      { sessionId: "h4", userId: "u1", startedAt: "2023-10-04T12:00:00Z", endedAt: "2023-10-04T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 }, // LA Oct 4
+      { sessionId: "h5", userId: "u1", startedAt: "2023-10-05T12:00:00Z", endedAt: "2023-10-05T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 }, // LA Oct 5
+      { sessionId: "h6", userId: "u1", startedAt: "2023-10-06T12:00:00Z", endedAt: "2023-10-06T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 }, // LA Oct 6
+      { sessionId: "h7", userId: "u1", startedAt: "2023-10-07T12:00:00Z", endedAt: "2023-10-07T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 }, // LA Oct 7
+      { sessionId: "h8", userId: "u1", startedAt: "2023-10-08T12:00:00Z", endedAt: "2023-10-08T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 }, // LA Oct 8
+      { sessionId: "h9", userId: "u1", startedAt: "2023-10-09T12:00:00Z", endedAt: "2023-10-09T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 }, // LA Oct 9
+      { sessionId: "h10", userId: "u1", startedAt: "2023-10-10T12:00:00Z", endedAt: "2023-10-10T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 }, // LA Oct 10
+      { sessionId: "h11", userId: "u1", startedAt: "2023-10-11T12:00:00Z", endedAt: "2023-10-11T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 }, // LA Oct 11
+      { sessionId: "h12", userId: "u1", startedAt: "2023-10-12T12:00:00Z", endedAt: "2023-10-12T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 }, // LA Oct 12
+      { sessionId: "h13", userId: "u1", startedAt: "2023-10-13T12:00:00Z", endedAt: "2023-10-13T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 }, // LA Oct 13
+      { sessionId: "h14", userId: "u1", startedAt: "2023-10-14T12:00:00Z", endedAt: "2023-10-14T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 }, // LA Oct 14
+    ];
+    // Total local days = 14. Total UTC days = 13 (Oct 2 through Oct 14).
+    
+    const contextLocalSame: PatternLevelExecutionContext = {
+      level: "PATTERN",
+      userId: "u1",
+      timezone: "America/Los_Angeles", 
+      timeline: {
+        windowStart: "2023-11-15T08:00:00.000Z", // Midnight LA time Nov 15
+        windowEnd: "2023-11-29T08:00:00.000Z",
+        totalDurationSeconds: 14 * 86400,
+        blocks: [],
+        coverageSummary: {
+          totalDurationSeconds: 14 * 86400,
+          observedSeconds: 14 * 86400,
+          reportedSeconds: 0,
+          observedReportedSeconds: 0,
+          unknownSeconds: 0,
+          explainedGapSeconds: 0,
+          coverageRatio: 1
+        }
+      },
+      config: mockDetectorConfig,
+      generateOperationalMetadata: () => ({ detectorVersion: "1.0", configurationVersion: "1.0", generatedAt: "now" })
+    };
+
+    const detectorDiff = new ContextSwitchingDetector(config, new MockCurrentEpisodesProvider(episodes), new MockBaselineProvider(tzBaselinePopCorrected));
+    const resDiff = await detectorDiff.evaluatePattern(contextLocalSame, "eval-pat-diff", "pat-1");
+    
+    // Because we have 14 distinct LOCAL LA days, but only 13 distinct UTC days,
+    // if the baseline uses UTC, this will fail with INSUFFICIENT_BASELINE_DATA.
+    // If it correctly uses the local timezone (America/Los_Angeles), it will pass.
     assert.strictEqual(resDiff.executionStatus, "DETECTED");
   });
 });

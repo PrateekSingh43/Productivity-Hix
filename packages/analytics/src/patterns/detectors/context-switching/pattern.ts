@@ -67,7 +67,8 @@ export function evaluateContextSwitchingPattern(
       metricExtractor: (session) => session.switchesPerHour,
       aggregator: (vals) => median(vals),
       minimumPopulationCount: config.minimumBaselineSessions,
-      minimumDistinctDays: config.minimumBaselineDays
+      minimumDistinctDays: config.minimumBaselineDays,
+      timezone: context.timezone
     }
   );
 
