@@ -13,3 +13,4 @@ export type { BaselineResult, BaselineEvaluationConfig } from "./baseline/engine
 export { evaluateBaseline } from "./baseline/engine";
 export { median, percentile, iqr, recurrenceFraction, signedRelativeChange } from "./baseline/statistics";
 export { CompletedTasksAdapter, type TaskDataSource } from "./baseline/providers/completed-tasks-adapter";
+export { PrismaTaskDataSource } from "./baseline/providers/prisma-task-data-source";

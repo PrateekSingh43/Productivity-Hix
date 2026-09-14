@@ -25,9 +25,15 @@ export interface BaselineResult {
   readonly baselineWindow: HistoricalWindow;
 
   /**
-   * The count of population items meeting qualification guards.
+   * The number of qualified items passing the qualifier.
    */
-  readonly qualifiedPopulationCount: number;
+  qualifiedPopulationCount: number;
+
+  /**
+   * The number of qualified items that produced a finite valid metric.
+   * Items that produce `null` (metric unavailable) are skipped, reducing this count.
+   */
+  aggregatableMetricCount: number;
 
   /**
    * Count of unique local calendar days containing qualifying population items.
@@ -136,6 +142,7 @@ export function evaluateBaseline<T>(
       strategy: config.strategy,
       baselineWindow: window,
       qualifiedPopulationCount: qualifiedCount,
+      aggregatableMetricCount: 0,
       distinctCalendarDayCount: distinctDays,
       aggregatedValue: null,
       status: "INSUFFICIENT_BASELINE_DATA",
@@ -156,6 +163,7 @@ export function evaluateBaseline<T>(
         strategy: config.strategy,
         baselineWindow: window,
         qualifiedPopulationCount: qualifiedCount,
+        aggregatableMetricCount: extractedValues.length,
         distinctCalendarDayCount: distinctDays,
         aggregatedValue: null,
         status: "NO_AGGREGATABLE_VALUES",
@@ -171,22 +179,24 @@ export function evaluateBaseline<T>(
       strategy: config.strategy,
       baselineWindow: window,
       qualifiedPopulationCount: qualifiedCount,
+      aggregatableMetricCount: 0,
       distinctCalendarDayCount: distinctDays,
       aggregatedValue: null,
-      status: "INSUFFICIENT_BASELINE_DATA",
+      status: "NO_AGGREGATABLE_VALUES",
     };
   }
 
   // Aggregate metrics
-  const result = config.aggregator(extractedValues);
+  const aggregatedValue = config.aggregator(extractedValues);
   
-  if (result === null || !isValidFinite(result)) {
+  if (aggregatedValue === null || !isValidFinite(aggregatedValue)) {
     return {
       populationType: config.populationType,
       metricName: config.metricName,
       strategy: config.strategy,
       baselineWindow: window,
       qualifiedPopulationCount: qualifiedCount,
+      aggregatableMetricCount: extractedValues.length,
       distinctCalendarDayCount: distinctDays,
       aggregatedValue: null,
       status: "NO_AGGREGATABLE_VALUES",
@@ -199,8 +209,9 @@ export function evaluateBaseline<T>(
     strategy: config.strategy,
     baselineWindow: window,
     qualifiedPopulationCount: qualifiedCount,
+    aggregatableMetricCount: extractedValues.length,
     distinctCalendarDayCount: distinctDays,
-    aggregatedValue: result,
+    aggregatedValue,
     status: "VALID",
   };
 }

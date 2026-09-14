@@ -353,6 +353,9 @@ importers:
 
   packages/analytics:
     dependencies:
+      '@repo/db':
+        specifier: workspace:*
+        version: link:../db
       '@repo/types':
         specifier: workspace:*
         version: link:../types

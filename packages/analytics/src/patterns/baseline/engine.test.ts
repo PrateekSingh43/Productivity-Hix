@@ -46,10 +46,43 @@ describe("Baseline: Engine", () => {
     assert.strictEqual(result.strategy, "median");
     
     assert.strictEqual(result.qualifiedPopulationCount, 4); // item 5 filtered out
+    assert.strictEqual(result.aggregatableMetricCount, 4); // All 4 have valid metrics
     assert.strictEqual(result.distinctCalendarDayCount, 2); // Jan 1, Jan 2
     
     // Median of [0, 5, 10, 15] is 7.5
     assert.strictEqual(result.aggregatedValue, 7.5);
+  });
+
+  it("should track qualified vs aggregatable metrics correctly (10 qualified, 3 aggregatable)", () => {
+    const pop = Array.from({ length: 10 }).map((_, i) => ({
+      id: `${i}`,
+      timestamp: "2023-01-01T10:00:00Z",
+      switches: i < 3 ? 5 : -1, // Only 3 are >= 0
+      valid: true // All 10 are valid
+    }));
+
+    const result = evaluateBaseline(pop, window, evalStart, defaultConfig);
+    
+    assert.strictEqual(result.status, "VALID");
+    assert.strictEqual(result.qualifiedPopulationCount, 10);
+    assert.strictEqual(result.aggregatableMetricCount, 3);
+    assert.strictEqual(result.aggregatedValue, 5); // Median of [5, 5, 5]
+  });
+
+  it("should return NO_AGGREGATABLE_VALUES if all metrics are null (10 qualified, 0 aggregatable)", () => {
+    const pop = Array.from({ length: 10 }).map((_, i) => ({
+      id: `${i}`,
+      timestamp: "2023-01-01T10:00:00Z",
+      switches: -1, // Extractor returns null for all
+      valid: true
+    }));
+
+    const result = evaluateBaseline(pop, window, evalStart, defaultConfig);
+    
+    assert.strictEqual(result.status, "NO_AGGREGATABLE_VALUES");
+    assert.strictEqual(result.qualifiedPopulationCount, 10);
+    assert.strictEqual(result.aggregatableMetricCount, 0);
+    assert.strictEqual(result.aggregatedValue, null);
   });
 
   it("should enforce anti-leakage strictly", () => {
@@ -64,6 +97,7 @@ describe("Baseline: Engine", () => {
     const result = evaluateBaseline(dummyPopulation, window, evalStart, config);
     
     assert.strictEqual(result.status, "INSUFFICIENT_BASELINE_DATA");
+    assert.strictEqual(result.aggregatableMetricCount, 0);
     assert.strictEqual(result.aggregatedValue, null);
   });
 
@@ -96,6 +130,7 @@ describe("Baseline: Engine", () => {
     const result = evaluateBaseline(invalidPopulation, window, evalStart, config);
     
     assert.strictEqual(result.status, "NO_AGGREGATABLE_VALUES");
+    assert.strictEqual(result.aggregatableMetricCount, 1);
     assert.strictEqual(result.aggregatedValue, null);
   });
 });
