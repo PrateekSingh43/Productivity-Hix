@@ -1,12 +1,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
 import type { TaskWithSessions } from "@repo/types";
-import { CompletedTaskProvider, type TaskDataSource } from "./completed-task-provider";
+import { CompletedTasksAdapter, type TaskDataSource } from "./completed-tasks-adapter";
 import type { HistoricalWindow } from "../source";
 import { evaluateBaseline } from "../engine";
 import { median } from "../statistics";
 
-describe("Baseline: CompletedTaskProvider (Integration)", () => {
+describe("Baseline: CompletedTasksAdapter (Integration)", () => {
   const dummyTasks: TaskWithSessions[] = [
     {
       id: "task_userA_1",
@@ -71,7 +71,7 @@ describe("Baseline: CompletedTaskProvider (Integration)", () => {
 
   it("should prove user isolation and half-open boundary [start, end)", async () => {
     const dataSource = new MockTaskDataSource();
-    const provider = new CompletedTaskProvider(dataSource);
+    const provider = new CompletedTasksAdapter(dataSource);
 
     const window: HistoricalWindow = {
       start: "2023-01-01T00:00:00Z",

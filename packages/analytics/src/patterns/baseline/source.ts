@@ -19,9 +19,13 @@ export interface HistoricalWindow {
  * @throws Error if the historical window leaks into or beyond the evaluation start
  */
 export function enforceAntiLeakage(window: HistoricalWindow, evaluationStart: string): void {
+  const windowStartMs = Date.parse(window.start);
   const windowEndMs = Date.parse(window.end);
   const evalStartMs = Date.parse(evaluationStart);
 
+  if (Number.isNaN(windowStartMs)) {
+    throw new Error("Invalid baseline window start timestamp");
+  }
   if (Number.isNaN(windowEndMs)) {
     throw new Error("Invalid baseline window end timestamp");
   }
@@ -29,6 +33,12 @@ export function enforceAntiLeakage(window: HistoricalWindow, evaluationStart: st
     throw new Error("Invalid evaluation start timestamp");
   }
   
+  if (windowStartMs >= windowEndMs) {
+    throw new Error(
+      `Invalid baseline window: start (${window.start}) must be strictly before end (${window.end}).`
+    );
+  }
+
   if (windowEndMs > evalStartMs) {
     throw new Error(
       `Baseline leakage detected: Historical window end (${window.end}) ` +

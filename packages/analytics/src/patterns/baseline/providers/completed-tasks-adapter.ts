@@ -10,12 +10,13 @@ export interface TaskDataSource {
 }
 
 /**
- * Concrete provider for historical completed task episodes.
- * Adapts an existing canonical historical source (e.g. Postgres Tasks) 
- * into a strongly typed BaselinePopulationProvider.
+ * Concrete provider for historical completed tasks.
+ * Note: This provider is an upstream historical Task source adapter only.
+ * It does not construct Phase-4 D2 task episodes. It serves merely as an
+ * interface boundary proving the architecture works end-to-end.
  */
-export class CompletedTaskProvider implements BaselinePopulationProvider<TaskWithSessions> {
-  readonly populationType = "completed_task_episodes";
+export class CompletedTasksAdapter implements BaselinePopulationProvider<TaskWithSessions> {
+  readonly populationType = "completed_tasks";
 
   constructor(private readonly dataSource: TaskDataSource) {}
 

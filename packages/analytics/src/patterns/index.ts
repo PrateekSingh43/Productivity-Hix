@@ -12,4 +12,4 @@ export type { HistoricalWindow, BaselinePopulationProvider } from "./baseline/so
 export type { BaselineResult, BaselineEvaluationConfig } from "./baseline/engine";
 export { evaluateBaseline } from "./baseline/engine";
 export { median, percentile, iqr, recurrenceFraction, signedRelativeChange } from "./baseline/statistics";
-export { CompletedTaskProvider, type TaskDataSource } from "./baseline/providers/completed-task-provider";
+export { CompletedTasksAdapter, type TaskDataSource } from "./baseline/providers/completed-tasks-adapter";

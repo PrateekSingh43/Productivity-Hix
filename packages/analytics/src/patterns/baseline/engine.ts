@@ -143,9 +143,26 @@ export function evaluateBaseline<T>(
   }
 
   // Extract metrics
-  const extractedValues = qualifiedItems
-    .map(config.metricExtractor)
-    .filter((v): v is number => v !== null && isValidFinite(v));
+  const extractedValues: number[] = [];
+  for (const item of qualifiedItems) {
+    const val = config.metricExtractor(item);
+    if (val === null) continue; // Valid omission
+
+    if (!isValidFinite(val)) {
+      // Invalid numeric metric encountered
+      return {
+        populationType: config.populationType,
+        metricName: config.metricName,
+        strategy: config.strategy,
+        baselineWindow: window,
+        qualifiedPopulationCount: qualifiedCount,
+        distinctCalendarDayCount: distinctDays,
+        aggregatedValue: null,
+        status: "NO_AGGREGATABLE_VALUES",
+      };
+    }
+    extractedValues.push(val);
+  }
 
   if (extractedValues.length === 0) {
     return {
