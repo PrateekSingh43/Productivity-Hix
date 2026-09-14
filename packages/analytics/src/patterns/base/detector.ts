@@ -34,7 +34,7 @@ export interface PatternDetector<TMetrics = Record<string, unknown>> {
     context: PatternLevelExecutionContext,
     evaluationId: string,
     patternId: string
-  ): BehavioralPatternOutput<TMetrics>;
+  ): Promise<BehavioralPatternOutput<TMetrics>>;
 }
 
 /**
