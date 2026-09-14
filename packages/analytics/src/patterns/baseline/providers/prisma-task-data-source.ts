@@ -10,7 +10,7 @@ import type { Database } from "@repo/db";
 export class PrismaTaskDataSource implements TaskDataSource {
   constructor(private readonly db: Database) {}
 
-  async fetchUserTasks(userId: string, start: string, end: string): Promise<TaskWithSessions[]> {
+  async findCompletedTasks(userId: string, start: string, end: string): Promise<TaskWithSessions[]> {
     const tasks = await this.db.task.findMany({
       where: {
         userId,

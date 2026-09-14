@@ -59,7 +59,7 @@ describe("Baseline: PrismaTaskDataSource", () => {
     } as unknown as Database;
 
     const source = new PrismaTaskDataSource(mockDb);
-    const result = await source.fetchUserTasks("user-1", "2023-01-01T00:00:00Z", "2023-01-10T00:00:00Z");
+    const result = await source.findCompletedTasks("user-1", "2023-01-01T00:00:00Z", "2023-01-10T00:00:00Z");
 
     // 1. Verify query semantics
     assert.ok(capturedWhere);
