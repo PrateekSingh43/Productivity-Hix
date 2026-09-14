@@ -235,14 +235,24 @@ Task completion is an outcome milestone. It does not retroactively establish how
 
 ## 11. Temporal Slicing
 
-To handle arbitrary overlaps between telemetry, check-ins, work sessions, gap explanations, and task completions, the timeline uses atomic boundary slicing:
+To handle arbitrary overlaps between telemetry, check-ins, work sessions, gap explanations, and task completions, the timeline uses atomic boundary slicing.
+
+The current boundary collector explicitly handles timestamps from these currently implemented boundary sources:
+- Timeline segments (`start`, `end`)
+- Raw telemetry events (`timestamp`, `timestamp + duration`)
+- Check-ins (`windowStart`, `windowEnd`, or fallback `createdAt`)
+- User gap explanations (`startTime`, `endTime`)
+- Work sessions (`startedAt`, resolved `endedAt`)
+- Task completion timestamps (`completedAt`)
 
 ```text
-1. Collect all boundary timestamps (starts, ends, completions) across all input classes.
+1. Collect boundary timestamps from currently implemented boundary sources (timeline segments, raw telemetry events, check-ins, user gap explanations, work sessions, task completions).
 2. Sort unique timestamps to create contiguous disjoint atomic intervals [start, end).
 3. Evaluate evidence precedence and attach dimensions for each atomic interval.
 4. Merge adjacent contiguous blocks only if all semantic fingerprints are identical.
 ```
+
+The collector handles strictly these six concrete sources; future evidence types must be explicitly wired into boundary collection rather than assumed to be automatically supported.
 
 Intervals use half-open semantics `[start, end)` so boundary events do not cause double-counting.
 
@@ -283,7 +293,7 @@ Array order never affects which record is selected. Stable database identifiers 
 
 ## 13. Provenance
 
-The Evidence Model preserves **source-level provenance** for overlapping evidence sources:
+The current `EvidenceTimeline` preserves source-level provenance and authority. It does not preserve raw telemetry event IDs, raw collector metadata, or one provenance record per raw telemetry event.
 
 ### Telemetry Provenance Mapping:
 - `desktop` → `desktop_telemetry`
@@ -301,7 +311,7 @@ When desktop and browser telemetry concurrently overlap an interval:
 - **Concurrent Source Provenance**: All overlapping source classes are preserved in `provenance: EvidenceProvenance[]` (e.g. both `desktop_telemetry` and `browser_telemetry`).
 
 > [!IMPORTANT]
-> **Source-Level vs Lineage**: The current Evidence Model preserves source-level provenance. It does **not** retain raw telemetry event IDs or collector metadata in `EvidenceTimeline`. Do not claim complete raw event lineage exists in the timeline blocks.
+> **Source-Level vs Lineage**: The current EvidenceTimeline preserves source-level provenance and authority. It does not preserve raw telemetry event IDs, raw collector metadata, or one provenance record per raw telemetry event. Do not use terminology such as "complete lineage", "full event lineage", or "complete collector provenance" unless the implementation is actually changed later to support those guarantees.
 
 ---
 
@@ -352,11 +362,13 @@ An evidence timeline can be recomputed at any time from raw events and user repo
 
 ## 17. Existing Legacy Analytics
 
-The new canonical Phase 4 behavioral-pattern architecture is not yet implemented or frozen.
+A legacy `productivityPatterns()` compatibility path already exists for existing analytics/UI consumers. The new canonical Phase 4 behavioral-pattern architecture is still future work.
 
-A legacy `productivityPatterns()` compatibility path currently exists in `@repo/analytics` and is consumed by `apps/api/src/services/analytics/service.ts` to satisfy backward-compatibility requirements for legacy UI consumers.
+The legacy `productivityPatterns()` compatibility path currently exists in `@repo/analytics` and is consumed by `apps/api/src/services/analytics/service.ts` to satisfy backward-compatibility requirements for existing analytics/UI consumers.
 
-This legacy path remains completely separate from the Phase 3 Evidence Model and must not become a competing semantic source of truth for future canonical detectors.
+This legacy path remains completely separate from the Phase 3 Evidence Model and must not become a competing semantic source of truth for future canonical detectors. Future canonical Phase 4 detectors will be built on the canonical feature layer and `EvidenceTimeline`, rather than extending the legacy `productivityPatterns()` function.
+
+Future developers must NOT delete or modify the legacy implementation prematurely, must NOT claim that no pattern logic exists anywhere in the repository, and must NOT call the legacy implementation the canonical Phase 4 detector.
 
 ---
 
@@ -371,6 +383,22 @@ This legacy path remains completely separate from the Phase 3 Evidence Model and
 | **Phase 4** | Canonical Behavioral Pattern Detection (context switches, hyperfocus, fatigue curves, schedule variance) | *Future* |
 | **Phase 5** | Insight Generation (causal correlation between patterns and outcomes) | *Future* |
 | **Phase 6+** | Analytical Daily/Periodic Synthesis, AI Interpretation & Retention Engine | *Future* |
+
+```text
+Phase 3 — Evidence & Observation Model
+Status: COMPLETED / FROZEN
+
+Implementation:
+- frozen
+- deterministic
+- tested
+
+Documentation:
+- reconciled with actual implementation
+
+Future work:
+- Phase 4 Behavioral Pattern Detection
+```
 
 ---
 
@@ -429,7 +457,7 @@ This legacy path remains completely separate from the Phase 3 Evidence Model and
 7. **Invariant 5 (Explicit Attribution)**: Explicit task linking vs unlinked planned tasks.
 8. **Invariant 6 & 12 (Contiguous Coverage)**: Sum of block durations equals total query window.
 9. **Invariant 7 & 13 (Semantic Merging)**: Adjacent blocks merge only when all semantic fingerprints are identical.
-10. **Invariant 8 (Provenance)**: Lineage metadata survives transformation into evidence blocks.
+10. **Invariant 8 (Provenance)**: Source-level provenance metadata survives transformation into evidence blocks.
 11. **Invariant 10 (Outcome Decoupling)**: Task completion is recorded as an outcome, not collapsed into activity.
 12. **Invariant 11 (General Determinism)**: Slicing and evaluation are invariant to input array order.
 13. **Correction 1 (Semantic Fingerprints)**: Merging preserves all semantic dimensions (`alignment`, `energy`, etc.).
