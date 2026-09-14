@@ -2,7 +2,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert";
 import { ContextSwitchingDetector, type CurrentEpisodesProvider } from "./detector";
 import type { ContextSwitchingConfig, ContextSwitchingBaselineSession, ContextSwitchingMetrics } from "./types";
-import type { TemporalEvidenceBlock } from "@repo/types";
+import type { TemporalEvidenceBlock, EpisodeMeasurementOutput } from "@repo/types";
 import type { EpisodeExecutionContext, PatternLevelExecutionContext, DetectorConfiguration } from "../../base/context";
 import type { BaselinePopulationProvider } from "../../baseline/source";
 
@@ -48,11 +48,18 @@ describe("Detector 1: detector.ts", () => {
     configurationVersion: "1.0.0",
     attributionMode: "GENERAL",
     baselineStrategy: "PERSONAL_30_DAY",
-    sufficiency: {} as any
+    sufficiency: {
+      requiredEvidenceQuality: {
+        allowReportedOnly: false,
+        allowExplainedGap: false,
+        maxUnknownFraction: 0.15
+      },
+      unknownHandling: "INDETERMINATE_IF_EXCEEDED"
+    }
   };
 
   class MockCurrentEpisodesProvider implements CurrentEpisodesProvider<ContextSwitchingMetrics> {
-    constructor(private readonly episodes: any[]) {}
+    constructor(private readonly episodes: EpisodeMeasurementOutput<ContextSwitchingMetrics>[]) {}
     async fetchEpisodes() { return this.episodes; }
   }
 
@@ -94,7 +101,7 @@ describe("Detector 1: detector.ts", () => {
         }
       },
       config: mockDetectorConfig,
-      generateOperationalMetadata: () => ({ timestamp: "now", contextType: "test", detectorVersion: "1.0", configurationVersion: "1.0", generatedAt: "now" })
+      generateOperationalMetadata: () => ({ detectorVersion: "1.0", configurationVersion: "1.0", generatedAt: "now" })
     };
 
     const res = detector.evaluateEpisode(context, "eval-1");
@@ -108,41 +115,54 @@ describe("Detector 1: detector.ts", () => {
     assert.deepStrictEqual(res, resShuffled);
   });
 
+  const createEp = (switches: number, dateStr: string, day: string): EpisodeMeasurementOutput<ContextSwitchingMetrics> => ({
+    metadata: {
+      evaluationId: "eval-" + day,
+      detectorVersion: "1.0",
+      configurationVersion: "1.0",
+      generatedAt: "now"
+    },
+    userId: "u1",
+    detectorIdentity: "context_switching_density",
+    level: "EPISODE",
+    attributionMode: "GENERAL",
+    executionStatus: "QUALIFIED",
+    taxonomy: "context_dynamics",
+    episodeEvidence: {
+      sessionId: "s" + day,
+      boundingWindow: { start: dateStr, end: dateStr }
+    },
+    temporalWindow: { start: dateStr, end: dateStr, scale: "CONTINUOUS_INTERVAL" },
+    activeDurationSeconds: 3600,
+    coverageRatio: 1,
+    metrics: { switchesPerHour: switches, medianDwellSeconds: 300, interquartileDwellSeconds: 100, shortContextFraction: 0.1 },
+    epistemicCaveats: []
+  });
+
+  const baselinePop: ContextSwitchingBaselineSession[] = [
+    { sessionId: "h1", userId: "u1", startedAt: "2023-10-01T12:00:00Z", endedAt: "2023-10-01T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 },
+    { sessionId: "h2", userId: "u1", startedAt: "2023-10-02T12:00:00Z", endedAt: "2023-10-02T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 },
+    { sessionId: "h3", userId: "u1", startedAt: "2023-10-03T12:00:00Z", endedAt: "2023-10-03T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 },
+    { sessionId: "h4", userId: "u1", startedAt: "2023-10-04T12:00:00Z", endedAt: "2023-10-04T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 },
+    { sessionId: "h5", userId: "u1", startedAt: "2023-10-05T12:00:00Z", endedAt: "2023-10-05T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 },
+    { sessionId: "h6", userId: "u1", startedAt: "2023-10-06T12:00:00Z", endedAt: "2023-10-06T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 },
+    { sessionId: "h7", userId: "u1", startedAt: "2023-10-07T12:00:00Z", endedAt: "2023-10-07T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 },
+    { sessionId: "h8", userId: "u1", startedAt: "2023-10-08T12:00:00Z", endedAt: "2023-10-08T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 },
+    { sessionId: "h9", userId: "u1", startedAt: "2023-10-09T12:00:00Z", endedAt: "2023-10-09T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 },
+    { sessionId: "h10", userId: "u1", startedAt: "2023-10-10T12:00:00Z", endedAt: "2023-10-10T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 },
+    { sessionId: "h11", userId: "u1", startedAt: "2023-10-11T12:00:00Z", endedAt: "2023-10-11T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 },
+    { sessionId: "h12", userId: "u1", startedAt: "2023-10-12T12:00:00Z", endedAt: "2023-10-12T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 },
+    { sessionId: "h13", userId: "u1", startedAt: "2023-10-13T12:00:00Z", endedAt: "2023-10-13T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 },
+    { sessionId: "h14", userId: "u1", startedAt: "2023-10-14T12:00:00Z", endedAt: "2023-10-14T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 },
+  ];
+
   test("evaluatePattern: full pattern decision, preserved metrics, timezone boundary", async () => {
-    const createEp = (switches: number, day: string) => ({
-      level: "EPISODE",
-      executionStatus: "QUALIFIED",
-      episodeEvidence: { sessionId: "s" + day },
-      activeDurationSeconds: 3600,
-      coverageRatio: 1,
-      metrics: { switchesPerHour: switches, medianDwellSeconds: 300, interquartileDwellSeconds: 100, shortContextFraction: 0.1 },
-      temporalWindow: { start: `2023-11-${day}T12:00:00Z` }
-    } as any);
-
     const episodes = [
-      createEp(10, "15"),
-      createEp(10, "16"),
-      createEp(10, "17"),
-      createEp(10, "18"),
-      createEp(10, "19"),
-    ];
-
-    const baselinePop: ContextSwitchingBaselineSession[] = [
-      { sessionId: "h1", userId: "u1", startedAt: "2023-10-01T12:00:00Z", endedAt: "2023-10-01T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 },
-      { sessionId: "h2", userId: "u1", startedAt: "2023-10-02T12:00:00Z", endedAt: "2023-10-02T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 },
-      { sessionId: "h3", userId: "u1", startedAt: "2023-10-03T12:00:00Z", endedAt: "2023-10-03T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 },
-      { sessionId: "h4", userId: "u1", startedAt: "2023-10-04T12:00:00Z", endedAt: "2023-10-04T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 },
-      { sessionId: "h5", userId: "u1", startedAt: "2023-10-05T12:00:00Z", endedAt: "2023-10-05T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 },
-      // add more days to ensure we pass the 14 days minimum
-      { sessionId: "h6", userId: "u1", startedAt: "2023-10-06T12:00:00Z", endedAt: "2023-10-06T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 },
-      { sessionId: "h7", userId: "u1", startedAt: "2023-10-07T12:00:00Z", endedAt: "2023-10-07T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 },
-      { sessionId: "h8", userId: "u1", startedAt: "2023-10-08T12:00:00Z", endedAt: "2023-10-08T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 },
-      { sessionId: "h9", userId: "u1", startedAt: "2023-10-09T12:00:00Z", endedAt: "2023-10-09T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 },
-      { sessionId: "h10", userId: "u1", startedAt: "2023-10-10T12:00:00Z", endedAt: "2023-10-10T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 },
-      { sessionId: "h11", userId: "u1", startedAt: "2023-10-11T12:00:00Z", endedAt: "2023-10-11T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 },
-      { sessionId: "h12", userId: "u1", startedAt: "2023-10-12T12:00:00Z", endedAt: "2023-10-12T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 },
-      { sessionId: "h13", userId: "u1", startedAt: "2023-10-13T12:00:00Z", endedAt: "2023-10-13T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 },
-      { sessionId: "h14", userId: "u1", startedAt: "2023-10-14T12:00:00Z", endedAt: "2023-10-14T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 },
+      createEp(10, "2023-11-15T12:00:00Z", "15"),
+      createEp(10, "2023-11-16T12:00:00Z", "16"),
+      createEp(10, "2023-11-17T12:00:00Z", "17"),
+      createEp(10, "2023-11-18T12:00:00Z", "18"),
+      createEp(10, "2023-11-19T12:00:00Z", "19"),
     ];
 
     let passedBaselineWindowStart = "";
@@ -179,14 +199,12 @@ describe("Detector 1: detector.ts", () => {
         }
       },
       config: mockDetectorConfig,
-      generateOperationalMetadata: () => ({ timestamp: "now", contextType: "test", detectorVersion: "1.0", configurationVersion: "1.0", generatedAt: "now" })
+      generateOperationalMetadata: () => ({ detectorVersion: "1.0", configurationVersion: "1.0", generatedAt: "now" })
     };
 
     const res = await detector.evaluatePattern(context, "eval-pat", "pat-1");
 
     // 1. Timezone Check
-    // 30 days before Nov 15 midnight LA time is Oct 16 midnight LA time.
-    // Oct 16 LA is UTC-7. So 07:00:00Z
     assert.strictEqual(passedBaselineWindowEnd, "2023-11-15T08:00:00.000Z");
     assert.strictEqual(passedBaselineWindowStart, "2023-10-16T07:00:00.000Z");
 
@@ -205,26 +223,16 @@ describe("Detector 1: detector.ts", () => {
   });
 
   test("evaluatePattern: Baseline Distinct Days Guard", async () => {
-    const createEp = (switches: number, day: string) => ({
-      level: "EPISODE",
-      executionStatus: "QUALIFIED",
-      episodeEvidence: { sessionId: "s" + day },
-      activeDurationSeconds: 3600,
-      coverageRatio: 1,
-      metrics: { switchesPerHour: switches, medianDwellSeconds: 300, interquartileDwellSeconds: 100, shortContextFraction: 0.1 },
-      temporalWindow: { start: `2023-11-${day}T12:00:00Z` }
-    } as any);
-
     const episodes = [
-      createEp(10, "15"),
-      createEp(10, "16"),
-      createEp(10, "17"),
-      createEp(10, "18"),
-      createEp(10, "19"),
+      createEp(10, "2023-11-15T12:00:00Z", "15"),
+      createEp(10, "2023-11-16T12:00:00Z", "16"),
+      createEp(10, "2023-11-17T12:00:00Z", "17"),
+      createEp(10, "2023-11-18T12:00:00Z", "18"),
+      createEp(10, "2023-11-19T12:00:00Z", "19"),
     ];
 
     // 5 sessions, but all on the same day! Minimum distinct days is 14.
-    const baselinePop: ContextSwitchingBaselineSession[] = [
+    const badBaselinePop: ContextSwitchingBaselineSession[] = [
       { sessionId: "h1", userId: "u1", startedAt: "2023-10-01T12:00:00Z", endedAt: "2023-10-01T13:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 },
       { sessionId: "h2", userId: "u1", startedAt: "2023-10-01T13:00:00Z", endedAt: "2023-10-01T14:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 },
       { sessionId: "h3", userId: "u1", startedAt: "2023-10-01T14:00:00Z", endedAt: "2023-10-01T15:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 },
@@ -232,7 +240,7 @@ describe("Detector 1: detector.ts", () => {
       { sessionId: "h5", userId: "u1", startedAt: "2023-10-01T16:00:00Z", endedAt: "2023-10-01T17:00:00Z", activeDurationSeconds: 3600, coverageRatio: 1, switchesPerHour: 2 },
     ];
 
-    const detector = new ContextSwitchingDetector(config, new MockCurrentEpisodesProvider(episodes), new MockBaselineProvider(baselinePop));
+    const detector = new ContextSwitchingDetector(config, new MockCurrentEpisodesProvider(episodes), new MockBaselineProvider(badBaselinePop));
 
     const context: PatternLevelExecutionContext = {
       level: "PATTERN",
@@ -254,11 +262,79 @@ describe("Detector 1: detector.ts", () => {
         }
       },
       config: mockDetectorConfig,
-      generateOperationalMetadata: () => ({ timestamp: "now", contextType: "test", detectorVersion: "1.0", configurationVersion: "1.0", generatedAt: "now" })
+      generateOperationalMetadata: () => ({ detectorVersion: "1.0", configurationVersion: "1.0", generatedAt: "now" })
     };
 
     const res = await detector.evaluatePattern(context, "eval-pat", "pat-1");
     // Should fail baseline distinct day check
     assert.strictEqual(res.executionStatus, "INSUFFICIENT_BASELINE_DATA");
+  });
+
+  test("evaluatePattern: Timezone regression test for current window distinct days", async () => {
+    // We want to test that if UTC dates differ but local dates are the same, it counts as ONE distinct day.
+    // Timezone: America/Los_Angeles (UTC-8 in standard time, UTC-7 in daylight time)
+    // Let's use standard time: Nov 15 2023.
+    // Nov 15 2023 20:00:00 PST = Nov 16 2023 04:00:00 UTC.
+    // Nov 15 2023 10:00:00 PST = Nov 15 2023 18:00:00 UTC.
+    
+    // We provide 5 qualifying episodes. 
+    // They will span UTC dates Nov 15 and Nov 16, but local date is always Nov 15!
+    const localSameEpisodes = [
+      createEp(10, "2023-11-15T18:00:00Z", "1"), // 10:00 PST Nov 15
+      createEp(10, "2023-11-15T22:00:00Z", "2"), // 14:00 PST Nov 15
+      createEp(10, "2023-11-16T02:00:00Z", "3"), // 18:00 PST Nov 15
+      createEp(10, "2023-11-16T04:00:00Z", "4"), // 20:00 PST Nov 15
+      createEp(10, "2023-11-16T06:00:00Z", "5"), // 22:00 PST Nov 15
+    ];
+
+    const contextLocalSame: PatternLevelExecutionContext = {
+      level: "PATTERN",
+      userId: "u1",
+      timezone: "America/Los_Angeles", 
+      timeline: {
+        windowStart: "2023-11-15T08:00:00.000Z", // Midnight LA time Nov 15
+        windowEnd: "2023-11-29T08:00:00.000Z",
+        totalDurationSeconds: 14 * 86400,
+        blocks: [],
+        coverageSummary: {
+          totalDurationSeconds: 14 * 86400,
+          observedSeconds: 14 * 86400,
+          reportedSeconds: 0,
+          observedReportedSeconds: 0,
+          unknownSeconds: 0,
+          explainedGapSeconds: 0,
+          coverageRatio: 1
+        }
+      },
+      config: mockDetectorConfig,
+      generateOperationalMetadata: () => ({ detectorVersion: "1.0", configurationVersion: "1.0", generatedAt: "now" })
+    };
+
+    const detectorSame = new ContextSwitchingDetector(config, new MockCurrentEpisodesProvider(localSameEpisodes), new MockBaselineProvider(baselinePop));
+    
+    const resSame = await detectorSame.evaluatePattern(contextLocalSame, "eval-pat-same", "pat-1");
+    // Because it's only ONE local day, but minimumQualifyingCalendarDays is 3, it should fail with INSUFFICIENT_EVIDENCE
+    assert.strictEqual(resSame.executionStatus, "INSUFFICIENT_EVIDENCE");
+
+    // Now test where UTC dates are the same, but local dates differ.
+    // UTC Nov 15 02:00:00Z = Nov 14 18:00:00 PST
+    // UTC Nov 15 18:00:00Z = Nov 15 10:00:00 PST
+    // UTC Nov 16 02:00:00Z = Nov 15 18:00:00 PST
+    // UTC Nov 16 18:00:00Z = Nov 16 10:00:00 PST
+    // These 4 episodes span 3 distinct local days: Nov 14, Nov 15, Nov 16.
+    const localDiffEpisodes = [
+      createEp(10, "2023-11-15T02:00:00Z", "1"), // Nov 14 local
+      createEp(10, "2023-11-15T18:00:00Z", "2"), // Nov 15 local
+      createEp(10, "2023-11-16T02:00:00Z", "3"), // Nov 15 local
+      createEp(10, "2023-11-16T18:00:00Z", "4"), // Nov 16 local
+      createEp(10, "2023-11-16T20:00:00Z", "5"), // Nov 16 local
+    ];
+
+    const detectorDiff = new ContextSwitchingDetector(config, new MockCurrentEpisodesProvider(localDiffEpisodes), new MockBaselineProvider(baselinePop));
+    const resDiff = await detectorDiff.evaluatePattern(contextLocalSame, "eval-pat-diff", "pat-1");
+    
+    // We have 5 sessions, 3 distinct local days. It should pass evidence sufficiency!
+    assert.notStrictEqual(resDiff.executionStatus, "INSUFFICIENT_EVIDENCE");
+    assert.strictEqual(resDiff.executionStatus, "DETECTED");
   });
 });

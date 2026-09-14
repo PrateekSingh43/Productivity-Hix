@@ -5,7 +5,7 @@ import type { ContextSwitchingConfig, ContextSwitchingMetrics, ContextSwitchingB
 import { evaluateBaseline } from "../../baseline/engine";
 import { median, recurrenceFraction, signedRelativeChange } from "../../baseline/statistics";
 import { safeDivide } from "../../shared/math";
-import { subtractCalendarDays } from "../../qualification/temporal";
+import { subtractCalendarDays, countDistinctCalendarDays } from "../../qualification/temporal";
 
 export function evaluateContextSwitchingPattern(
   context: PatternLevelExecutionContext,
@@ -35,7 +35,10 @@ export function evaluateContextSwitchingPattern(
   let executionStatus = "NO_PATTERN" as any;
   
   // 1. Evidence sufficiency check
-  const distinctDays = new Set(qualifyingEpisodes.map(e => e.temporalWindow.start.split("T")[0])).size;
+  const distinctDays = countDistinctCalendarDays(
+    qualifyingEpisodes.map(e => e.temporalWindow.start),
+    context.timezone
+  );
   if (
     qualifyingEpisodes.length < config.minimumQualifyingSessions ||
     distinctDays < config.minimumQualifyingCalendarDays
