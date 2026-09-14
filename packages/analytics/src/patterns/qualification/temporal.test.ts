@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { countDistinctCalendarDays, isValidTemporalWindow, isValidBaselinePrecedence } from "./temporal";
+import { countDistinctCalendarDays, isValidTemporalWindow, isValidBaselinePrecedence, subtractCalendarDays } from "./temporal";
 
 describe("Phase 4: Temporal Qualification Guards", () => {
   it("isValidTemporalWindow strictly enforces start < end", () => {
@@ -10,9 +10,20 @@ describe("Phase 4: Temporal Qualification Guards", () => {
   });
 
   it("isValidBaselinePrecedence ensures baseline end is <= evaluation start", () => {
-    assert.equal(isValidBaselinePrecedence("2026-09-14T10:00:00Z", "2026-09-14T10:00:00Z"), true); // adjacent
-    assert.equal(isValidBaselinePrecedence("2026-09-14T09:00:00Z", "2026-09-14T10:00:00Z"), true); // precedes
-    assert.equal(isValidBaselinePrecedence("2026-09-14T11:00:00Z", "2026-09-14T10:00:00Z"), false); // leaks
+    assert.strictEqual(isValidBaselinePrecedence("2023-01-01T00:00:00Z", "2023-01-01T00:00:00Z"), true);
+    assert.strictEqual(isValidBaselinePrecedence("2023-01-01T00:00:00Z", "2023-01-01T00:00:01Z"), true);
+    assert.strictEqual(isValidBaselinePrecedence("2023-01-01T00:00:01Z", "2023-01-01T00:00:00Z"), false);
+  });
+
+  it("subtractCalendarDays correctly subtracts 30 days handling exact same local time across DST", () => {
+    // Nov 15 2023 in Los Angeles is standard time (UTC-8)
+    // 08:00:00Z is Midnight (00:00) Nov 15 in LA.
+    const start = "2023-11-15T08:00:00.000Z";
+    const res = subtractCalendarDays(start, 30, "America/Los_Angeles");
+    
+    // 30 days before Nov 15 is Oct 16. Oct 16 is Daylight Saving Time (UTC-7)
+    // So midnight Oct 16 in LA is 07:00:00Z.
+    assert.strictEqual(res, "2023-10-16T07:00:00.000Z");
   });
 
   it("countDistinctCalendarDays respects local timezone boundaries", () => {

@@ -120,4 +120,31 @@ describe("Detector 1: sequence.ts", () => {
     assert.strictEqual(res.switchCount, 0);
     assert.deepStrictEqual(res.dwellDurations, [600, 120]);
   });
+
+  test("parseContextSequence: deterministic ordering regardless of array order", () => {
+    const block1 = appBlock("Code.exe", 600);
+    block1.id = "b1";
+    block1.startTime = "2023-01-01T10:00:00Z";
+    block1.endTime = "2023-01-01T10:10:00Z";
+
+    const block2 = browserBlock("Chrome", "github.com", 1800);
+    block2.id = "b2";
+    block2.startTime = "2023-01-01T10:30:00Z";
+    block2.endTime = "2023-01-01T11:00:00Z";
+
+    const block3 = appBlock("Code.exe", 600);
+    block3.id = "b3";
+    block3.startTime = "2023-01-01T11:00:00Z";
+    block3.endTime = "2023-01-01T11:10:00Z";
+
+    // Expected sequence: Code -> Chrome -> Code (2 switches)
+    const originalBlocks = [block1, block2, block3];
+    const shuffledBlocks = [block3, block1, block2]; // B, A, C order logically B3, B1, B2
+
+    const res1 = parseContextSequence(originalBlocks);
+    const res2 = parseContextSequence(shuffledBlocks);
+
+    assert.strictEqual(res1.switchCount, 2);
+    assert.deepStrictEqual(res1, res2);
+  });
 });

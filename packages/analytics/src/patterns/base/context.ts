@@ -20,6 +20,7 @@ export interface BaseExecutionContextOptions {
   userId: string;
   config: DetectorConfiguration;
   level: "EPISODE" | "PATTERN";
+  canonicalSessionId?: string;
 }
 
 /**
@@ -34,6 +35,7 @@ export class PatternExecutionContext {
   public readonly userId: string;
   public readonly config: DetectorConfiguration;
   public readonly level: "EPISODE" | "PATTERN";
+  public readonly canonicalSessionId?: string;
 
   constructor(options: BaseExecutionContextOptions) {
     if (!isValidTemporalWindow(options.timeline.windowStart, options.timeline.windowEnd)) {
@@ -45,6 +47,7 @@ export class PatternExecutionContext {
     this.userId = options.userId;
     this.config = options.config;
     this.level = options.level;
+    this.canonicalSessionId = options.canonicalSessionId;
   }
 
   /**
@@ -63,6 +66,7 @@ export class PatternExecutionContext {
 
 export interface EpisodeExecutionContext extends PatternExecutionContext {
   readonly level: "EPISODE";
+  readonly canonicalSessionId: string;
 }
 
 export interface PatternLevelExecutionContext extends PatternExecutionContext {

@@ -1,17 +1,18 @@
 import type { PatternLevelExecutionContext } from "../../base/context";
 import { createPatternResult } from "../../base/detector";
-import type { EpisodeMeasurementOutput, WorkSession } from "@repo/types";
-import type { ContextSwitchingConfig, ContextSwitchingMetrics } from "./types";
+import type { EpisodeMeasurementOutput } from "@repo/types";
+import type { ContextSwitchingConfig, ContextSwitchingMetrics, ContextSwitchingBaselineSession, ContextSwitchingPatternMetrics } from "./types";
 import { evaluateBaseline } from "../../baseline/engine";
 import { median, recurrenceFraction, signedRelativeChange } from "../../baseline/statistics";
 import { safeDivide } from "../../shared/math";
+import { subtractCalendarDays } from "../../qualification/temporal";
 
 export function evaluateContextSwitchingPattern(
   context: PatternLevelExecutionContext,
   evaluationId: string,
   patternId: string,
   episodes: EpisodeMeasurementOutput<ContextSwitchingMetrics>[],
-  historicalSessions: WorkSession[],
+  historicalSessions: ContextSwitchingBaselineSession[],
   config: ContextSwitchingConfig
 ) {
   // Aggregate episodes in the current window
@@ -46,9 +47,8 @@ export function evaluateContextSwitchingPattern(
 
   // 2. Baseline calculation (30-day non-overlapping preceding window)
   const baselineWindow = {
-    // The evaluation engine will handle actual parsing, but we just pass D-43 to D-13 window logically
-    start: getDaysAgo(context.timeline.windowStart, 30), // Actually 30 days before D-13
-    end: context.timeline.windowStart // D-13
+    start: subtractCalendarDays(context.timeline.windowStart, 30, context.timezone),
+    end: context.timeline.windowStart
   };
 
   const baselineResult = evaluateBaseline(
@@ -59,10 +59,9 @@ export function evaluateContextSwitchingPattern(
       populationType: "completed_sessions",
       metricName: "switchesPerHour",
       strategy: "median",
-      qualifier: (session) => true, // In actual implementation, we might filter, but the prompt says baseline population is strictly eligible sessions from the provider
-      metricExtractor: (session) => {
-        return (session as any).switchesPerHour ?? null; 
-      },
+      qualifier: (session) => true,
+      timestampExtractor: (session) => session.startedAt,
+      metricExtractor: (session) => session.switchesPerHour,
       aggregator: (vals) => median(vals),
       minimumPopulationCount: config.minimumBaselineSessions,
       minimumDistinctDays: config.minimumBaselineDays
@@ -72,6 +71,11 @@ export function evaluateContextSwitchingPattern(
   let baselineMedianSwitchesPerHour: number | null = null;
   let deltaRatio: number | null = null;
   let comparisonStatus = "NOT_APPLICABLE" as any;
+  let elevatedSessionFraction: number | null = null;
+  let currentMedianSwitchesPerHour: number | null = null;
+  let currentMedianDwellSeconds: number | null = null;
+  let currentMedianIqrDwell: number | null = null;
+  let currentMedianShortContextFraction: number | null = null;
   
   if (executionStatus !== "INSUFFICIENT_EVIDENCE" && executionStatus !== "INDETERMINATE_COVERAGE") {
     // Check baseline maturity
@@ -80,11 +84,11 @@ export function evaluateContextSwitchingPattern(
       comparisonStatus = "INSUFFICIENT_BASELINE_DATA";
     } else if (baselineResult.status === "VALID") {
       baselineMedianSwitchesPerHour = baselineResult.aggregatedValue;
-      const currentMedianSwitchesPerHour = median(
-        qualifyingEpisodes
-          .map(e => e.metrics.switchesPerHour)
-          .filter(v => v !== null) as number[]
-      );
+      
+      currentMedianSwitchesPerHour = median(qualifyingEpisodes.map(e => e.metrics.switchesPerHour).filter(v => v !== null) as number[]);
+      currentMedianDwellSeconds = median(qualifyingEpisodes.map(e => e.metrics.medianDwellSeconds).filter(v => v !== null) as number[]);
+      currentMedianIqrDwell = median(qualifyingEpisodes.map(e => e.metrics.interquartileDwellSeconds).filter(v => v !== null) as number[]);
+      currentMedianShortContextFraction = median(qualifyingEpisodes.map(e => e.metrics.shortContextFraction).filter(v => v !== null) as number[]);
       
       // Zero Baseline Guard
       if (baselineMedianSwitchesPerHour === null || baselineMedianSwitchesPerHour <= 0) {
@@ -114,7 +118,7 @@ export function evaluateContextSwitchingPattern(
         e.metrics.switchesPerHour !== null && e.metrics.switchesPerHour > comparisonThreshold
       ).length;
       
-      const elevatedSessionFraction = recurrenceFraction(elevatedSessions, qualifyingEpisodes.length);
+      elevatedSessionFraction = recurrenceFraction(elevatedSessions, qualifyingEpisodes.length);
       
       const contrastPasses = comparisonStatus === "UNDEFINED_ZERO_BASELINE" 
         ? (currentMedianSwitchesPerHour !== null && currentMedianSwitchesPerHour >= config.absoluteElevatedSwitchThreshold)
@@ -133,7 +137,7 @@ export function evaluateContextSwitchingPattern(
   // Canonicalize IDs
   const contributingSessionIds = qualifyingEpisodes.map(e => e.episodeEvidence.sessionId!).sort();
 
-  return createPatternResult(
+  return createPatternResult<ContextSwitchingPatternMetrics>(
     context,
     evaluationId,
     patternId,
@@ -161,10 +165,11 @@ export function evaluateContextSwitchingPattern(
         comparisonStatus
       },
       metrics: {
-        switchesPerHour: null,
-        medianDwellSeconds: null,
-        interquartileDwellSeconds: null,
-        shortContextFraction: null
+        switchesPerHour: currentMedianSwitchesPerHour,
+        medianDwellSeconds: currentMedianDwellSeconds,
+        interquartileDwellSeconds: currentMedianIqrDwell,
+        shortContextFraction: currentMedianShortContextFraction,
+        elevatedSessionFraction
       },
       reliability: {
         tier: "PROVISIONAL",
@@ -185,10 +190,4 @@ export function evaluateContextSwitchingPattern(
       epistemicCaveats: []
     }
   );
-}
-
-function getDaysAgo(dateString: string, days: number): string {
-  const d = new Date(dateString);
-  d.setUTCDate(d.getUTCDate() - days);
-  return d.toISOString();
 }

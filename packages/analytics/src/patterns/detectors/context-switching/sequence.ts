@@ -7,6 +7,13 @@ export interface ContextSequenceResult {
 }
 
 export function parseContextSequence(blocks: TemporalEvidenceBlock[]): ContextSequenceResult {
+  const sortedBlocks = [...blocks].sort((a, b) => {
+    if (a.startTime !== b.startTime) return a.startTime < b.startTime ? -1 : 1;
+    if (a.endTime !== b.endTime) return a.endTime < b.endTime ? -1 : 1;
+    if (a.id !== b.id) return a.id < b.id ? -1 : 1;
+    return 0;
+  });
+
   let switchCount = 0;
   const dwells: number[] = [];
   let qualifyingObservedActiveDurationSeconds = 0;
@@ -14,7 +21,7 @@ export function parseContextSequence(blocks: TemporalEvidenceBlock[]): ContextSe
   let currentKey: string | null = null;
   let currentDwellDuration = 0;
   
-  for (const block of blocks) {
+  for (const block of sortedBlocks) {
     if (block.coverage === "UNKNOWN") {
       // Interruption boundary: terminal dwell finalized, sequence interrupted
       if (currentKey !== null) {

@@ -18,3 +18,18 @@ export interface ContextSwitchingMetrics {
   interquartileDwellSeconds: number | null;
   shortContextFraction: number | null;
 }
+
+export interface ContextSwitchingBaselineSession {
+  sessionId: string;
+  userId: string;
+  startedAt: string;
+  endedAt: string;
+  activeDurationSeconds: number;
+  coverageRatio: number;
+  switchesPerHour: number | null;
+}
+
+export interface ContextSwitchingPatternMetrics extends ContextSwitchingMetrics {
+  elevatedSessionFraction: number | null;
+}
+

@@ -4,17 +4,18 @@ import type { EpisodeMeasurementOutput, BehavioralPatternOutput, WorkSession } f
 import type { BaselinePopulationProvider } from "../../baseline/source";
 import { evaluateContextSwitchingEpisode } from "./episode";
 import { evaluateContextSwitchingPattern } from "./pattern";
-import type { ContextSwitchingConfig, ContextSwitchingMetrics } from "./types";
+import type { ContextSwitchingConfig, ContextSwitchingMetrics, ContextSwitchingBaselineSession, ContextSwitchingPatternMetrics } from "./types";
+import { subtractCalendarDays } from "../../qualification/temporal";
 
 export interface CurrentEpisodesProvider<TMetrics> {
   fetchEpisodes(userId: string, window: { start: string; end: string }): Promise<EpisodeMeasurementOutput<TMetrics>[]>;
 }
 
-export class ContextSwitchingDetector implements EpisodeDetector<ContextSwitchingMetrics>, PatternDetector<ContextSwitchingMetrics> {
+export class ContextSwitchingDetector implements EpisodeDetector<ContextSwitchingMetrics>, PatternDetector<ContextSwitchingPatternMetrics> {
   constructor(
     private readonly config: ContextSwitchingConfig,
     private readonly currentEpisodesProvider: CurrentEpisodesProvider<ContextSwitchingMetrics>,
-    private readonly baselineProvider: BaselinePopulationProvider<WorkSession & { switchesPerHour: number | null }>
+    private readonly baselineProvider: BaselinePopulationProvider<ContextSwitchingBaselineSession>
   ) {}
 
   public evaluateEpisode(
@@ -22,7 +23,7 @@ export class ContextSwitchingDetector implements EpisodeDetector<ContextSwitchin
     evaluationId: string
   ): EpisodeMeasurementOutput<ContextSwitchingMetrics> {
     const session: WorkSession = {
-      id: "ep-" + context.timeline.windowStart,
+      id: context.canonicalSessionId,
       userId: context.userId,
       startedAt: context.timeline.windowStart,
       endedAt: context.timeline.windowEnd,
@@ -43,7 +44,7 @@ export class ContextSwitchingDetector implements EpisodeDetector<ContextSwitchin
     context: PatternLevelExecutionContext,
     evaluationId: string,
     patternId: string
-  ): Promise<BehavioralPatternOutput<ContextSwitchingMetrics>> {
+  ): Promise<BehavioralPatternOutput<ContextSwitchingPatternMetrics>> {
     // 1. Fetch evaluated current window episodes
     const currentEpisodes = await this.currentEpisodesProvider.fetchEpisodes(context.userId, {
       start: context.timeline.windowStart,
@@ -53,7 +54,7 @@ export class ContextSwitchingDetector implements EpisodeDetector<ContextSwitchin
     // 2. Fetch baseline historical sessions
     // Baseline window is [D-43, D-13)
     const baselineWindowEnd = context.timeline.windowStart;
-    const baselineWindowStart = this.getDaysAgo(baselineWindowEnd, 30);
+    const baselineWindowStart = subtractCalendarDays(baselineWindowEnd, 30, context.timezone);
     const historicalSessions = await this.baselineProvider.fetchPopulation(context.userId, {
       start: baselineWindowStart,
       end: baselineWindowEnd
@@ -67,11 +68,5 @@ export class ContextSwitchingDetector implements EpisodeDetector<ContextSwitchin
       historicalSessions,
       this.config
     );
-  }
-
-  private getDaysAgo(dateString: string, days: number): string {
-    const d = new Date(dateString);
-    d.setUTCDate(d.getUTCDate() - days);
-    return d.toISOString();
   }
 }
