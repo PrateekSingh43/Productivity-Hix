@@ -1,5 +1,5 @@
 import type { TaskDataSource } from "./completed-tasks-adapter";
-import type { TaskWithSessions } from "@repo/types";
+import type { TaskWithSessions, TaskStatus, TaskPriority } from "@repo/types";
 import type { Database } from "@repo/db";
 
 /**
@@ -52,8 +52,8 @@ export class PrismaTaskDataSource implements TaskDataSource {
       userId: t.userId,
       title: t.title,
       description: t.description,
-      status: t.status as any,
-      priority: t.priority as any,
+      status: t.status as TaskStatus,
+      priority: t.priority as TaskPriority,
       plannedDurationMinutes: t.plannedDurationMinutes ?? 30,
       dueAt: t.dueAt?.toISOString() ?? null,
       completedAt: t.completedAt?.toISOString() ?? null,

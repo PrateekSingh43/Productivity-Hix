@@ -1,6 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
 import { PrismaTaskDataSource } from "./prisma-task-data-source";
+import { CompletedTasksAdapter } from "./completed-tasks-adapter";
+import { evaluateBaseline } from "../engine";
 import type { Database } from "@repo/db";
 
 describe("Baseline: PrismaTaskDataSource", () => {
@@ -76,5 +78,55 @@ describe("Baseline: PrismaTaskDataSource", () => {
     assert.strictEqual(task.sessions[0].durationSeconds, 3600);
     assert.strictEqual(task.checkIns!.length, 1);
     assert.strictEqual(task.checkIns![0].energy, "high");
+  });
+
+  it("should prove end-to-end architecture (PrismaTaskDataSource -> CompletedTasksAdapter -> evaluateBaseline)", async () => {
+    const mockDb = {
+      task: {
+        findMany: async () => [
+          {
+            id: "task-1",
+            userId: "user-1",
+            title: "Task 1",
+            description: null,
+            status: "done",
+            priority: "none",
+            plannedDurationMinutes: 30,
+            dueAt: null,
+            completedAt: new Date("2023-01-05T10:00:00Z"),
+            goalId: null,
+            productiveDate: null,
+            createdAt: new Date("2023-01-01T10:00:00Z"),
+            updatedAt: new Date("2023-01-05T10:00:00Z"),
+            sessions: [],
+            checkIns: []
+          }
+        ]
+      }
+    } as unknown as Database;
+
+    const source = new PrismaTaskDataSource(mockDb);
+    const adapter = new CompletedTasksAdapter(source);
+    
+    const window = {
+      start: "2023-01-01T00:00:00Z",
+      end: "2023-01-10T00:00:00Z",
+    };
+    const evalStart = "2023-01-10T00:00:00Z";
+    
+    const population = await adapter.fetchPopulation("user-1", window);
+    
+    const result = evaluateBaseline(population, window, evalStart, {
+      populationType: adapter.populationType,
+      metricName: "taskCount",
+      strategy: "count",
+      qualifier: () => true,
+      metricExtractor: () => 1,
+      aggregator: (vals) => vals.length,
+    });
+    
+    assert.strictEqual(result.status, "VALID");
+    assert.strictEqual(result.aggregatedValue, 1);
+    assert.strictEqual(result.populationType, "completed_tasks");
   });
 });
