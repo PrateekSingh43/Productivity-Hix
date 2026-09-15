@@ -98,7 +98,7 @@ export function evaluateTaskFragmentationPattern(
       metricExtractor: (ep) => ep.wallClockFragmentationRatio,
       aggregator: (vals) => median(vals),
       minimumPopulationCount: config.minimumBaselineEpisodes,
-      minimumDistinctDays: 2,
+      minimumDistinctDays: config.minimumBaselineDistinctDays,
       timezone: context.timezone,
     }
   );
@@ -212,7 +212,7 @@ export function evaluateTaskFragmentationPattern(
         meanCoverageRatio: meanTelemetryCoverageRatio,
       },
       baseline: {
-        strategy: "SAME_TASK_TYPE",
+        strategy: config.baselineStrategy ?? "ROLLING_14_DAY_WINDOW",
         comparedMetric: "wallClockFragmentationRatio",
         baselineValue: baselineMedianFragmentation,
         currentValue: currentMedianFragmentation,

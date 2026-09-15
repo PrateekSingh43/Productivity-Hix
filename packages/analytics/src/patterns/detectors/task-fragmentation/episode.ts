@@ -4,11 +4,39 @@ import type { EpisodeMeasurementOutput, EpisodeExecutionStatus, TemporalEvidence
 import type { TaskFragmentationConfig, TaskExecutionFragmentationMetrics } from "./types";
 import { segmentTaskExecutionEpisodes, findAuthoritativeTaskIds } from "./sequence";
 
+function createEmptyMetrics(taskId: string): TaskExecutionFragmentationMetrics {
+  return {
+    taskId,
+    fragmentCount: 0,
+    wallClockSpanSeconds: 0,
+    activeTaskDurationSeconds: 0,
+    knownInterveningGapSeconds: 0,
+    unknownSeconds: 0,
+    unknownFraction: 0,
+    wallClockFragmentationRatio: null,
+    medianFragmentDurationSeconds: null,
+    longestFragmentDurationSeconds: null,
+    interquartileFragmentDurationSeconds: null,
+    medianInterveningGapSeconds: null,
+    gapBreakdown: {
+      breakSeconds: 0,
+      otherTaskSeconds: 0,
+      unattributedObservedSeconds: 0,
+      explainedGapSeconds: 0,
+    },
+  };
+}
+
 /**
  * Evaluates a single bounded task execution episode.
  * 
  * Rules:
- * - Authoritative taskId must be present with linkType === "EXPLICIT".
+ * - A D2 EpisodeExecutionContext must identify one authoritative target task.
+ * - If multiple authoritative tasks exist and no explicit targetTaskId is supplied,
+ *   returns an explicit INSUFFICIENT_EVIDENCE result without guessing or arbitrary selection.
+ * - A session ID is NEVER interpreted as a task ID.
+ * - An EpisodeExecutionContext maps to exactly one bounded task execution episode.
+ * - Multiple bounded episodes within the window are rejected rather than silently using episodes[0].
  * - If unknownFraction > maxUnknownFraction (candidate 0.20) -> INDETERMINATE_COVERAGE.
  * - If activeTaskDurationSeconds < minimumEpisodeActiveDurationSeconds -> INSUFFICIENT_EVIDENCE.
  * - Preserves exact conservation: wallClockSpan = activeTask + knownGaps + unknown.
@@ -23,71 +51,75 @@ export function evaluateTaskFragmentationEpisode(
 ): EpisodeMeasurementOutput<TaskExecutionFragmentationMetrics> {
   const epistemicCaveats: string[] = [];
 
-  // Determine authoritative target taskId
-  let resolvedTaskId = targetTaskId;
+  // Determine authoritative target taskId from explicit parameter or context
+  let resolvedTaskId = targetTaskId ?? context.targetTaskId;
+
   if (!resolvedTaskId) {
     const authoritativeIds = findAuthoritativeTaskIds(blocks);
-    if (authoritativeIds.includes(context.canonicalSessionId)) {
-      resolvedTaskId = context.canonicalSessionId;
-    } else if (authoritativeIds.length === 1) {
-      resolvedTaskId = authoritativeIds[0];
-    } else if (authoritativeIds.length > 1) {
-      // Pick the primary taskId deterministically (first alphabetically)
-      resolvedTaskId = authoritativeIds[0];
-      epistemicCaveats.push(
-        `Multiple authoritative tasks detected in window; evaluating primary task ${resolvedTaskId}.`
-      );
-    }
-  }
 
-  // If still no authoritative taskId, return INSUFFICIENT_EVIDENCE
-  if (!resolvedTaskId) {
-    const emptyMetrics: TaskExecutionFragmentationMetrics = {
-      taskId: "unknown",
-      fragmentCount: 0,
-      wallClockSpanSeconds: 0,
-      activeTaskDurationSeconds: 0,
-      knownInterveningGapSeconds: 0,
-      unknownSeconds: 0,
-      unknownFraction: 0,
-      wallClockFragmentationRatio: null,
-      medianFragmentDurationSeconds: null,
-      longestFragmentDurationSeconds: null,
-      interquartileFragmentDurationSeconds: null,
-      medianInterveningGapSeconds: null,
-      gapBreakdown: {
-        breakSeconds: 0,
-        otherTaskSeconds: 0,
-        unattributedObservedSeconds: 0,
-        explainedGapSeconds: 0,
-      },
-    };
-
-    return createEpisodeResult<TaskExecutionFragmentationMetrics>(
-      context,
-      evaluationId,
-      "INSUFFICIENT_EVIDENCE",
-      {
-        taxonomy: "context_dynamics",
-        temporalWindow: {
-          start: context.timeline.windowStart,
-          end: context.timeline.windowEnd,
-          scale: "TASK_INSTANCE",
-        },
-        episodeEvidence: {
-          sessionId: context.canonicalSessionId,
-          taskId: undefined,
-          boundingWindow: {
+    if (authoritativeIds.length === 0) {
+      return createEpisodeResult<TaskExecutionFragmentationMetrics>(
+        context,
+        evaluationId,
+        "INSUFFICIENT_EVIDENCE",
+        {
+          taxonomy: "context_dynamics",
+          temporalWindow: {
             start: context.timeline.windowStart,
             end: context.timeline.windowEnd,
+            scale: "TASK_INSTANCE",
           },
-        },
-        activeDurationSeconds: 0,
-        coverageRatio: 0,
-        metrics: emptyMetrics,
-        epistemicCaveats: ["No authoritative explicit task linkage found in episode window."],
-      }
-    );
+          episodeEvidence: {
+            sessionId: context.canonicalSessionId,
+            taskId: undefined,
+            boundingWindow: {
+              start: context.timeline.windowStart,
+              end: context.timeline.windowEnd,
+            },
+          },
+          activeDurationSeconds: 0,
+          coverageRatio: 0,
+          metrics: createEmptyMetrics("unknown"),
+          epistemicCaveats: ["No authoritative explicit task linkage found in episode window."],
+        }
+      );
+    }
+
+    if (authoritativeIds.length > 1) {
+      // Reject ambiguous multi-task context without guessing or picking arbitrarily
+      return createEpisodeResult<TaskExecutionFragmentationMetrics>(
+        context,
+        evaluationId,
+        "INSUFFICIENT_EVIDENCE",
+        {
+          taxonomy: "context_dynamics",
+          temporalWindow: {
+            start: context.timeline.windowStart,
+            end: context.timeline.windowEnd,
+            scale: "TASK_INSTANCE",
+          },
+          episodeEvidence: {
+            sessionId: context.canonicalSessionId,
+            taskId: undefined,
+            boundingWindow: {
+              start: context.timeline.windowStart,
+              end: context.timeline.windowEnd,
+            },
+          },
+          activeDurationSeconds: 0,
+          coverageRatio: 0,
+          metrics: createEmptyMetrics("ambiguous"),
+          epistemicCaveats: [
+            `Ambiguous task context: Multiple authoritative tasks detected in window (${authoritativeIds.join(
+              ", "
+            )}) with no explicit targetTaskId provided.`,
+          ],
+        }
+      );
+    }
+
+    // Exactly one authoritative task ID present
+    resolvedTaskId = authoritativeIds[0];
   }
 
   // Segment blocks into bounded task episodes
@@ -98,27 +130,6 @@ export function evaluateTaskFragmentationEpisode(
   });
 
   if (episodes.length === 0) {
-    const emptyMetrics: TaskExecutionFragmentationMetrics = {
-      taskId: resolvedTaskId,
-      fragmentCount: 0,
-      wallClockSpanSeconds: 0,
-      activeTaskDurationSeconds: 0,
-      knownInterveningGapSeconds: 0,
-      unknownSeconds: 0,
-      unknownFraction: 0,
-      wallClockFragmentationRatio: null,
-      medianFragmentDurationSeconds: null,
-      longestFragmentDurationSeconds: null,
-      interquartileFragmentDurationSeconds: null,
-      medianInterveningGapSeconds: null,
-      gapBreakdown: {
-        breakSeconds: 0,
-        otherTaskSeconds: 0,
-        unattributedObservedSeconds: 0,
-        explainedGapSeconds: 0,
-      },
-    };
-
     return createEpisodeResult<TaskExecutionFragmentationMetrics>(
       context,
       evaluationId,
@@ -140,13 +151,44 @@ export function evaluateTaskFragmentationEpisode(
         },
         activeDurationSeconds: 0,
         coverageRatio: 0,
-        metrics: emptyMetrics,
+        metrics: createEmptyMetrics(resolvedTaskId),
         epistemicCaveats: ["No active task execution fragments observed for task."],
       }
     );
   }
 
-  // Use the primary bounded episode
+  // D2 Fix 2: Exactly one bounded task execution episode per EpisodeExecutionContext.
+  // Multiple bounded episodes must not be silently discarded or truncated to episodes[0].
+  if (episodes.length > 1) {
+    return createEpisodeResult<TaskExecutionFragmentationMetrics>(
+      context,
+      evaluationId,
+      "INSUFFICIENT_EVIDENCE",
+      {
+        taxonomy: "context_dynamics",
+        temporalWindow: {
+          start: context.timeline.windowStart,
+          end: context.timeline.windowEnd,
+          scale: "TASK_INSTANCE",
+        },
+        episodeEvidence: {
+          sessionId: context.canonicalSessionId,
+          taskId: resolvedTaskId,
+          boundingWindow: {
+            start: context.timeline.windowStart,
+            end: context.timeline.windowEnd,
+          },
+        },
+        activeDurationSeconds: 0,
+        coverageRatio: 0,
+        metrics: createEmptyMetrics(resolvedTaskId),
+        epistemicCaveats: [
+          `Multiple bounded task execution episodes detected within a single EpisodeExecutionContext window (${episodes.length} episodes). An EpisodeExecutionContext must encompass exactly one bounded episode.`,
+        ],
+      }
+    );
+  }
+
   const episode = episodes[0]!;
 
   let executionStatus: EpisodeExecutionStatus = "QUALIFIED";

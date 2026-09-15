@@ -51,6 +51,20 @@ export interface TaskFragmentationConfig {
   minimumBaselineEpisodes: number;
 
   /**
+   * Minimum distinct calendar days required in baseline population.
+   * Candidate: 2 distinct days.
+   */
+  minimumBaselineDistinctDays: number;
+
+  /**
+   * Baseline strategy to employ for comparison.
+   * Note: The Task model in Prisma currently does not define an authoritative task type field.
+   * Baseline compares against user's historical task execution episodes across the baseline window.
+   * Defaults to "ROLLING_14_DAY_WINDOW" or "PERSONAL_30_DAY".
+   */
+  baselineStrategy?: "ROLLING_14_DAY_WINDOW" | "PERSONAL_30_DAY" | "PERSONAL_HISTORICAL_VARIANCE";
+
+  /**
    * Contrast threshold for deltaFragmentation (current - baseline).
    * Candidate: +0.30.
    */

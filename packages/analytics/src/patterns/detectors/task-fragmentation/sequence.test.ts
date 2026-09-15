@@ -316,6 +316,33 @@ describe("Detector 2: sequence.ts", () => {
     assert.deepStrictEqual(res1, res2);
   });
 
+  test("uncovered silent gap with no evidence blocks is accounted for as unknown and conserves span", () => {
+    // Task 1: 10:00-10:20 (1200s)
+    // [NO BLOCKS AT ALL from 10:20 to 10:40! (1200s)]
+    // Task 1: 10:40-11:00 (1200s)
+    const blocks = [
+      taskBlock("b1", "2026-09-01T10:00:00Z", "2026-09-01T10:20:00Z", 1200, "task-1"),
+      taskBlock("b2", "2026-09-01T10:40:00Z", "2026-09-01T11:00:00Z", 1200, "task-1"),
+    ];
+
+    const episodes = segmentTaskExecutionEpisodes(blocks, "task-1");
+    assert.strictEqual(episodes.length, 1);
+
+    const ep = episodes[0]!;
+    assert.strictEqual(ep.wallClockSpanSeconds, 3600);
+    assert.strictEqual(ep.activeTaskDurationSeconds, 2400);
+    assert.strictEqual(ep.knownInterveningGapSeconds, 0);
+    assert.strictEqual(ep.unknownSeconds, 1200); // Uncovered hole strictly accounted for as UNKNOWN!
+    assert.strictEqual(ep.unknownFraction, 1200 / 3600);
+    assert.strictEqual(ep.wallClockFragmentationRatio, 0);
+
+    // Strict conservation invariant: no disappearing time
+    assert.strictEqual(
+      ep.wallClockSpanSeconds,
+      ep.activeTaskDurationSeconds + ep.knownInterveningGapSeconds + ep.unknownSeconds
+    );
+  });
+
   test("empty blocks returns empty episodes safely", () => {
     const episodes = segmentTaskExecutionEpisodes([], "task-1");
     assert.deepStrictEqual(episodes, []);

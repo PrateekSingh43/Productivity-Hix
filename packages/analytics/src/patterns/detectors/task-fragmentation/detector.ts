@@ -39,7 +39,8 @@ export class TaskFragmentationDetector
       context,
       evaluationId,
       context.timeline.blocks,
-      this.config
+      this.config,
+      context.targetTaskId
     );
   }
 

@@ -196,9 +196,14 @@ export function segmentTaskExecutionEpisodes(
         lastBlockIndex: idx,
         firstBlockIndex: idx,
       };
-    } else if (idx === currentFragment.lastBlockIndex + 1) {
-      // Contiguous in sorted sequence
-      currentFragment.endTime = block.endTime;
+    } else if (
+      idx === currentFragment.lastBlockIndex + 1 &&
+      Date.parse(block.startTime) <= Date.parse(currentFragment.endTime)
+    ) {
+      // Contiguous in sorted sequence with no temporal gap
+      currentFragment.endTime = new Date(
+        Math.max(Date.parse(currentFragment.endTime), Date.parse(block.endTime))
+      ).toISOString();
       currentFragment.durationSeconds += block.durationSeconds;
       currentFragment.blockIds.push(block.id);
       currentFragment.lastBlockIndex = idx;
@@ -277,20 +282,6 @@ export function segmentTaskExecutionEpisodes(
       activeTaskDurationSeconds += frag.durationSeconds;
     }
 
-    // Identify intervening blocks inside [startedAt, endedAt)
-    const interveningBlocks = sortedBlocks.filter((b) => {
-      const bStartMs = Date.parse(b.startTime);
-      const bEndMs = Date.parse(b.endTime);
-      const spanStartMs = Date.parse(startedAt);
-      const spanEndMs = Date.parse(endedAt);
-
-      // Must be inside the bounding interval
-      if (bStartMs < spanStartMs || bEndMs > spanEndMs) return false;
-
-      // Must not be one of the active task blocks
-      return !isAuthoritativeTaskBlock(b, targetTaskId);
-    });
-
     let knownInterveningGapSeconds = 0;
     let unknownSeconds = 0;
     let breakSeconds = 0;
@@ -300,35 +291,97 @@ export function segmentTaskExecutionEpisodes(
 
     const gaps: TaskInterveningGap[] = [];
 
-    for (const b of interveningBlocks) {
-      const { kind, isKnown } = classifyInterveningBlock(b, targetTaskId);
-      if (isKnown) {
-        knownInterveningGapSeconds += b.durationSeconds;
-        switch (kind) {
-          case "break":
-            breakSeconds += b.durationSeconds;
-            break;
-          case "other_task":
-            otherTaskSeconds += b.durationSeconds;
-            break;
-          case "unattributed_observed":
-            unattributedObservedSeconds += b.durationSeconds;
-            break;
-          case "explained_gap":
-            explainedGapSeconds += b.durationSeconds;
-            break;
-        }
-      } else {
-        unknownSeconds += b.durationSeconds;
+    // Process each intervening gap between successive fragments to guarantee
+    // the conservation invariant: wallClockSpan = activeTask + knownGap + unknown.
+    for (let j = 1; j < clusterFragments.length; j++) {
+      const prevFrag = clusterFragments[j - 1]!;
+      const currFrag = clusterFragments[j]!;
+
+      const gapStartMs = Date.parse(prevFrag.endTime);
+      const gapEndMs = Date.parse(currFrag.startTime);
+
+      if (gapEndMs <= gapStartMs) {
+        continue;
       }
 
-      gaps.push({
-        startTime: b.startTime,
-        endTime: b.endTime,
-        durationSeconds: b.durationSeconds,
-        kind,
-        blockIds: [b.id],
+      // Find blocks overlapping this specific gap interval [gapStartMs, gapEndMs)
+      const blocksInGap = sortedBlocks.filter((b) => {
+        const bStartMs = Date.parse(b.startTime);
+        const bEndMs = Date.parse(b.endTime);
+        return bStartMs < gapEndMs && bEndMs > gapStartMs && !isAuthoritativeTaskBlock(b, targetTaskId);
       });
+
+      let cursorMs = gapStartMs;
+
+      for (const b of blocksInGap) {
+        const bStartMs = Date.parse(b.startTime);
+        const bEndMs = Date.parse(b.endTime);
+
+        const clampedStartMs = Math.max(gapStartMs, Math.max(cursorMs, bStartMs));
+        const clampedEndMs = Math.min(gapEndMs, bEndMs);
+
+        if (clampedStartMs > cursorMs) {
+          // Uncovered interval between cursor and block start -> missing telemetry (UNKNOWN)
+          const holeDuration = (clampedStartMs - cursorMs) / 1000;
+          unknownSeconds += holeDuration;
+          gaps.push({
+            startTime: new Date(cursorMs).toISOString(),
+            endTime: new Date(clampedStartMs).toISOString(),
+            durationSeconds: holeDuration,
+            kind: "unknown",
+            blockIds: [],
+          });
+          cursorMs = clampedStartMs;
+        }
+
+        if (clampedEndMs > cursorMs) {
+          const duration = (clampedEndMs - cursorMs) / 1000;
+          const { kind, isKnown } = classifyInterveningBlock(b, targetTaskId);
+
+          if (isKnown) {
+            knownInterveningGapSeconds += duration;
+            switch (kind) {
+              case "break":
+                breakSeconds += duration;
+                break;
+              case "other_task":
+                otherTaskSeconds += duration;
+                break;
+              case "unattributed_observed":
+                unattributedObservedSeconds += duration;
+                break;
+              case "explained_gap":
+                explainedGapSeconds += duration;
+                break;
+            }
+          } else {
+            unknownSeconds += duration;
+          }
+
+          gaps.push({
+            startTime: new Date(cursorMs).toISOString(),
+            endTime: new Date(clampedEndMs).toISOString(),
+            durationSeconds: duration,
+            kind,
+            blockIds: [b.id],
+          });
+
+          cursorMs = clampedEndMs;
+        }
+      }
+
+      // If trailing uncovered interval remains in this gap -> missing telemetry (UNKNOWN)
+      if (cursorMs < gapEndMs) {
+        const trailingHoleDuration = (gapEndMs - cursorMs) / 1000;
+        unknownSeconds += trailingHoleDuration;
+        gaps.push({
+          startTime: new Date(cursorMs).toISOString(),
+          endTime: new Date(gapEndMs).toISOString(),
+          durationSeconds: trailingHoleDuration,
+          kind: "unknown",
+          blockIds: [],
+        });
+      }
     }
 
     // Zero guard for fractions
