@@ -123,6 +123,7 @@ model Task {
   status                 TaskStatus    @default(todo)
   priority               String        @default("medium")
   plannedDurationMinutes Int?          @default(30) @map("planned_duration_minutes")
+  plannedStart           DateTime?     @map("planned_start")
   dueAt                  DateTime?     @map("due_at")
   completedAt            DateTime?     @map("completed_at")
   createdAt              DateTime      @default(now()) @map("created_at")
@@ -138,6 +139,7 @@ model Task {
 
   @@index([userId, status])
   @@index([userId, productiveDate])
+  @@index([userId, plannedStart])
   @@index([goalId])
   @@map("tasks")
 }

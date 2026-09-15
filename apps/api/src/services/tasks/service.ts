@@ -23,6 +23,7 @@ type TaskWithSessionRows = {
   status: Task["status"];
   priority: string;
   plannedDurationMinutes: number | null;
+  plannedStart?: Date | null;
   dueAt: Date | null;
   completedAt: Date | null;
   createdAt: Date;
@@ -57,6 +58,7 @@ export function serializeTask(task: TaskWithSessionRows): Task {
     status: task.status,
     priority: (task.priority as Task["priority"]) || "medium",
     plannedDurationMinutes: task.plannedDurationMinutes ?? 30,
+    plannedStart: task.plannedStart?.toISOString() ?? null,
     actualDurationSeconds,
     dueAt: task.dueAt?.toISOString() ?? null,
     completedAt: task.completedAt?.toISOString() ?? null,
@@ -343,6 +345,7 @@ export async function createTask(
     dueAt?: Date | null;
     priority?: "none" | "low" | "medium" | "high";
     plannedDurationMinutes?: number;
+    plannedStart?: Date | null;
     goalId?: string | null;
     productiveDate?: string | null;
   },
@@ -374,6 +377,7 @@ export async function createTask(
       title: input.title,
       description: input.description,
       dueAt: input.dueAt,
+      plannedStart: input.plannedStart ?? null,
       priority: input.priority ?? "medium",
       plannedDurationMinutes: input.plannedDurationMinutes ?? 30,
       goalId: input.goalId,
@@ -400,6 +404,7 @@ export async function updateTask(
     title?: string;
     description?: string | null;
     dueAt?: Date | null;
+    plannedStart?: Date | null;
     priority?: "none" | "low" | "medium" | "high";
     plannedDurationMinutes?: number;
     status?: "todo" | "in_progress" | "done" | "cancelled";

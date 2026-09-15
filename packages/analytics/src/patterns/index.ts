@@ -22,3 +22,5 @@ export * from "./detectors/context-switching/episode";
 export * from "./detectors/context-switching/pattern";
 export * from "./detectors/context-switching/detector";
 export * from "./detectors/task-fragmentation";
+export * from "./detectors/continuous-activity";
+export * from "./detectors/schedule-variance";

@@ -9,6 +9,7 @@ export type Task = {
   status: TaskStatus;
   priority: TaskPriority;
   plannedDurationMinutes: number;
+  plannedStart?: string | null;
   actualDurationSeconds?: number;
   dueAt: string | null;
   completedAt: string | null;
