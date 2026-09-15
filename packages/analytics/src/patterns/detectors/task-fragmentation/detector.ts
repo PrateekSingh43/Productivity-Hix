@@ -12,6 +12,7 @@ import type {
   CurrentTaskEpisodesProvider,
 } from "./types";
 import { subtractCalendarDays } from "../../qualification/temporal";
+import { TimelineTaskExecutionEpisodesProvider } from "./provider";
 
 /**
  * Detector 2: Task Execution Fragmentation Detector
@@ -27,7 +28,9 @@ export class TaskFragmentationDetector
 {
   constructor(
     private readonly config: TaskFragmentationConfig,
-    private readonly currentEpisodesProvider: CurrentTaskEpisodesProvider<TaskExecutionFragmentationMetrics>,
+    private readonly currentEpisodesProvider:
+      | CurrentTaskEpisodesProvider<TaskExecutionFragmentationMetrics>
+      | undefined,
     private readonly baselineProvider: BaselinePopulationProvider<TaskExecutionBaselineEpisode>
   ) {}
 
@@ -49,11 +52,24 @@ export class TaskFragmentationDetector
     evaluationId: string,
     patternId: string
   ): Promise<BehavioralPatternOutput<TaskExecutionFragmentationPatternMetrics>> {
-    // 1. Fetch current window episodes
-    const currentEpisodes = await this.currentEpisodesProvider.fetchEpisodes(context.userId, {
-      start: context.timeline.windowStart,
-      end: context.timeline.windowEnd,
-    });
+    // 1. Fetch current window episodes: either from injected provider or derived from authoritative Phase-3 EvidenceTimeline
+    let currentEpisodes: EpisodeMeasurementOutput<TaskExecutionFragmentationMetrics>[] = [];
+    if (this.currentEpisodesProvider) {
+      currentEpisodes = await this.currentEpisodesProvider.fetchEpisodes(context.userId, {
+        start: context.timeline.windowStart,
+        end: context.timeline.windowEnd,
+      });
+    } else if (context.timeline.blocks && context.timeline.blocks.length > 0) {
+      const provider = new TimelineTaskExecutionEpisodesProvider(
+        { getBlocks: async () => context.timeline.blocks },
+        this.config,
+        { timezone: context.timezone }
+      );
+      currentEpisodes = await provider.fetchEpisodes(context.userId, {
+        start: context.timeline.windowStart,
+        end: context.timeline.windowEnd,
+      });
+    }
 
     // 2. Fetch baseline historical episodes (strictly precedes evaluation start)
     const baselineWindowEnd = context.timeline.windowStart;

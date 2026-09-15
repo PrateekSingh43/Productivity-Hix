@@ -1,17 +1,30 @@
 import type { BaselinePopulationProvider, HistoricalWindow } from "../../baseline/source";
-import type { TaskWithSessions } from "@repo/types";
+import type { TaskWithSessions, TemporalEvidenceBlock, EpisodeMeasurementOutput } from "@repo/types";
 import type { Database } from "@repo/db";
 import type {
   TaskExecutionBaselineEpisode,
   CurrentTaskEpisodesProvider,
   TaskExecutionFragmentationMetrics,
+  TaskFragmentationConfig,
 } from "./types";
-import type { EpisodeMeasurementOutput } from "@repo/types";
-import { isDifferentCalendarDay } from "./sequence";
+import {
+  isDifferentCalendarDay,
+  isAuthoritativeTaskBlock,
+  classifyInterveningBlock,
+  findAuthoritativeTaskIds,
+  segmentTaskExecutionEpisodes,
+} from "./sequence";
 import { safeDivide } from "../../shared/math";
+import {
+  PatternExecutionContext,
+  type EpisodeExecutionContext,
+  type DetectorConfiguration,
+} from "../../base/context";
+import { evaluateTaskFragmentationEpisode } from "./episode";
 
 /**
- * Data source abstraction for fetching authoritative tasks and their work sessions.
+ * Data source abstraction for fetching authoritative tasks and their work sessions,
+ * and optionally historical evidence blocks.
  */
 export interface TaskWorkSessionsDataSource {
   findTasksWithSessions(
@@ -19,11 +32,17 @@ export interface TaskWorkSessionsDataSource {
     startUTC: string,
     endUTC: string
   ): Promise<TaskWithSessions[]>;
+  findEvidenceBlocks?(
+    userId: string,
+    startUTC: string,
+    endUTC: string
+  ): Promise<TemporalEvidenceBlock[]>;
 }
 
 export interface TaskExecutionBaselineProviderOptions {
   continuationGapThresholdSeconds?: number;
   timezone?: string;
+  evidenceBlocks?: TemporalEvidenceBlock[];
 }
 
 /**
@@ -32,7 +51,14 @@ export interface TaskExecutionBaselineProviderOptions {
  * Derives bounded task execution episodes from authoritative Task + WorkSession data.
  * CRITICAL INVARIANT: Task rows ≠ execution episodes.
  * A single Task may have multiple execution episodes across calendar days or long gaps.
- * Enforces [start, end) half-open boundary and user isolation.
+ * 
+ * CANONICAL EPISTEMIC MODEL:
+ * - Active execution comes only from authoritative task-linked sessions.
+ * - An intervening gap is a KNOWN gap IF AND ONLY IF supported by authoritative evidence
+ *   (e.g., another task session, explicit break, or explained gap).
+ * - Absence of evidence between sessions is strictly UNKNOWN (missing telemetry / unobserved).
+ * - Strict conservation invariant: wallClockSpan = active + knownGap + unknown.
+ * - wallClockFragmentationRatio uses ONLY knownInterveningGapSeconds.
  */
 export class TaskExecutionBaselineProvider
   implements BaselinePopulationProvider<TaskExecutionBaselineEpisode>
@@ -52,10 +78,43 @@ export class TaskExecutionBaselineProvider
     const timezone = this.options?.timezone ?? "UTC";
 
     const tasks = await this.dataSource.findTasksWithSessions(userId, window.start, window.end);
+    const evidenceBlocks =
+      this.options?.evidenceBlocks ??
+      (this.dataSource.findEvidenceBlocks
+        ? await this.dataSource.findEvidenceBlocks(userId, window.start, window.end)
+        : undefined);
+
     const episodes: TaskExecutionBaselineEpisode[] = [];
 
     const windowStartMs = Date.parse(window.start);
     const windowEndMs = Date.parse(window.end);
+
+    // Extract all sessions across all tasks to identify work on other tasks during gaps
+    interface FlatSession {
+      taskId: string;
+      sessionId: string;
+      startedAtMs: number;
+      endedAtMs: number;
+    }
+
+    const allSessions: FlatSession[] = [];
+    for (const t of tasks) {
+      if (!t.sessions) continue;
+      for (const s of t.sessions) {
+        const sStartMs = Date.parse(s.startedAt);
+        const sEndMs = s.endedAt
+          ? Date.parse(s.endedAt)
+          : sStartMs + (s.durationSeconds ?? 0) * 1000;
+        if (sStartMs >= windowStartMs && sStartMs < windowEndMs) {
+          allSessions.push({
+            taskId: t.id,
+            sessionId: s.id,
+            startedAtMs: sStartMs,
+            endedAtMs: sEndMs,
+          });
+        }
+      }
+    }
 
     for (const task of tasks) {
       if (!task.sessions || task.sessions.length === 0) {
@@ -87,7 +146,9 @@ export class TaskExecutionBaselineProvider
         const prev = validSessions[i - 1]!;
         const curr = validSessions[i]!;
 
-        const prevEndMs = prev.endedAt ? Date.parse(prev.endedAt) : Date.parse(prev.startedAt);
+        const prevEndMs = prev.endedAt
+          ? Date.parse(prev.endedAt)
+          : Date.parse(prev.startedAt) + (prev.durationSeconds ?? 0) * 1000;
         const currStartMs = Date.parse(curr.startedAt);
         const gapSeconds = Math.max(0, (currStartMs - prevEndMs) / 1000);
 
@@ -112,7 +173,12 @@ export class TaskExecutionBaselineProvider
         const lastSession = cluster[cluster.length - 1]!;
 
         const startedAt = firstSession.startedAt;
-        const endedAt = lastSession.endedAt ?? lastSession.startedAt;
+        const endedAt =
+          lastSession.endedAt ??
+          new Date(
+            Date.parse(lastSession.startedAt) +
+              (lastSession.durationSeconds ?? 0) * 1000
+          ).toISOString();
         const wallClockSpanSeconds = Math.max(
           0,
           (Date.parse(endedAt) - Date.parse(startedAt)) / 1000
@@ -120,23 +186,122 @@ export class TaskExecutionBaselineProvider
 
         let activeTaskDurationSeconds = 0;
         for (const s of cluster) {
-          activeTaskDurationSeconds += s.durationSeconds ?? 0;
+          const sStart = Date.parse(s.startedAt);
+          const sEnd = s.endedAt
+            ? Date.parse(s.endedAt)
+            : sStart + (s.durationSeconds ?? 0) * 1000;
+          activeTaskDurationSeconds +=
+            s.durationSeconds ?? Math.max(0, (sEnd - sStart) / 1000);
         }
 
         let knownInterveningGapSeconds = 0;
-        for (let j = 1; j < cluster.length; j++) {
-          const p = cluster[j - 1]!;
-          const c = cluster[j]!;
-          const pEnd = p.endedAt ? Date.parse(p.endedAt) : Date.parse(p.startedAt);
-          const cStart = Date.parse(c.startedAt);
-          knownInterveningGapSeconds += Math.max(0, (cStart - pEnd) / 1000);
-        }
+        let unknownSeconds = 0;
 
-        // Uncovered time inside the bounding span is unknown
-        const unknownSeconds = Math.max(
-          0,
-          wallClockSpanSeconds - (activeTaskDurationSeconds + knownInterveningGapSeconds)
-        );
+        // Process intervening intervals between successive sessions.
+        // Under the canonical ProductiveHix contract:
+        // Absence of telemetry is UNKNOWN, not a known break.
+        // An interval is a known gap IF AND ONLY IF supported by authoritative evidence.
+        for (let j = 1; j < cluster.length; j++) {
+          const prev = cluster[j - 1]!;
+          const curr = cluster[j]!;
+          const gapStartMs = prev.endedAt
+            ? Date.parse(prev.endedAt)
+            : Date.parse(prev.startedAt) + (prev.durationSeconds ?? 0) * 1000;
+          const gapEndMs = Date.parse(curr.startedAt);
+
+          if (gapEndMs <= gapStartMs) {
+            continue;
+          }
+
+          if (evidenceBlocks && evidenceBlocks.length > 0) {
+            // Case 1: Authoritative Phase-3 evidence blocks are available
+            const blocksInGap = evidenceBlocks
+              .filter((b) => {
+                const bStartMs = Date.parse(b.startTime);
+                const bEndMs = Date.parse(b.endTime);
+                return (
+                  bStartMs < gapEndMs &&
+                  bEndMs > gapStartMs &&
+                  !isAuthoritativeTaskBlock(b, task.id)
+                );
+              })
+              .sort((a, b) => {
+                const cmp = Date.parse(a.startTime) - Date.parse(b.startTime);
+                if (cmp !== 0) return cmp;
+                return a.id.localeCompare(b.id);
+              });
+
+            let cursorMs = gapStartMs;
+            for (const b of blocksInGap) {
+              const bStartMs = Date.parse(b.startTime);
+              const bEndMs = Date.parse(b.endTime);
+
+              const clampedStartMs = Math.max(gapStartMs, Math.max(cursorMs, bStartMs));
+              const clampedEndMs = Math.min(gapEndMs, bEndMs);
+
+              if (clampedStartMs > cursorMs) {
+                // Unsupported interval with no evidence -> UNKNOWN!
+                unknownSeconds += (clampedStartMs - cursorMs) / 1000;
+                cursorMs = clampedStartMs;
+              }
+
+              if (clampedEndMs > cursorMs) {
+                const dur = (clampedEndMs - cursorMs) / 1000;
+                const { isKnown } = classifyInterveningBlock(b, task.id);
+                if (isKnown) {
+                  knownInterveningGapSeconds += dur;
+                } else {
+                  unknownSeconds += dur;
+                }
+                cursorMs = clampedEndMs;
+              }
+            }
+
+            if (cursorMs < gapEndMs) {
+              // Trailing unsupported gap -> UNKNOWN!
+              unknownSeconds += (gapEndMs - cursorMs) / 1000;
+            }
+          } else {
+            // Case 2: Derived from WorkSessions
+            // An interval is a KNOWN gap IF and ONLY IF covered by an authoritative WorkSession
+            // for another task. Missing/uncovered intervals are STRICTLY UNKNOWN.
+            const otherSessionsInGap = allSessions
+              .filter(
+                (s) =>
+                  s.taskId !== task.id &&
+                  s.startedAtMs < gapEndMs &&
+                  s.endedAtMs > gapStartMs
+              )
+              .sort((a, b) => {
+                const cmp = a.startedAtMs - b.startedAtMs;
+                if (cmp !== 0) return cmp;
+                return a.sessionId.localeCompare(b.sessionId);
+              });
+
+            let cursorMs = gapStartMs;
+            for (const otherS of otherSessionsInGap) {
+              const clampedStartMs = Math.max(gapStartMs, Math.max(cursorMs, otherS.startedAtMs));
+              const clampedEndMs = Math.min(gapEndMs, otherS.endedAtMs);
+
+              if (clampedStartMs > cursorMs) {
+                // Unsupported gap between sessions -> UNKNOWN
+                unknownSeconds += (clampedStartMs - cursorMs) / 1000;
+                cursorMs = clampedStartMs;
+              }
+
+              if (clampedEndMs > cursorMs) {
+                // Authoritative work on another task -> KNOWN intervening gap
+                knownInterveningGapSeconds += (clampedEndMs - cursorMs) / 1000;
+                cursorMs = clampedEndMs;
+              }
+            }
+
+            if (cursorMs < gapEndMs) {
+              // Trailing unsupported gap -> UNKNOWN
+              unknownSeconds += (gapEndMs - cursorMs) / 1000;
+            }
+          }
+        }
 
         const unknownFraction =
           wallClockSpanSeconds > 0
@@ -268,7 +433,129 @@ export class PrismaTaskWorkSessionsDataSource implements TaskWorkSessionsDataSou
 }
 
 /**
- * Production-ready CurrentTaskEpisodesProvider for Detector 2.
+ * Concrete data source abstraction for fetching authoritative Phase-3 evidence blocks.
+ */
+export interface AuthoritativeTimelineSource {
+  getBlocks(
+    userId: string,
+    window: { start: string; end: string }
+  ): Promise<TemporalEvidenceBlock[]>;
+}
+
+/**
+ * Production-ready CurrentTaskEpisodesProvider backed by authoritative Phase-3 EvidenceTimeline.
+ * Extracts distinct authoritative tasks and segments evidence into bounded execution episodes.
+ */
+export class TimelineTaskExecutionEpisodesProvider
+  implements CurrentTaskEpisodesProvider<TaskExecutionFragmentationMetrics>
+{
+  constructor(
+    private readonly timelineSource: AuthoritativeTimelineSource,
+    private readonly config: TaskFragmentationConfig,
+    private readonly options?: { timezone?: string }
+  ) {}
+
+  async fetchEpisodes(
+    userId: string,
+    window: { start: string; end: string }
+  ): Promise<EpisodeMeasurementOutput<TaskExecutionFragmentationMetrics>[]> {
+    const blocks = await this.timelineSource.getBlocks(userId, window);
+    if (!blocks || blocks.length === 0) {
+      return [];
+    }
+
+    const taskIds = findAuthoritativeTaskIds(blocks);
+    const results: EpisodeMeasurementOutput<TaskExecutionFragmentationMetrics>[] = [];
+
+    for (const taskId of taskIds) {
+      const episodes = segmentTaskExecutionEpisodes(blocks, taskId, {
+        timezone: this.options?.timezone ?? "UTC",
+        continuationGapThresholdSeconds: this.config.continuationGapThresholdSeconds,
+      });
+
+      for (let i = 0; i < episodes.length; i++) {
+        const ep = episodes[i]!;
+        const epStartMs = Date.parse(ep.startedAt);
+        const epEndMs = Date.parse(ep.endedAt);
+        const episodeBlocks = blocks.filter((b) => {
+          const bStartMs = Date.parse(b.startTime);
+          const bEndMs = Date.parse(b.endTime);
+          return bStartMs < epEndMs && bEndMs > epStartMs;
+        });
+
+        const fullConfig: DetectorConfiguration = {
+          detectorIdentity: "task_execution_fragmentation",
+          detectorVersion: "1.0.0",
+          configurationVersion: "1.0.0",
+          attributionMode: "TASK_LINKED",
+          baselineStrategy: this.config.baselineStrategy ?? "ROLLING_14_DAY_WINDOW",
+          sufficiency: {
+            minimumQualifyingEpisodes: this.config.minimumQualifyingEpisodes,
+            minimumDistinctCalendarDays: this.config.minimumQualifyingCalendarDays,
+            minimumBaselineMaturityDays: this.config.minimumBaselineDays,
+            requiredEvidenceQuality: {
+              allowReportedOnly: false,
+              allowExplainedGap: true,
+              maxUnknownFraction: this.config.maxUnknownFraction,
+            },
+            unknownHandling: "INDETERMINATE_IF_EXCEEDED",
+          },
+          ...this.config,
+        };
+
+        const episodeContext = new PatternExecutionContext({
+          userId,
+          timezone: this.options?.timezone ?? "UTC",
+          timeline: {
+            windowStart: ep.startedAt,
+            windowEnd: ep.endedAt,
+            totalDurationSeconds: ep.wallClockSpanSeconds,
+            blocks: episodeBlocks,
+            coverageSummary: {
+              totalDurationSeconds: ep.wallClockSpanSeconds,
+              observedSeconds: ep.activeTaskDurationSeconds,
+              reportedSeconds: 0,
+              observedReportedSeconds: 0,
+              unknownSeconds: ep.unknownSeconds,
+              explainedGapSeconds: ep.gapBreakdown.explainedGapSeconds,
+              coverageRatio: Math.max(0, Math.min(1, 1 - ep.unknownFraction)),
+            },
+          },
+          config: fullConfig,
+          level: "EPISODE",
+          canonicalSessionId: `sess-${taskId}-${i}`,
+          targetTaskId: taskId,
+        });
+
+        if (
+          episodeContext.level === "EPISODE" &&
+          typeof episodeContext.canonicalSessionId === "string"
+        ) {
+          const epContext: EpisodeExecutionContext = {
+            ...episodeContext,
+            level: "EPISODE",
+            canonicalSessionId: episodeContext.canonicalSessionId,
+            generateOperationalMetadata: () =>
+              episodeContext.generateOperationalMetadata(),
+          };
+          const evaluation = evaluateTaskFragmentationEpisode(
+            epContext,
+            `eval-ep-${taskId}-${i}`,
+            episodeBlocks,
+            this.config,
+            taskId
+          );
+          results.push(evaluation);
+        }
+      }
+    }
+
+    return results;
+  }
+}
+
+/**
+ * Custom fetcher-based CurrentTaskEpisodesProvider for Detector 2.
  */
 export class TaskExecutionEpisodesProvider
   implements CurrentTaskEpisodesProvider<TaskExecutionFragmentationMetrics>

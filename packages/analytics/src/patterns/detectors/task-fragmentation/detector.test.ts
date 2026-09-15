@@ -23,6 +23,7 @@ import type { BaselinePopulationProvider } from "../../baseline/source";
 import {
   TaskExecutionBaselineProvider,
   type TaskWorkSessionsDataSource,
+  TimelineTaskExecutionEpisodesProvider,
 } from "./provider";
 
 describe("Detector 2: detector.ts", () => {
@@ -1025,15 +1026,281 @@ describe("Detector 2: detector.ts", () => {
     assert.strictEqual(ep1.taskId, "task-A");
     assert.strictEqual(ep1.fragmentCount, 2);
     assert.strictEqual(ep1.activeTaskDurationSeconds, 3600);
-    assert.strictEqual(ep1.knownInterveningGapSeconds, 900); // 15m = 900s
+    // In this test, no other task session or evidence exists between sess-A1 (10:30) and sess-A2 (10:45).
+    // Under the canonical ProductiveHix contract, absence of telemetry is UNKNOWN, not a known break!
+    assert.strictEqual(ep1.knownInterveningGapSeconds, 0);
+    assert.strictEqual(ep1.unknownSeconds, 900); // 15m unsupported hole = 900s
     assert.strictEqual(ep1.wallClockSpanSeconds, 4500); // 10:00 to 11:15 = 75m = 4500s
-    assert.strictEqual(ep1.wallClockFragmentationRatio, 900 / 4500); // 0.20
+    assert.strictEqual(ep1.wallClockFragmentationRatio, 0); // knownInterveningGap / wallClockSpan = 0
+    assert.strictEqual(ep1.unknownFraction, 900 / 4500); // 0.20
+    assert.strictEqual(ep1.coverageRatio, 1 - 900 / 4500); // 0.80
+
+    // Strict conservation invariant: wallClockSpan === active + knownGap + unknown
+    assert.strictEqual(
+      ep1.wallClockSpanSeconds,
+      ep1.activeTaskDurationSeconds + ep1.knownInterveningGapSeconds + ep1.unknownSeconds
+    );
 
     const ep2 = episodes[1]!;
     assert.strictEqual(ep2.taskId, "task-A");
     assert.strictEqual(ep2.fragmentCount, 1);
     assert.strictEqual(ep2.activeTaskDurationSeconds, 3600);
+    assert.strictEqual(ep2.knownInterveningGapSeconds, 0);
+    assert.strictEqual(ep2.unknownSeconds, 0);
     assert.strictEqual(ep2.wallClockSpanSeconds, 3600);
     assert.strictEqual(ep2.wallClockFragmentationRatio, 0);
+  });
+
+  test("TaskExecutionBaselineProvider: intervening work on another task is proven as KNOWN gap", async () => {
+    class MockMultiTaskDataSource implements TaskWorkSessionsDataSource {
+      async findTasksWithSessions(userId: string): Promise<TaskWithSessions[]> {
+        return [
+          {
+            id: "task-A",
+            userId,
+            title: "Task A",
+            description: null,
+            status: "done",
+            priority: "medium",
+            plannedDurationMinutes: 60,
+            dueAt: null,
+            completedAt: null,
+            createdAt: "2026-08-20T00:00:00Z",
+            updatedAt: "2026-08-25T17:00:00Z",
+            sessions: [
+              {
+                id: "sess-A1",
+                startedAt: "2026-08-21T10:00:00Z",
+                endedAt: "2026-08-21T10:30:00Z",
+                durationSeconds: 1800,
+                isPaused: false,
+                lastResumedAt: null,
+                notes: null,
+              },
+              {
+                id: "sess-A2",
+                startedAt: "2026-08-21T10:45:00Z",
+                endedAt: "2026-08-21T11:15:00Z",
+                durationSeconds: 1800,
+                isPaused: false,
+                lastResumedAt: null,
+                notes: null,
+              },
+            ],
+          },
+          {
+            id: "task-B",
+            userId,
+            title: "Task B (intervening work during Task A gap)",
+            description: null,
+            status: "in_progress",
+            priority: "high",
+            plannedDurationMinutes: 30,
+            dueAt: null,
+            completedAt: null,
+            createdAt: "2026-08-20T00:00:00Z",
+            updatedAt: "2026-08-21T11:00:00Z",
+            sessions: [
+              // Fully occupies the 10:30 - 10:45 gap between sess-A1 and sess-A2
+              {
+                id: "sess-B1",
+                startedAt: "2026-08-21T10:30:00Z",
+                endedAt: "2026-08-21T10:45:00Z",
+                durationSeconds: 900,
+                isPaused: false,
+                lastResumedAt: null,
+                notes: null,
+              },
+            ],
+          },
+        ];
+      }
+    }
+
+    const provider = new TaskExecutionBaselineProvider(new MockMultiTaskDataSource(), {
+      continuationGapThresholdSeconds: 7200,
+      timezone: "UTC",
+    });
+
+    const window = {
+      start: "2026-08-18T00:00:00Z",
+      end: "2026-09-01T00:00:00Z",
+    };
+
+    const episodes = await provider.fetchPopulation("user-1", window);
+    const epA = episodes.find((e) => e.taskId === "task-A");
+    assert.ok(epA);
+    assert.strictEqual(epA.activeTaskDurationSeconds, 3600);
+    // Because Task B proved work during 10:30-10:45, it is an authoritative KNOWN intervening gap!
+    assert.strictEqual(epA.knownInterveningGapSeconds, 900);
+    assert.strictEqual(epA.unknownSeconds, 0);
+    assert.strictEqual(epA.wallClockSpanSeconds, 4500);
+    assert.strictEqual(epA.wallClockFragmentationRatio, 900 / 4500); // 0.20
+    assert.strictEqual(epA.unknownFraction, 0);
+    assert.strictEqual(epA.coverageRatio, 1.0);
+    assert.strictEqual(
+      epA.wallClockSpanSeconds,
+      epA.activeTaskDurationSeconds + epA.knownInterveningGapSeconds + epA.unknownSeconds
+    );
+  });
+
+  test("TaskExecutionBaselineProvider: partial overlap with other task session partitions known vs unknown", async () => {
+    class MockPartialDataSource implements TaskWorkSessionsDataSource {
+      async findTasksWithSessions(userId: string): Promise<TaskWithSessions[]> {
+        return [
+          {
+            id: "task-A",
+            userId,
+            title: "Task A",
+            description: null,
+            status: "done",
+            priority: "medium",
+            plannedDurationMinutes: 60,
+            dueAt: null,
+            completedAt: null,
+            createdAt: "2026-08-20T00:00:00Z",
+            updatedAt: "2026-08-25T17:00:00Z",
+            sessions: [
+              {
+                id: "sess-A1",
+                startedAt: "2026-08-21T10:00:00Z",
+                endedAt: "2026-08-21T10:30:00Z",
+                durationSeconds: 1800,
+                isPaused: false,
+                lastResumedAt: null,
+                notes: null,
+              },
+              {
+                id: "sess-A2",
+                startedAt: "2026-08-21T10:45:00Z",
+                endedAt: "2026-08-21T11:15:00Z",
+                durationSeconds: 1800,
+                isPaused: false,
+                lastResumedAt: null,
+                notes: null,
+              },
+            ],
+          },
+          {
+            id: "task-B",
+            userId,
+            title: "Task B (10m out of 15m gap)",
+            description: null,
+            status: "in_progress",
+            priority: "medium",
+            plannedDurationMinutes: 10,
+            dueAt: null,
+            completedAt: null,
+            createdAt: "2026-08-20T00:00:00Z",
+            updatedAt: "2026-08-21T11:00:00Z",
+            sessions: [
+              // 10:30 to 10:40 (10m = 600s), leaving 10:40 to 10:45 (5m = 300s) uncovered
+              {
+                id: "sess-B1",
+                startedAt: "2026-08-21T10:30:00Z",
+                endedAt: "2026-08-21T10:40:00Z",
+                durationSeconds: 600,
+                isPaused: false,
+                lastResumedAt: null,
+                notes: null,
+              },
+            ],
+          },
+        ];
+      }
+    }
+
+    const provider = new TaskExecutionBaselineProvider(new MockPartialDataSource(), {
+      continuationGapThresholdSeconds: 7200,
+      timezone: "UTC",
+    });
+
+    const window = {
+      start: "2026-08-18T00:00:00Z",
+      end: "2026-09-01T00:00:00Z",
+    };
+
+    const episodes = await provider.fetchPopulation("user-1", window);
+    const epA = episodes.find((e) => e.taskId === "task-A");
+    assert.ok(epA);
+    assert.strictEqual(epA.activeTaskDurationSeconds, 3600);
+    assert.strictEqual(epA.knownInterveningGapSeconds, 600); // 10m Task B
+    assert.strictEqual(epA.unknownSeconds, 300); // 5m uncovered hole
+    assert.strictEqual(epA.wallClockSpanSeconds, 4500);
+    assert.strictEqual(epA.wallClockFragmentationRatio, 600 / 4500);
+    assert.strictEqual(epA.unknownFraction, 300 / 4500);
+
+    // Exact conservation: 4500 === 3600 + 600 + 300
+    assert.strictEqual(
+      epA.wallClockSpanSeconds,
+      epA.activeTaskDurationSeconds + epA.knownInterveningGapSeconds + epA.unknownSeconds
+    );
+  });
+
+  test("TimelineTaskExecutionEpisodesProvider: derives current episodes directly from Phase-3 EvidenceTimeline", async () => {
+    const blocks: TemporalEvidenceBlock[] = [
+      createTaskBlock("b1", "2026-09-01T10:00:00Z", "2026-09-01T10:30:00Z", 1800, "task-alpha"),
+      createBreakBlock("b2", "2026-09-01T10:30:00Z", "2026-09-01T10:45:00Z", 900),
+      createTaskBlock("b3", "2026-09-01T10:45:00Z", "2026-09-01T11:15:00Z", 1800, "task-alpha"),
+    ];
+
+    const timelineSource = {
+      async getBlocks() {
+        return blocks;
+      },
+    };
+
+    const provider = new TimelineTaskExecutionEpisodesProvider(timelineSource, config, {
+      timezone: "UTC",
+    });
+
+    const episodes = await provider.fetchEpisodes("user-1", {
+      start: "2026-09-01T00:00:00Z",
+      end: "2026-09-02T00:00:00Z",
+    });
+
+    assert.strictEqual(episodes.length, 1);
+    const ep = episodes[0]!;
+    assert.strictEqual(ep.executionStatus, "QUALIFIED");
+    assert.strictEqual(ep.metrics.taskId, "task-alpha");
+    assert.strictEqual(ep.metrics.fragmentCount, 2);
+    assert.strictEqual(ep.metrics.activeTaskDurationSeconds, 3600);
+    assert.strictEqual(ep.metrics.knownInterveningGapSeconds, 900);
+    assert.strictEqual(ep.metrics.unknownSeconds, 0);
+    assert.strictEqual(ep.metrics.wallClockSpanSeconds, 4500);
+    assert.strictEqual(ep.metrics.wallClockFragmentationRatio, 900 / 4500);
+  });
+
+  test("TaskFragmentationDetector.evaluatePattern: works with TimelineTaskExecutionEpisodesProvider backed by Phase-3 evidence", async () => {
+    const blocks: TemporalEvidenceBlock[] = [
+      createTaskBlock("b1", "2026-09-01T10:00:00Z", "2026-09-01T10:30:00Z", 1800, "task-alpha"),
+      createBreakBlock("b2", "2026-09-01T10:30:00Z", "2026-09-01T10:45:00Z", 900),
+      createTaskBlock("b3", "2026-09-01T10:45:00Z", "2026-09-01T11:15:00Z", 1800, "task-alpha"),
+    ];
+
+    const timelineSource = {
+      async getBlocks() {
+        return blocks;
+      },
+    };
+
+    const currentProvider = new TimelineTaskExecutionEpisodesProvider(timelineSource, config, {
+      timezone: "UTC",
+    });
+
+    const baselineProvider: BaselinePopulationProvider<TaskExecutionBaselineEpisode> = {
+      populationType: "completed_task_episodes",
+      async fetchPopulation() {
+        return [];
+      },
+    };
+
+    const detector = new TaskFragmentationDetector(config, currentProvider, baselineProvider);
+    const ctx = createPatternContext();
+    const result = await detector.evaluatePattern(ctx, "eval-timeline", "pat-timeline");
+
+    // Output is produced deterministically from authoritative evidence
+    assert.strictEqual(result.metadata.patternId, "pat-timeline");
+    assert.strictEqual(result.executionStatus, "INSUFFICIENT_EVIDENCE"); // baseline empty
   });
 });
