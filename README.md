@@ -14,7 +14,7 @@ _Closing the loop between Intention, Behavior, Perception, Outcome, and Retained
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D24.0.0-339933?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Tests](https://img.shields.io/badge/Tests-Vitest%20%7C%20100%25%20Passing-6E9F18?style=for-the-badge&logo=vitest&logoColor=white)](https://vitest.dev/)
 [![Zero Fake Data](https://img.shields.io/badge/Principle-Zero%20Fake%20Data-FF4081?style=for-the-badge)](#1-zero-fake-data-guarantee)
-[![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](LICENSE)
+[![License: Proprietary](https://img.shields.io/badge/License-Proprietary%20%7C%20All%20Rights%20Reserved-d32f2f?style=for-the-badge)](LICENSE)
 
 <br />
 
