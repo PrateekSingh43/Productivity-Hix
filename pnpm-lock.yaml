@@ -359,6 +359,9 @@ importers:
       '@repo/types':
         specifier: workspace:*
         version: link:../types
+      '@repo/validation':
+        specifier: workspace:*
+        version: link:../validation
       simple-statistics:
         specifier: ^7.11.0
         version: 7.11.0

@@ -1,0 +1,387 @@
+import {
+  materializeTemporalBlocks,
+  resolveBlockSemantics,
+  type BlockEngineInput,
+  type BlockSemantics,
+} from "@repo/analytics";
+import {
+  validateTemporalDurations,
+  validateContributionInterval,
+  validateClaimEvidenceTarget,
+  validateTenantBoundary,
+} from "@repo/validation";
+import type { PrismaClient } from "@repo/db";
+import type { Prisma } from "@repo/db";
+
+export interface MaterializerResult {
+  blocksCreated: number;
+  blocksUpdated: number;
+  observationsCreated: number;
+  claimsCreated: number;
+  evidenceCreated: number;
+  attentionCreated: number;
+  gapsCreated: number;
+}
+
+interface NormalizedRow {
+  id: string;
+  externalId: string;
+  source: string;
+  watcher: string;
+  timestamp: Date;
+  duration: number;
+  data: unknown;
+}
+
+export interface MaterializeOptions {
+  maxGapMs?: number;
+  minBreakMs?: number;
+  transientThresholdMs?: number;
+  maxBreakMs?: number;
+  minGapSeconds?: number;
+}
+
+const ENGINE_VERSION = "3b.0.1";
+
+function rowToInput(row: NormalizedRow, userId: string, deviceId: string | null): BlockEngineInput | null {
+  const startMs = row.timestamp.getTime();
+  const durationMs = Math.round(row.duration * 1000);
+  if (!Number.isFinite(startMs) || durationMs <= 0) return null;
+  const data = (row.data && typeof row.data === "object" && !Array.isArray(row.data)
+    ? (row.data as Record<string, unknown>)
+    : {}) as Record<string, any>;
+  const isAfk = row.watcher === "afk" && (data.state === "afk" || data.status === "afk" || data.state === true || data.status === true);
+  const application = typeof data.application === "string" && data.application ? data.application : typeof data.app === "string" ? data.app : "";
+  const title = typeof data.windowTitle === "string" ? data.windowTitle : typeof data.pageTitle === "string" ? data.pageTitle : typeof data.title === "string" ? data.title : "";
+  return {
+    activityId: row.id,
+    userId,
+    deviceId,
+    source: row.source === "browser" ? "browser" : "desktop",
+    watcher: row.watcher,
+    application: isAfk ? "afk" : application || "unknown",
+    title: typeof title === "string" ? title : "",
+    domain: typeof data.domain === "string" && data.domain ? data.domain : null,
+    url: typeof data.sanitizedUrl === "string" ? data.sanitizedUrl : typeof data.url === "string" ? data.url : null,
+    isAfk,
+    start: startMs,
+    end: startMs + durationMs,
+    data,
+  };
+}
+
+export async function materializeBlocksForUserDay(
+  prisma: PrismaClient,
+  userId: string,
+  from: Date,
+  to: Date,
+  options: MaterializeOptions = {}
+): Promise<MaterializerResult> {
+  const result: MaterializerResult = {
+    blocksCreated: 0,
+    blocksUpdated: 0,
+    observationsCreated: 0,
+    claimsCreated: 0,
+    evidenceCreated: 0,
+    attentionCreated: 0,
+    gapsCreated: 0,
+  };
+
+  const [userPref, rules, overrides] = await Promise.all([
+    prisma.userPreference.findUnique({ where: { userId }, select: { quietHoursEnabled: true, quietHoursStart: true, quietHoursEnd: true } }),
+    prisma.userActivityRule.findMany({ where: { userId, isEnabled: true }, orderBy: [{ priority: "asc" }, { createdAt: "asc" }] }),
+    prisma.userActivityOverride.findMany({ where: { userId }, orderBy: { createdAt: "asc" } }),
+  ]);
+  void userPref;
+
+  const rows = (await prisma.normalizedActivity.findMany({
+    where: { userId, timestamp: { gte: from, lt: to }, duration: { gt: 0 } },
+    orderBy: [{ timestamp: "asc" }, { id: "asc" }],
+  })) as NormalizedRow[];
+
+  if (rows.length === 0) return result;
+
+  const deviceId = await resolvePrimaryDeviceId(prisma, userId);
+  const inputs = rows
+    .map((row) => rowToInput(row, userId, deviceId))
+    .filter((v): v is BlockEngineInput => v !== null);
+
+  const blocks = materializeTemporalBlocks(inputs, options);
+
+  for (const block of blocks) {
+    await persistBlock(prisma, userId, block, rules, overrides, result);
+  }
+
+  await detectCoverageGaps(prisma, userId, inputs, options.minGapSeconds ?? 50 * 60);
+  return result;
+}
+
+function activityModalityValues(): string[] {
+  return [
+    "development",
+    "reading_research",
+    "writing_documentation",
+    "communication",
+    "administration",
+    "media_consumption",
+    "gaming",
+    "idle_away",
+    "system_maintenance",
+    "unknown",
+  ];
+}
+
+function toSafeModality(value: string): string {
+  return activityModalityValues().includes(value) ? value : "unknown";
+}
+
+async function resolvePrimaryDeviceId(prisma: PrismaClient, userId: string): Promise<string | null> {
+  const device = await prisma.desktopDevice.findFirst({
+    where: { userId },
+    orderBy: { lastActiveAt: "desc" },
+    select: { id: true },
+  });
+  return device?.id ?? null;
+}
+
+function evidenceRows(
+  target: { claimId?: string; linkId?: string; inferenceId?: string },
+  semantics: BlockSemantics
+): Array<{ evidenceType: string; evidenceReference: string; weight: number }> {
+  const evidence = semantics.evidence.map((e) => ({
+    evidenceType: e.kind,
+    evidenceReference: e.reference,
+    weight: 1,
+  }));
+  if (evidence.length === 0 && (target.claimId || target.linkId || target.inferenceId)) {
+    evidence.push({ evidenceType: "OBSERVATION", evidenceReference: "block_inputs", weight: 1 });
+  }
+  return evidence;
+}
+
+async function persistBlock(
+  prisma: PrismaClient,
+  userId: string,
+  block: ReturnType<typeof materializeTemporalBlocks>[number],
+  rules: Array<Record<string, unknown> & { id: string; priority: number; isEnabled: boolean; applicationPattern: string | null; domainPattern: string | null; titlePattern: string | null; urlPattern: string | null; assignedModality: string | null; assignedContext: string | null; defaultRelevance: string | null }>,
+  overrides: Array<{ id: string; targetTimeWindowStart: Date; targetTimeWindowEnd: Date; targetApplication: string; targetClaimFamily: string; targetClaimType: string; overriddenValue: string }>,
+  result: MaterializerResult
+): Promise<void> {
+  const startTime = new Date(block.startTime);
+  const endTime = new Date(block.endTime);
+
+  const durations = validateTemporalDurations({
+    wallClockDurationMs: block.wallClockDurationMs,
+    observedActiveDurationMs: block.observedActiveDurationMs,
+    pausedDurationMs: block.pausedDurationMs,
+  });
+  if (!durations.isValid) {
+    throw new Error(`Temporal duration validation failed: ${durations.errors.join("; ")}`);
+  }
+
+  const semantics = resolveBlockSemantics(
+    {
+      start: block.startTime,
+      end: block.endTime,
+      application: block.primaryApplication,
+      domain: block.domain,
+      title: block.cleanTitle,
+      url: block.sanitizedUrl,
+      isAfk: block.isAfkBlock,
+      source: block.sourceChannel === "BROWSER_TAB" ? "browser" : "desktop",
+    },
+    {
+      rules: rules.map((r) => ({
+        id: r.id,
+        name: typeof r.name === "string" && r.name ? r.name : r.id,
+        priority: r.priority,
+        isEnabled: r.isEnabled,
+        applicationPattern: r.applicationPattern,
+        domainPattern: r.domainPattern,
+        titlePattern: r.titlePattern,
+        urlPattern: r.urlPattern,
+        assignedModality: r.assignedModality as never,
+        assignedContext: r.assignedContext,
+        defaultRelevance: r.defaultRelevance as never,
+      })),
+      overrides: overrides.map((o) => ({
+        id: o.id,
+        targetTimeWindowStart: o.targetTimeWindowStart.getTime(),
+        targetTimeWindowEnd: o.targetTimeWindowEnd.getTime(),
+        targetApplication: o.targetApplication,
+        targetClaimFamily: o.targetClaimFamily,
+        targetClaimType: o.targetClaimType,
+        overriddenValue: o.overriddenValue,
+      })),
+    }
+  );
+
+  const existing = await prisma.temporalActivityBlock.findFirst({
+    where: { userId, observationSetFingerprint: block.observationSetFingerprint },
+    select: { id: true },
+  });
+
+  const blockData = {
+    userId,
+    deviceId: null,
+    observationSetFingerprint: block.observationSetFingerprint,
+    startTime,
+    endTime,
+    wallClockDurationMs: block.wallClockDurationMs,
+    observedActiveDurationMs: block.observedActiveDurationMs,
+    pausedDurationMs: block.pausedDurationMs,
+    track: block.track,
+    primaryApplication: block.primaryApplication,
+    cleanTitle: block.cleanTitle.slice(0, 512),
+    domain: block.domain,
+    sanitizedUrl: block.sanitizedUrl,
+    sourceChannel: block.sourceChannel,
+    rawEventCount: block.rawEventCount,
+    interactionDensity: block.interactionDensity as Prisma.InputJsonValue,
+    sourceComposition: block.sourceComposition as Prisma.InputJsonValue,
+  };
+
+  const blockId = existing?.id ?? (await prisma.temporalActivityBlock.create({ data: blockData, select: { id: true } })).id;
+  if (existing) {
+    await prisma.temporalActivityBlock.update({ where: { id: blockId }, data: { startTime, endTime, updatedAt: new Date() } });
+    result.blocksUpdated++;
+    await prisma.blockObservation.deleteMany({ where: { blockId } });
+    await prisma.semanticClaim.deleteMany({ where: { blockId } });
+    await prisma.attentionInference.deleteMany({ where: { blockId } });
+  } else {
+    result.blocksCreated++;
+  }
+
+  for (const obs of block.observations) {
+    const validity = validateContributionInterval(
+      {
+        contributionStart: new Date(obs.contributionStart),
+        contributionEnd: new Date(obs.contributionEnd),
+        contributionDurationMs: obs.contributionDurationMs,
+      },
+      {
+        temporalBlock: { startTime, endTime },
+      }
+    );
+    if (!validity.isValid) continue;
+    await prisma.blockObservation.create({
+      data: {
+        blockId,
+        activityId: obs.activityId,
+        contributionStart: new Date(obs.contributionStart),
+        contributionEnd: new Date(obs.contributionEnd),
+        contributionDurationMs: obs.contributionDurationMs,
+      },
+    });
+    result.observationsCreated++;
+  }
+
+  const claim = await prisma.semanticClaim.create({
+    data: {
+      blockId,
+      claimType: "MODALITY_PRIMARY",
+      value: toSafeModality(semantics.primaryModality),
+      confidence: semantics.primaryConfidence,
+      provenance: semantics.primaryProvenance,
+      authority: semantics.primaryProvenance === "USER_OVERRIDE" ? "USER" : "SYSTEM",
+      engineVersion: ENGINE_VERSION,
+      evaluatedAt: new Date(),
+      inputFingerprint: block.observationSetFingerprint,
+      isCurrent: true,
+    },
+    select: { id: true },
+  });
+  result.claimsCreated++;
+
+  if (semantics.context) {
+    const link = await prisma.activityContextLink.create({
+      data: {
+        blockId,
+        userId,
+        targetScope: "UNLINKED",
+        relevance: (semantics.relevance ?? "UNKNOWN") as never,
+        intentionRelationship: "UNKNOWN",
+        confidence: null,
+        provenance: (semantics.contextProvenance ?? "INFERRED") as never,
+        authority: semantics.contextProvenance === "USER_RULE" ? "USER" : "SYSTEM",
+      },
+      select: { id: true },
+    });
+    await prisma.semanticClaim.create({
+      data: {
+        blockId,
+        claimType: "TOPIC_CONTEXT",
+        value: semantics.context,
+        confidence: null,
+        provenance: (semantics.contextProvenance ?? "CONTEXT_HEURISTIC") as never,
+        authority: semantics.contextProvenance === "USER_RULE" ? "USER" : "SYSTEM",
+        engineVersion: ENGINE_VERSION,
+        evaluatedAt: new Date(),
+        isCurrent: true,
+      },
+    });
+    result.claimsCreated++;
+    void link;
+  }
+
+  const evidence = evidenceRows({ claimId: claim.id }, semantics);
+  for (const ev of evidence) {
+    await prisma.claimEvidence.create({ data: { claimId: claim.id, ...ev } });
+    result.evidenceCreated++;
+  }
+
+  const focusState = block.isAfkBlock ? "UNKNOWN" : block.observedActiveDurationMs >= 10 * 60_000 ? "SUPPORTED" : "INSUFFICIENT";
+  await prisma.attentionInference.create({
+    data: {
+      blockId,
+      focusEvidenceState: focusState,
+      confidence: null,
+      provenance: "INFERRED",
+      authority: "SYSTEM",
+    },
+  });
+  result.attentionCreated++;
+  void validateClaimEvidenceTarget;
+  void validateTenantBoundary;
+}
+
+async function detectCoverageGaps(
+  prisma: PrismaClient,
+  userId: string,
+  inputs: BlockEngineInput[],
+  minGapSeconds: number
+): Promise<void> {
+  if (inputs.length === 0) return;
+  const sorted = [...inputs].sort((a, b) => a.start - b.start);
+  const minGapMs = minGapSeconds * 1000;
+
+  for (let i = 1; i < sorted.length; i++) {
+    const prev = sorted[i - 1]!;
+    const curr = sorted[i]!;
+    const gapStart = prev.end;
+    const gapEnd = curr.start;
+    if (gapEnd - gapStart < minGapMs) continue;
+
+    const overlapping = await prisma.telemetryCoverageGap.findFirst({
+      where: {
+        userId,
+        startTime: { lt: new Date(gapEnd) },
+        endTime: { gt: new Date(gapStart) },
+      },
+      select: { id: true },
+    });
+    if (overlapping) continue;
+
+    await prisma.telemetryCoverageGap.create({
+      data: {
+        userId,
+        startTime: new Date(gapStart),
+        endTime: new Date(gapEnd),
+        durationSeconds: Math.round((gapEnd - gapStart) / 1000),
+        coverageState: "UNKNOWN_SILENCE",
+        reconciliationState: "UNEXPLAINED",
+      },
+    });
+  }
+}
+

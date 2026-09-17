@@ -11,6 +11,70 @@ import {
   categorizeActivity,
 } from "@repo/analytics";
 import { getDb } from "../../lib/prisma";
+import { materializeBlocksForUserDay } from "./blocks";
+
+export interface TimelineBlockPayload {
+  id: string;
+  startTime: string;
+  endTime: string;
+  wallClockDurationMs: number;
+  observedActiveDurationMs: number;
+  pausedDurationMs: number;
+  track: string;
+  primaryApplication: string;
+  cleanTitle: string;
+  domain: string | null;
+  sanitizedUrl: string | null;
+  sourceChannel: string;
+  rawEventCount: number;
+  observationSetFingerprint: string;
+  isAfkBlock: boolean;
+  modality: {
+    primary: { value: string; confidence: number | null; provenance: string; authority: string } | null;
+    secondary: Array<{ value: string; provenance: string }>;
+    context: { value: string; provenance: string } | null;
+  };
+  attention: { focusEvidenceState: string } | null;
+  coverageGaps: Array<{ id: string; startTime: string; endTime: string; coverageState: string; reconciliationState: string }>;
+  pendingInterpretation: boolean;
+}
+
+function toTimelineBlockPayload(
+  block: { id: string; [key: string]: unknown },
+  claims: Array<{ claimType: string; value: string; confidence: number | null; provenance: string }>,
+  attention: { focusEvidenceState: string } | null
+): TimelineBlockPayload {
+  const primary = claims.find((c) => c.claimType === "MODALITY_PRIMARY") ?? null;
+  const secondary = claims.filter((c) => c.claimType === "MODALITY_SECONDARY");
+  const context = claims.find((c) => c.claimType === "TOPIC_CONTEXT") ?? null;
+  return {
+    id: block.id,
+    startTime: (block.startTime as Date).toISOString(),
+    endTime: (block.endTime as Date).toISOString(),
+    wallClockDurationMs: block.wallClockDurationMs as number,
+    observedActiveDurationMs: block.observedActiveDurationMs as number,
+    pausedDurationMs: block.pausedDurationMs as number,
+    track: block.track as string,
+    primaryApplication: block.primaryApplication as string,
+    cleanTitle: block.cleanTitle as string,
+    domain: (block.domain as string | null) ?? null,
+    sanitizedUrl: (block.sanitizedUrl as string | null) ?? null,
+    sourceChannel: block.sourceChannel as string,
+    rawEventCount: block.rawEventCount as number,
+    observationSetFingerprint: block.observationSetFingerprint as string,
+    isAfkBlock: (block.track as string) === "FOREGROUND" && (block.primaryApplication as string) === "afk",
+    modality: {
+      primary: primary
+        ? { value: primary.value, confidence: primary.confidence, provenance: primary.provenance, authority: "SYSTEM" }
+        : null,
+      secondary: secondary.map((c) => ({ value: c.value, provenance: c.provenance })),
+      context: context ? { value: context.value, provenance: context.provenance } : null,
+    },
+    attention,
+    coverageGaps: [],
+    pendingInterpretation: !primary,
+  };
+}
 
 export { normalizeAppName, cleanWindowTitle, categorizeActivity };
 
@@ -117,6 +181,7 @@ export async function getTimelineForDay(
       summary: emptySummary,
       currentActivity: null,
       segments: [],
+      blocks: [],
     };
   }
 
@@ -168,6 +233,34 @@ export async function getTimelineForDay(
     };
   }
 
+  // Materialize Phase 3B semantic blocks (idempotent, fingerprint-backed)
+  let blocks: TimelineBlockPayload[] = [];
+  try {
+    await materializeBlocksForUserDay(getDb(), userId, startOfDay, endOfDay, {
+      maxGapMs: 120_000,
+      minBreakMs: 60_000,
+      transientThresholdMs: 15_000,
+      maxBreakMs: 2 * 60 * 60 * 1000,
+    });
+    const blockRows = await prisma.temporalActivityBlock.findMany({
+      where: { userId, startTime: { gte: startOfDay, lte: endOfDay }, track: "FOREGROUND" },
+      orderBy: { startTime: "asc" },
+      include: {
+        claims: { where: { isCurrent: true }, select: { claimType: true, value: true, confidence: true, provenance: true } },
+        attentionInferences: { select: { focusEvidenceState: true } },
+      },
+    });
+    blocks = blockRows.map((row) =>
+      toTimelineBlockPayload(
+        row as unknown as { id: string; [key: string]: unknown },
+        row.claims as Array<{ claimType: string; value: string; confidence: number | null; provenance: string }>,
+        row.attentionInferences[0] ? { focusEvidenceState: row.attentionInferences[0]!.focusEvidenceState } : null
+      )
+    );
+  } catch (materializeError) {
+    console.error("[Timeline] Block materialization failed, returning legacy timeline only:", materializeError);
+  }
+
   return {
     date: effectiveDateStr,
     timezone,
@@ -175,5 +268,6 @@ export async function getTimelineForDay(
     summary,
     currentActivity,
     segments,
+    blocks,
   };
 }
