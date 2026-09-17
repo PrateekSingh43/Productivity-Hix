@@ -1,4 +1,18 @@
-const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000";
+
+export function getApiBaseUrl(): string {
+  return apiUrl;
+}
+
+export function getWebSocketBaseUrl(): string {
+  if (process.env.NEXT_PUBLIC_WS_URL) {
+    return process.env.NEXT_PUBLIC_WS_URL;
+  }
+  const url = new URL(apiUrl);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  url.pathname = "/ws";
+  return url.toString().replace(/\/$/, "");
+}
 
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const headers: Record<string, string> = {

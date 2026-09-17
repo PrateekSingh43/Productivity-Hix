@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import { Monitor, Globe, Activity, Wifi, WifiOff, Clock, ShieldCheck, Laptop } from "lucide-react";
 import type { TelemetryEvent } from "@repo/telemetry";
+import { getWebSocketBaseUrl } from "../../src/lib/api/client";
 
 interface LiveState {
   connected: boolean;
@@ -53,7 +54,7 @@ export function LiveActivityCard() {
     let unmounted = false;
 
     function connect() {
-      const wsUrl = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:4000/ws";
+      const wsUrl = getWebSocketBaseUrl();
       const url = `${wsUrl}?userId=00000000-0000-0000-0000-000000000001`;
 
       try {

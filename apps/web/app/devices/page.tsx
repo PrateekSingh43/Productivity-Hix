@@ -147,7 +147,7 @@ export default function DevicesPage() {
               <div className="flex items-center justify-between">
                 <span className="text-text-secondary">Presentation Stream</span>
                 <span className="font-mono text-accent-default">
-                  {isConnected ? "Connected (:4000/ws)" : "Disconnected"}
+                  {isConnected ? "Connected (:5000/ws)" : "Disconnected"}
                 </span>
               </div>
             </div>

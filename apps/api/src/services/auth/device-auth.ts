@@ -38,9 +38,9 @@ export async function createDeviceAuthorization(input: DeviceCodeRequestInput) {
     },
   });
 
-  const webOrigin = env.WEB_ORIGIN || "http://localhost:3000";
-  const verificationUri = `${webOrigin}/pair`;
-  const verificationUriComplete = `${webOrigin}/pair?code=${userCode}`;
+  const primaryWebOrigin = (env.WEB_ORIGIN || "http://localhost:5173").split(",")[0].trim();
+  const verificationUri = `${primaryWebOrigin}/pair`;
+  const verificationUriComplete = `${primaryWebOrigin}/pair?code=${userCode}`;
 
   return {
     deviceCode,

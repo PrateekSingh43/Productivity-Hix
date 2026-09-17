@@ -24,7 +24,25 @@ export function createApp(): Express {
   const app = express();
   app.disable("x-powered-by");
   app.use(helmet());
-  app.use(cors({ origin: env.WEB_ORIGIN, credentials: true }));
+  const configuredOrigins = env.WEB_ORIGIN.split(",").map((o) => o.trim().replace(/\/$/, "")).filter(Boolean);
+  const allowedOrigins = new Set([
+    ...configuredOrigins,
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+  ]);
+  app.use(
+    cors({
+      origin: (origin, callback) => {
+        if (!origin || allowedOrigins.has(origin.replace(/\/$/, ""))) {
+          return callback(null, true);
+        }
+        return callback(null, false);
+      },
+      credentials: true,
+    }),
+  );
   app.use(express.json({ limit: "1mb" }));
   app.use(requestId);
   app.use(pinoHttp());

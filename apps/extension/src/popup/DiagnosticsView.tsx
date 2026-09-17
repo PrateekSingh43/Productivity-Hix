@@ -112,7 +112,7 @@ export function DiagnosticsView({ status, onBack, onRefresh }: DiagnosticsViewPr
         </div>
 
         <div className="diag-row">
-          <span className="diag-label">Express API (Port 4000)</span>
+          <span className="diag-label">Express API (Port 5000)</span>
           <span className={`status-pill ${status?.apiReachable ? "good" : "bad"}`}>
             ● {status?.apiReachable ? "Connected" : "Offline"}
           </span>

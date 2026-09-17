@@ -67,7 +67,7 @@ function formatClock(seconds: number) {
 }
 
 function openDashboard(path = "") {
-  void chrome.tabs.create({ url: `http://localhost:3000${path}` });
+  void chrome.tabs.create({ url: `http://localhost:5173${path}` });
 }
 
 function Skeleton({ className = "" }: { className?: string }) {

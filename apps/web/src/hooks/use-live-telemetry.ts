@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import type { TelemetryEvent } from "@repo/telemetry";
+import { getWebSocketBaseUrl } from "../lib/api/client";
 
 export interface LiveTelemetryState {
   connected: boolean;
@@ -54,7 +55,7 @@ export function useLiveTelemetry() {
     let unmounted = false;
 
     function connect() {
-      const wsUrl = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:4000/ws";
+      const wsUrl = getWebSocketBaseUrl();
       const url = `${wsUrl}?userId=00000000-0000-0000-0000-000000000001`;
 
       try {

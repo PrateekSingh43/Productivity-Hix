@@ -26,7 +26,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${geistSans.variable} ${geistMono.variable}`}>
+      <body suppressHydrationWarning className={`${geistSans.variable} ${geistMono.variable}`}>
         <Script
           id="theme-initializer"
           strategy="beforeInteractive"

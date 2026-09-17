@@ -9,7 +9,7 @@ export class ApiTelemetryClient {
     this.apiUrl = (
       options?.apiUrl ||
       process.env.PRODUCTIVEHIX_API_URL ||
-      "http://localhost:4000"
+      "http://localhost:5000"
     ).replace(/\/$/, "");
     this.deviceToken = options?.deviceToken || process.env.PRODUCTIVEHIX_DEVICE_TOKEN || null;
     this.devUserId = options?.devUserId || process.env.PRODUCTIVEHIX_DEV_USER_ID || null;

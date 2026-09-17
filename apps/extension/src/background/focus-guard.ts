@@ -10,6 +10,8 @@ const EXEMPT_HOSTS = [
   "auth0.com",
   "appleid.apple.com",
   "supabase.co",
+  "localhost:5173",
+  "localhost:5000",
   "localhost:3000",
   "localhost:4000",
   "127.0.0.1",
@@ -160,7 +162,7 @@ export class FocusGuardManager {
       }
 
       const settings = await getSettings();
-      const apiUrl = settings.apiUrl || "http://localhost:4000";
+      const apiUrl = settings.apiUrl || "http://localhost:5000";
       const wsUrl = apiUrl.replace(/^http/, "ws");
       const token = settings.deviceToken || "";
       const userId = settings.userId || "00000000-0000-0000-0000-000000000001";

@@ -29,7 +29,7 @@ export class DevicePairingManager {
     this.apiUrl = (
       apiUrl ||
       process.env.PRODUCTIVEHIX_API_URL ||
-      "http://localhost:4000"
+      "http://localhost:5000"
     ).replace(/\/$/, "");
 
     if (customPath) {

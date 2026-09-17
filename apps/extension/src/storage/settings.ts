@@ -31,8 +31,13 @@ export async function getSettings(): Promise<ExtensionSettings> {
     installationId = `browser-ext-${crypto.randomUUID()}`;
   }
 
+  let apiUrl = current?.apiUrl;
+  if (!apiUrl || apiUrl === "http://localhost:4000") {
+    apiUrl = "http://localhost:5000";
+  }
+
   const settings: ExtensionSettings = {
-    apiUrl: current?.apiUrl ?? "http://localhost:4000",
+    apiUrl,
     installationId,
     deviceToken: current?.deviceToken,
     userId: current?.userId ?? "00000000-0000-0000-0000-000000000001",
