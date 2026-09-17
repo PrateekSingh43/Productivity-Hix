@@ -327,9 +327,11 @@ The repository enforces strict architectural contracts across every package:
 
 ---
 
-## ⚖️ License
+## ⚖️ License & Proprietary Notice
 
-Distributed under the **MIT License**. See [`LICENSE`](LICENSE) for more information.
+Copyright &copy; 2026 Prateek Singh. **All Rights Reserved. Proprietary and Confidential.**
+
+Unauthorized copying, distribution, modification, public deployment, hosting, or commercial exploitation of this software or its services without prior written permission is strictly prohibited. See [`LICENSE`](LICENSE) for full legal terms and commercial licensing inquiries.
 
 <div align="center">
 <sub>Crafted with engineering rigor for deep work, cognitive mastery, and genuine intellectual growth.</sub>
