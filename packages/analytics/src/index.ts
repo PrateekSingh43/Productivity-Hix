@@ -26,4 +26,5 @@ export type {
 export * from "./features";
 export * from "./evidence";
 export * from "./patterns";
+export * from "./insights";
 

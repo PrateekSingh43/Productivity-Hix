@@ -77,7 +77,7 @@ export function iqr(values: number[]): number | null {
  * @returns The fraction [0, 1], or null if denominator is 0.
  */
 export function recurrenceFraction(satisfyingCount: number, totalQualifyingCount: number): number | null {
-  if (satisfyingCount < 0 || totalQualifyingCount < 0) {
+  if (!Number.isSafeInteger(satisfyingCount) || !Number.isSafeInteger(totalQualifyingCount) || satisfyingCount < 0 || totalQualifyingCount < 0 || satisfyingCount > totalQualifyingCount) {
     return null;
   }
   return safeDivide(satisfyingCount, totalQualifyingCount);

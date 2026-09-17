@@ -55,7 +55,12 @@ export function assessCoverage(
       }
     } else if (block.coverage === "UNKNOWN") {
       unknownSeconds += block.durationSeconds;
+    }
 
+    const isUnknownEquivalent = block.coverage === "UNKNOWN" ||
+      (block.coverage === "REPORTED" && !config.requiredEvidenceQuality.allowReportedOnly) ||
+      (block.coverage === "EXPLAINED_GAP" && !config.requiredEvidenceQuality.allowExplainedGap);
+    if (isUnknownEquivalent) {
       if (config.unknownHandling === "INTERRUPT_CONTINUITY") {
         interrupted = true;
       } else if (config.unknownHandling === "TERMINATE_EPISODE") {
@@ -65,7 +70,7 @@ export function assessCoverage(
   }
 
   const unknownFraction = safeRatio(unknownSeconds, totalDurationSeconds) ?? 0;
-  const isCoverageSufficient = unknownFraction <= config.requiredEvidenceQuality.maxUnknownFraction;
+  const isCoverageSufficient = totalDurationSeconds > 0 && unknownFraction <= config.requiredEvidenceQuality.maxUnknownFraction;
 
   let status: CoverageAssessment["status"] = "SUFFICIENT";
   if (terminated) {

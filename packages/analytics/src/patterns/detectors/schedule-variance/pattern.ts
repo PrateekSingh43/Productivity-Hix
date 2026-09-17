@@ -69,6 +69,7 @@ export function evaluateScheduleVariancePattern(
   const contributingSessionIds: string[] = [];
 
   let totalObservedActiveSeconds = 0;
+  const epistemicCaveats: string[] = [];
 
   // 2. Classify each task into mutually exclusive populations
   for (const instance of sortedInstances) {
@@ -86,7 +87,10 @@ export function evaluateScheduleVariancePattern(
       instance.plannedDurationMinutes
     );
 
-    if (metrics.status === "INDETERMINATE_COVERAGE") {
+    if (metrics.status === "INTEGRITY_ERROR") {
+      indeterminateStartTaskCount++;
+      epistemicCaveats.push(`INTEGRITY_ERROR_CORRUPT_TIMESTAMPS:${instance.taskId}`);
+    } else if (metrics.status === "INDETERMINATE_COVERAGE") {
       indeterminateStartTaskCount++;
     } else if (metrics.status === "NOT_OBSERVED") {
       notObservedTaskCount++;
@@ -143,7 +147,6 @@ export function evaluateScheduleVariancePattern(
 
   // 4. Qualification & Pattern Decision
   let executionStatus: PatternExecutionStatus = "NO_PATTERN";
-  const epistemicCaveats: string[] = [];
 
   const isSufficientEvidence =
     observedStartTaskCount >= config.minimumQualifyingTaskInstances &&

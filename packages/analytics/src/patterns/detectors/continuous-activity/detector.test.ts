@@ -90,6 +90,42 @@ describe("Detector 3: Continuous Activity Detector (Extended Continuous Observed
     outcome: null,
   });
 
+  test("coverage is enforced against the disclosed evaluation window", () => {
+    const blocks = [createBlock("short", "2026-09-15T10:00:00Z", "2026-09-15T10:10:00Z", 600)];
+    const result = new ContinuousActivityDetector(defaultConfig).evaluateEpisode(createContext("2026-09-15T10:00:00Z", "2026-09-15T11:00:00Z", blocks), "coverage");
+    assert.strictEqual(result.executionStatus, "INDETERMINATE_COVERAGE");
+    assert.strictEqual(result.metrics.evaluationWindowSeconds, 3600);
+    assert.strictEqual(result.metrics.coverageRatio, 1 / 6);
+    assert.deepStrictEqual(result.metrics.blockIds, ["short"]);
+  });
+
+  test("zero UNKNOWN tolerance is strict and duplicate overlaps are unioned", () => {
+    const blocks = [
+      createBlock("work", "2026-09-15T10:00:00Z", "2026-09-15T11:00:00Z", 3600),
+      createBlock("u1", "2026-09-15T10:00:00Z", "2026-09-15T10:01:00Z", 60, "UNKNOWN"),
+      createBlock("u2", "2026-09-15T10:00:30Z", "2026-09-15T10:01:00Z", 30, "UNKNOWN"),
+    ];
+    const context = createContext("2026-09-15T10:00:00Z", "2026-09-15T11:00:00Z", blocks);
+    const strict = new ContinuousActivityDetector({ ...defaultConfig, maxUnknownFraction: 0 }).evaluateEpisode(context, "strict");
+    assert.strictEqual(strict.executionStatus, "INDETERMINATE_COVERAGE");
+    assert.strictEqual(strict.metrics.unknownFraction, 1 / 60);
+    const tolerant = new ContinuousActivityDetector({ ...defaultConfig, maxUnknownFraction: 1 / 60 }).evaluateEpisode(context, "union");
+    assert.strictEqual(tolerant.executionStatus, "QUALIFIED");
+    assert.strictEqual(tolerant.metrics.observedDurationSeconds, 3540);
+  });
+
+  test("out-of-window evidence is clipped or ignored before measurement", () => {
+    const blocks = [
+      createBlock("carry", "2026-09-15T09:00:00Z", "2026-09-15T12:00:00Z", 10800),
+      createBlock("outside", "2026-09-15T08:00:00Z", "2026-09-15T09:00:00Z", 3600, "UNKNOWN"),
+      createBlock("touch", "2026-09-15T11:00:00Z", "2026-09-15T12:00:00Z", 3600),
+    ];
+    const result = new ContinuousActivityDetector(defaultConfig).evaluateEpisode(createContext("2026-09-15T10:00:00Z", "2026-09-15T11:00:00Z", blocks), "clip");
+    assert.strictEqual(result.metrics.observedDurationSeconds, 3600);
+    assert.strictEqual(result.metrics.unknownFraction, 0);
+    assert.deepStrictEqual(result.metrics.blockIds, ["carry"]);
+  });
+
   // Test 1 — one continuous interval
   test("Test 1: one continuous interval: 10:00-11:00 observed -> duration = 3600s", () => {
     const detector = new ContinuousActivityDetector(defaultConfig);
@@ -143,7 +179,7 @@ describe("Detector 3: Continuous Activity Detector (Extended Continuous Observed
       maximumContinuityGapSeconds: 0,
     });
     const resultSeparated = detectorZeroTol.evaluateEpisode(context, "eval-3-separated");
-    assert.strictEqual(resultSeparated.executionStatus, "QUALIFIED");
+    assert.strictEqual(resultSeparated.executionStatus, "INDETERMINATE_COVERAGE");
     // Longest run is 1800s (b1)
     assert.strictEqual(resultSeparated.metrics.continuousDurationSeconds, 1800);
     assert.strictEqual(resultSeparated.metrics.interruptionCount, 1);
@@ -287,7 +323,7 @@ describe("Detector 3: Continuous Activity Detector (Extended Continuous Observed
   });
 
   // Test 12 — open/current interval
-  test("Test 12: open/current interval ending at windowEnd does not invent future end time and flags caveat", () => {
+  test("Test 12: ending at windowEnd does not infer an open interval", () => {
     const detector = new ContinuousActivityDetector(defaultConfig);
     const windowEnd = "2026-09-15T11:00:00.000Z";
     const blocks = [
@@ -298,6 +334,6 @@ describe("Detector 3: Continuous Activity Detector (Extended Continuous Observed
 
     assert.strictEqual(result.executionStatus, "QUALIFIED");
     assert.strictEqual(result.temporalWindow.end, windowEnd);
-    assert.ok(result.epistemicCaveats.includes("OPEN_CURRENT_INTERVAL"));
+    assert.ok(!result.epistemicCaveats.includes("OPEN_CURRENT_INTERVAL"));
   });
 });

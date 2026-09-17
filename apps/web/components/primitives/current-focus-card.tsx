@@ -19,6 +19,8 @@ import Link from "next/link";
 
 export interface CurrentFocusCardProps {
   isActive?: boolean;
+  isPaused?: boolean;
+  isPending?: boolean;
   selectedTask?: Task | null;
   availableTasks?: Task[];
   elapsedSeconds?: number;
@@ -42,6 +44,8 @@ function formatElapsed(seconds: number): string {
 
 export function CurrentFocusCard({
   isActive = false,
+  isPaused = false,
+  isPending = false,
   selectedTask = null,
   availableTasks = [],
   elapsedSeconds = 0,
@@ -59,7 +63,7 @@ export function CurrentFocusCard({
   const [isChoosing, setIsChoosing] = useState(false);
 
   // 1. ACTIVE SESSION STATE (Operational, high-contrast, dominant timer)
-  if (isActive && selectedTask) {
+  if ((isActive || isPaused) && selectedTask) {
     const observedContext = observedDomain
       ? `${observedApplication || "Browser"} · ${observedDomain}`
       : observedTitle
@@ -78,7 +82,7 @@ export function CurrentFocusCard({
             </span>
             <div className="flex items-center gap-2">
               <span className="text-xs font-semibold text-text-primary">
-                Focus Session Active
+                {isPaused ? "Focus Session Paused" : "Focus Session Active"}
               </span>
               {selectedTask.goalTitle && (
                 <>
@@ -126,17 +130,19 @@ export function CurrentFocusCard({
           {onPause && (
             <button
               type="button"
-              onClick={onPause}
+              onClick={isPaused ? onResume : onPause}
+              disabled={isPending}
               className="inline-flex items-center gap-1.5 text-xs text-text-secondary hover:text-text-primary bg-bg-secondary border border-border-subtle hover:border-border-hover px-3.5 py-2 rounded-md transition-colors cursor-pointer"
             >
-              <Pause size={12} />
-              <span>Pause</span>
+              {isPaused ? <Play size={12} /> : <Pause size={12} />}
+              <span>{isPaused ? "Resume" : "Pause"}</span>
             </button>
           )}
           {onComplete && (
             <button
               type="button"
               onClick={onComplete}
+              disabled={isPending}
               className="inline-flex items-center gap-1.5 text-xs font-medium bg-text-primary hover:opacity-90 text-bg-default px-4 py-2 rounded-md transition-colors cursor-pointer"
             >
               <CheckCircle2 size={13} />

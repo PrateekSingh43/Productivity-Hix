@@ -6,7 +6,7 @@ import {
   Activity,
   Target,
   CheckCircle2,
-  Brain,
+
   ArrowRight,
   Sparkles,
   Monitor,
@@ -49,7 +49,7 @@ export default function HomePage() {
     : null;
 
   // Real observed active minutes from telemetry
-  const totalActiveMinutes = activity?.activeTime
+  const totalActiveMinutes = activity?.activeTime != null
     ? Math.round(activity.activeTime / 60)
     : null;
   const activeDisplay =
@@ -134,7 +134,7 @@ export default function HomePage() {
                   Day not planned yet
                 </h2>
                 <p className="text-xs sm:text-sm text-text-secondary leading-relaxed max-w-lg">
-                  Setting 1–3 concrete objectives anchors deliberate focus and provides a clear baseline for reflection.
+                  Setting 1–3 concrete objectives anchors deliberate focus and gives reflection a clear starting point.
                 </p>
                 <div className="pt-1">
                   <Link
@@ -199,7 +199,7 @@ export default function HomePage() {
       </div>
 
       {/* 3. SUPPORTING METRIC RIBBON (Integrated flat strip, no duplicate boxes) */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 rounded-xl border border-border-subtle bg-bg-card divide-y lg:divide-y-0 lg:divide-x divide-border-subtle overflow-hidden">
+      <div className="grid grid-cols-1 sm:grid-cols-3 rounded-xl border border-border-subtle bg-bg-card divide-y lg:divide-y-0 lg:divide-x divide-border-subtle overflow-hidden">
         {/* Metric 1: Observed Activity */}
         <div className="p-4 sm:p-5 space-y-1">
           <div className="flex items-center justify-between gap-2">
@@ -215,13 +215,13 @@ export default function HomePage() {
         {/* Metric 2: Focus Sessions */}
         <div className="p-4 sm:p-5 space-y-1">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-xs text-text-muted">Focus Sessions</span>
+            <span className="text-xs text-text-muted">Observed activity blocks</span>
             <Target size={14} className="text-text-muted" aria-hidden="true" />
           </div>
           <div className="text-xl sm:text-2xl font-semibold font-mono tracking-tight text-text-primary tabular-nums">
             {sessionCount}
           </div>
-          <p className="text-[11px] text-text-muted">Completed deliberate blocks</p>
+          <p className="text-[11px] text-text-muted">Recorded desktop and browser activity</p>
         </div>
 
         {/* Metric 3: Planned Tasks */}
@@ -231,24 +231,13 @@ export default function HomePage() {
             <CheckCircle2 size={14} className="text-text-muted" aria-hidden="true" />
           </div>
           <div className="text-xl sm:text-2xl font-semibold font-mono tracking-tight text-text-primary tabular-nums">
-            {tasks.length > 0 ? `${completedTasks.length} / ${tasks.length}` : "0"}
+            {completedTasks.length}
           </div>
           <p className="text-[11px] text-text-muted">
-            {tasks.length > 0 ? `${Math.round((completedTasks.length / tasks.length) * 100)}% intention fulfilled` : "No tasks planned yet"}
+            tasks done
           </p>
         </div>
 
-        {/* Metric 4: Reviews Due */}
-        <div className="p-4 sm:p-5 space-y-1">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-xs text-text-muted">Spaced Reviews</span>
-            <Brain size={14} className="text-text-muted" aria-hidden="true" />
-          </div>
-          <div className="text-xl sm:text-2xl font-semibold font-mono tracking-tight text-text-muted tabular-nums">
-            0 due
-          </div>
-          <p className="text-[11px] text-text-muted">Recall items scheduled</p>
-        </div>
       </div>
 
       {/* 4. CURRENT OBSERVED TELEMETRY EVIDENCE (Flat 2-column layout, no card-in-card) */}

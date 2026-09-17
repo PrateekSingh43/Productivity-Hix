@@ -183,7 +183,7 @@ function subtractInterruptionFromInterval(
 export function segmentContinuousActivityRuns(
   blocks: TemporalEvidenceBlock[],
   config: ContinuousActivityConfig,
-  windowEnd?: string
+  _windowEnd?: string
 ): ContinuousActivityRun[] {
   const validBlocks = blocks.filter(isValidTemporalBlock);
   if (validBlocks.length === 0) return [];
@@ -254,7 +254,7 @@ export function segmentContinuousActivityRuns(
         observedDurationSeconds: currentRun.observedDurationSeconds,
         blockIds: currentRun.blockIds,
         interruptionCount: totalInterruptions - 1,
-        isOpenInterval: windowEnd ? currentRun.endTime === windowEnd : false,
+        isOpenInterval: false,
       });
 
       currentRun = {
@@ -278,7 +278,7 @@ export function segmentContinuousActivityRuns(
     observedDurationSeconds: currentRun.observedDurationSeconds,
     blockIds: currentRun.blockIds,
     interruptionCount: totalInterruptions,
-    isOpenInterval: windowEnd ? currentRun.endTime === windowEnd : false,
+    isOpenInterval: false,
   });
 
   return runs;

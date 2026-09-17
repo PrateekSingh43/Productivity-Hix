@@ -32,6 +32,10 @@ export interface ContinuousActivityConfig {
 }
 
 export interface ContinuousActivityMetrics {
+  evaluationWindowSeconds: number;
+  blockIds: string[];
+  unknownFraction: number;
+  runCount: number;
   /** Total continuous duration of observed activity in seconds (primary metric). */
   continuousDurationSeconds: number;
 

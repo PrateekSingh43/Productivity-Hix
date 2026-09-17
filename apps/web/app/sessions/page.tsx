@@ -12,7 +12,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useTasks } from "../../src/hooks/queries/use-dashboard";
 import { useSessionsList } from "../../src/hooks/queries/use-tasks";
 import { useLiveTelemetry } from "../../src/hooks/use-live-telemetry";
-import { createSession, finishSession } from "../../src/lib/api/sessions";
+import { createSession, finishSession, pauseSession, resumeSession } from "../../src/lib/api/sessions";
 import { updateTask } from "../../src/lib/api/tasks";
 import type { Task, WorkSession } from "@repo/types";
 import { format } from "date-fns";
@@ -27,6 +27,8 @@ export default function SessionsPage() {
   const [sessionActive, setSessionActive] = useState(false);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [sessionError, setSessionError] = useState<string | null>(null);
+  const [sessionPending, setSessionPending] = useState(false);
 
   // Sync active session from backend
   const liveActiveSession = useMemo(() => {
@@ -36,11 +38,12 @@ export default function SessionsPage() {
   useEffect(() => {
     if (liveActiveSession) {
       setActiveSessionId(liveActiveSession.id);
-      setSessionActive(true);
-      const startMs = Date.parse(liveActiveSession.startedAt);
-      if (!isNaN(startMs)) {
-        setElapsedSeconds(Math.max(0, Math.floor((Date.now() - startMs) / 1000)));
-      }
+      setSessionActive(!liveActiveSession.isPaused);
+      const startMs = Date.parse(liveActiveSession.lastResumedAt ?? liveActiveSession.startedAt);
+      const accumulated = liveActiveSession.durationSeconds ?? 0;
+      setElapsedSeconds(liveActiveSession.isPaused || !Number.isFinite(startMs)
+        ? accumulated
+        : accumulated + Math.max(0, Math.floor((Date.now() - startMs) / 1000)));
       if (liveActiveSession.taskId) {
         const found = tasks.find((t) => t.id === liveActiveSession.taskId);
         if (found) setSelectedTask(found);
@@ -75,7 +78,9 @@ export default function SessionsPage() {
   }, [tasks, selectedTask, sessionActive]);
 
   const handleStartFocus = async () => {
-    if (!selectedTask) return;
+    if (!selectedTask || activeSessionId || sessionPending) return;
+    setSessionError(null);
+    setSessionPending(true);
     try {
       const session = await createSession({
         taskId: selectedTask.id,
@@ -88,24 +93,49 @@ export default function SessionsPage() {
       queryClient.invalidateQueries({ queryKey: ["tasks"] });
       queryClient.invalidateQueries({ queryKey: ["sessions"] });
     } catch {
-      setSessionActive(true);
+      setSessionError("The session could not be started or linked. Please try again.");
+    } finally {
+      setSessionPending(false);
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    }
+  };
+
+  const handlePauseResume = async (pause: boolean) => {
+    if (!activeSessionId || sessionPending) return;
+    setSessionError(null);
+    setSessionPending(true);
+    try {
+      const session = await (pause ? pauseSession(activeSessionId) : resumeSession(activeSessionId));
+      await queryClient.cancelQueries({ queryKey: ["sessions"] });
+      queryClient.setQueryData<WorkSession[]>(["sessions"], (current) =>
+        current?.map((item) => item.id === session.id ? session : item));
+      setSessionActive(!session.isPaused);
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    } catch {
+      setSessionError("The session could not be updated. Please try again.");
+    } finally {
+      setSessionPending(false);
     }
   };
 
   const handleCompleteFocus = async () => {
-    if (activeSessionId) {
+    if (!activeSessionId || sessionPending) return;
+    setSessionError(null);
+    setSessionPending(true);
+    try {
       await finishSession(activeSessionId, "Completed intentional focus block");
+      setSessionActive(false);
+      setActiveSessionId(null);
+      setElapsedSeconds(0);
+      queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      queryClient.invalidateQueries({ queryKey: ["plans"] });
+      queryClient.invalidateQueries({ queryKey: ["activity"] });
+    } catch {
+      setSessionError("The session could not be completed. Please try again.");
+    } finally {
+      setSessionPending(false);
     }
-    if (selectedTask) {
-      await updateTask(selectedTask.id, { status: "done" });
-    }
-    setSessionActive(false);
-    setActiveSessionId(null);
-    setElapsedSeconds(0);
-    queryClient.invalidateQueries({ queryKey: ["tasks"] });
-    queryClient.invalidateQueries({ queryKey: ["sessions"] });
-    queryClient.invalidateQueries({ queryKey: ["plans"] });
-    queryClient.invalidateQueries({ queryKey: ["activity"] });
   };
 
   // Metric summaries
@@ -124,11 +154,8 @@ export default function SessionsPage() {
     return Math.round(totalMinutes / completedSessions.length);
   }, [completedSessions, totalMinutes]);
 
-  const taskAlignmentPercent = useMemo(() => {
-    if (completedSessions.length === 0) return 0;
-    const aligned = completedSessions.filter((s) => Boolean(s.taskId)).length;
-    return Math.round((aligned / completedSessions.length) * 100);
-  }, [completedSessions]);
+  const taskLinkedSessions = completedSessions.filter((s) => Boolean(s.taskId)).length;
+  const isLimited = sessions.length >= 50;
 
   return (
     <PageContainer>
@@ -139,12 +166,19 @@ export default function SessionsPage() {
           { label: "Home", href: "/" },
           { label: "Sessions" },
         ]}
+        actions={
+          isLimited ? (
+            <span className="text-xs font-mono text-text-muted">showing most recent 50</span>
+          ) : undefined
+        }
       />
 
       {/* 1. VISUAL ANCHOR: CURRENT FOCUS CARD */}
       <Section>
         <CurrentFocusCard
           isActive={sessionActive}
+          isPaused={Boolean(activeSessionId) && !sessionActive}
+          isPending={sessionPending}
           selectedTask={selectedTask}
           availableTasks={tasks}
           elapsedSeconds={elapsedSeconds}
@@ -153,8 +187,8 @@ export default function SessionsPage() {
           observedTitle={telemetry.windowTitle || undefined}
           onSelectTask={(task) => setSelectedTask(task)}
           onStartFocus={handleStartFocus}
-          onPause={() => setSessionActive(false)}
-          onResume={() => setSessionActive(true)}
+          onPause={() => void handlePauseResume(true)}
+          onResume={() => void handlePauseResume(false)}
           onComplete={handleCompleteFocus}
         />
       </Section>
@@ -163,7 +197,7 @@ export default function SessionsPage() {
       <Section>
         <div className="rounded-xl border border-border-subtle bg-bg-card grid grid-cols-2 sm:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-border-subtle overflow-hidden">
           <div className="p-4 sm:p-5">
-            <span className="text-xs text-text-muted block mb-1">Total Sessions</span>
+            <span className="text-xs text-text-muted block mb-1">{isLimited ? "Sessions (last 50)" : "Total Sessions"}</span>
             <div className="text-xl sm:text-2xl font-semibold font-mono tabular-nums text-text-primary">
               {completedSessions.length}
             </div>
@@ -173,7 +207,7 @@ export default function SessionsPage() {
           </div>
 
           <div className="p-4 sm:p-5">
-            <span className="text-xs text-text-muted block mb-1">Total Focus Time</span>
+            <span className="text-xs text-text-muted block mb-1">{isLimited ? "Recorded minutes (last 50)" : "Total Focus Time"}</span>
             <div className="text-xl sm:text-2xl font-semibold font-mono tabular-nums text-text-primary">
               {totalMinutes}m
             </div>
@@ -193,12 +227,12 @@ export default function SessionsPage() {
           </div>
 
           <div className="p-4 sm:p-5">
-            <span className="text-xs text-text-muted block mb-1">Task Alignment</span>
+            <span className="text-xs text-text-muted block mb-1">Task-linked sessions</span>
             <div className="text-xl sm:text-2xl font-semibold font-mono tabular-nums text-text-primary">
-              {completedSessions.length > 0 ? `${taskAlignmentPercent}%` : "—"}
+              {taskLinkedSessions}
             </div>
             <p className="text-[11px] text-text-muted mt-0.5">
-              Linked to deliberate goals
+              Completed sessions linked to a task
             </p>
           </div>
         </div>

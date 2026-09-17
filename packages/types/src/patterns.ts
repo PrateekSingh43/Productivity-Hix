@@ -127,9 +127,62 @@ export interface EpisodeMeasurementOutput<
   epistemicCaveats: string[];
 }
 
+export type PatternRepertoireCategory =
+  | "strength"
+  | "stable"
+  | "emerging"
+  | "changed"
+  | "friction"
+  | "mismatch"
+  | "opportunity";
+
+export type PatternClaimLevel = "recurrence" | "sustained-change" | "co-occurrence";
+
+export interface AnalyticalWindow {
+  start: string;
+  end: string;
+}
+
+export interface PatternEvidenceRef {
+  occasionId: string;
+  date: string;
+  window: AnalyticalWindow;
+  blockIds: string[];
+  sessionIds: string[];
+  taskIds: string[];
+  reportIds: string[];
+}
+
+export interface PatternLayerFields {
+  claim: string;
+  claimLevel: PatternClaimLevel;
+  repertoireCategory: PatternRepertoireCategory;
+  comparison: {
+    referenceKind: "own-history" | "declared-intention";
+    window: AnalyticalWindow;
+    comparabilityNote: string;
+  };
+  eligibility: {
+    required: Record<string, number | string>;
+    observed: Record<string, number | string>;
+    excluded: Array<{ occasionId: string; reason: string }>;
+  };
+  contributingResults: Array<{
+    detectorIdentity: string;
+    resultId: string;
+    metricsUsed: string[];
+    role: "primary" | "supporting";
+  }>;
+  evidenceRefs: PatternEvidenceRef[];
+  caveats: string[];
+  headline?: string;
+  supportingLine?: string;
+  evidenceAnchor?: string;
+}
+
 export interface BehavioralPatternOutput<
   TMetrics = Record<string, unknown>,
-> {
+> extends Partial<PatternLayerFields> {
   metadata: BaseDetectionMetadata & {
     patternId: string;
   };
@@ -207,6 +260,42 @@ export interface BehavioralPatternOutput<
   };
 
   epistemicCaveats: string[];
+}
+
+export type QualifiedBehavioralPatternOutput<TMetrics = Record<string, unknown>> =
+  BehavioralPatternOutput<TMetrics> & PatternLayerFields;
+
+export type InsightClaimLevel =
+  | "co-occurrence"
+  | "contrast"
+  | "pattern-outcome-association";
+
+export type InsightInputRef =
+  | { patternId: string; role: "primary" | "supporting" }
+  | { observationRef: string; role: "primary" | "supporting" };
+
+export interface InsightOutput {
+  inputs: InsightInputRef[];
+  personalElements: Array<{
+    kind: "intention" | "reflection" | "outcome" | "retention";
+    recordId: string;
+  }>;
+  claim: string;
+  claimLevel: InsightClaimLevel;
+  alternatives: string[];
+  doesNotEstablish: string[];
+  evidenceRefs: PatternEvidenceRef[];
+  status: "DETECTED" | "NO_INSIGHT" | "INSUFFICIENT_EVIDENCE";
+  window: AnalyticalWindow;
+  reliability: PatternReliability | null;
+  headline?: string;
+  supportingLine?: string;
+  hypothesis?: {
+    adjustment: string;
+    intendedBenefit: string;
+    potentialCost: string;
+    reviewAfter: string;
+  };
 }
 
 export interface PatternEvaluationLogEntry {

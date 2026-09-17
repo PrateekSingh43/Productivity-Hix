@@ -71,6 +71,11 @@ export function evaluateContextSwitchingEpisode(
       activeDurationSeconds: sequence.qualifyingObservedActiveDurationSeconds,
       coverageRatio,
       metrics: {
+        switches: sequence.switches.map(switchEvidence => ({
+          ...switchEvidence,
+          sessionId: session.id,
+          taskId: session.taskId ?? switchEvidence.taskId,
+        })),
         switchesPerHour,
         medianDwellSeconds: medianDwell,
         interquartileDwellSeconds: iqrDwell,

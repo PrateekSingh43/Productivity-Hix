@@ -1,6 +1,9 @@
 import type { TemporalEvidenceBlock } from "@repo/types";
 
+import type { ContextSwitchEvidence } from "./types";
+
 export interface ContextSequenceResult {
+  switches: ContextSwitchEvidence[];
   switchCount: number;
   dwellDurations: number[];
   qualifyingObservedActiveDurationSeconds: number;
@@ -14,6 +17,7 @@ export function parseContextSequence(blocks: TemporalEvidenceBlock[]): ContextSe
     return 0;
   });
 
+  const switches: ContextSwitchEvidence[] = [];
   let switchCount = 0;
   const dwells: number[] = [];
   let qualifyingObservedActiveDurationSeconds = 0;
@@ -22,7 +26,7 @@ export function parseContextSequence(blocks: TemporalEvidenceBlock[]): ContextSe
   let currentDwellDuration = 0;
   
   for (const block of sortedBlocks) {
-    if (block.coverage === "UNKNOWN") {
+    if (block.coverage === "UNKNOWN" || block.observation?.isAfk === true || block.observation?.category === "break") {
       // Interruption boundary: terminal dwell finalized, sequence interrupted
       if (currentKey !== null) {
         dwells.push(currentDwellDuration);
@@ -71,6 +75,14 @@ export function parseContextSequence(blocks: TemporalEvidenceBlock[]): ContextSe
     } else {
       // Switch boundary
       switchCount++;
+      switches.push({
+        key: canonicalKey,
+        fromKey: currentKey,
+        timestamp: block.startTime,
+        dwellSeconds: currentDwellDuration,
+        blockId: block.id,
+        ...(block.intention?.linkType === "EXPLICIT" && block.intention.taskId ? { taskId: block.intention.taskId } : {}),
+      });
       dwells.push(currentDwellDuration);
       currentKey = canonicalKey;
       currentDwellDuration = block.durationSeconds;
@@ -83,6 +95,7 @@ export function parseContextSequence(blocks: TemporalEvidenceBlock[]): ContextSe
   }
   
   return {
+    switches,
     switchCount,
     dwellDurations: dwells,
     qualifyingObservedActiveDurationSeconds

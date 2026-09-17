@@ -8,3 +8,5 @@ export * from "./sessions";
 export * from "./tasks";
 export * from "./plans";
 export * from "./user";
+export * from "./patterns";
+export * from "./insights";

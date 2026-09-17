@@ -12,7 +12,18 @@ export interface ContextSwitchingConfig {
   minimumPatternCoverageRatio: number; // e.g. 0.85
 }
 
+export interface ContextSwitchEvidence {
+  key: string;
+  fromKey: string;
+  timestamp: string;
+  dwellSeconds: number;
+  blockId: string;
+  taskId?: string;
+  sessionId?: string;
+}
+
 export interface ContextSwitchingMetrics {
+  switches?: ContextSwitchEvidence[];
   switchesPerHour: number | null;
   medianDwellSeconds: number | null;
   interquartileDwellSeconds: number | null;

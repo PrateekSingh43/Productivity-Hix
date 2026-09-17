@@ -343,6 +343,72 @@ describe("Detector 2: sequence.ts", () => {
     );
   });
 
+  test("reported-only evidence is labeled reported, not unattributed observed", () => {
+    const reported = { ...baseBlock("r1", "2026-09-01T10:30:00Z", "2026-09-01T11:00:00Z", 1800), coverage: "REPORTED" as const };
+    const blocks = [
+      taskBlock("b1", "2026-09-01T10:00:00Z", "2026-09-01T10:30:00Z", 1800, "task-1"),
+      reported,
+      taskBlock("b2", "2026-09-01T11:00:00Z", "2026-09-01T11:30:00Z", 1800, "task-1"),
+    ];
+    const episodes = segmentTaskExecutionEpisodes(blocks, "task-1");
+    assert.strictEqual(episodes.length, 1);
+    const ep = episodes[0]!;
+    assert.strictEqual(ep.gapBreakdown.unattributedObservedSeconds, 0);
+    assert.strictEqual(ep.knownInterveningGapSeconds, 1800);
+    assert.strictEqual(ep.gapBreakdown.reportedUnobservedSeconds, 1800);
+    assert.strictEqual(ep.unknownSeconds, 0);
+    assert.deepStrictEqual(ep.gaps.map(g => g.kind), ["reported_unobserved"]);
+    assert.deepStrictEqual(ep.gaps.map(g => g.blockIds), [["r1"]]);
+    assert.strictEqual(
+      ep.wallClockSpanSeconds,
+      ep.activeTaskDurationSeconds + ep.knownInterveningGapSeconds + ep.unknownSeconds
+    );
+  });
+
+  test("completion timestamp terminates the episode before later work", () => {
+    const completion = baseBlock("done", "2026-09-01T12:00:00Z", "2026-09-01T12:00:00Z", 0);
+    completion.outcome = { taskId: "task-1", taskStatus: "done", taskCompletedAt: "2026-09-01T11:00:00Z" };
+    const blocks = [
+      taskBlock("b1", "2026-09-01T10:00:00Z", "2026-09-01T10:30:00Z", 1800, "task-1"),
+      taskBlock("b2", "2026-09-01T11:30:00Z", "2026-09-01T12:00:00Z", 1800, "task-1"),
+      completion,
+    ];
+    const episodes = segmentTaskExecutionEpisodes(blocks, "task-1");
+    assert.strictEqual(episodes.length, 1);
+    const ep = episodes[0]!;
+    assert.strictEqual(ep.endedAt, "2026-09-01T10:30:00Z");
+    assert.strictEqual(ep.activeTaskDurationSeconds, 1800);
+    assert.strictEqual(ep.fragmentCount, 1);
+  });
+
+  test("legitimate research context stays in-episode, not an unrelated interruption", () => {
+    const research = baseBlock("res", "2026-09-01T10:30:00Z", "2026-09-01T11:00:00Z", 1800);
+    research.observation = { application: "Chrome", title: "docs", cleanTitle: "docs", domain: "developer.mozilla.org", category: "browser", isAfk: false, rawEventCount: 5 };
+    research.intention = { targetScope: "TASK", taskId: "task-1", linkType: "EXPLICIT" };
+    const blocks = [
+      taskBlock("b1", "2026-09-01T10:00:00Z", "2026-09-01T10:30:00Z", 1800, "task-1"),
+      research,
+      taskBlock("b2", "2026-09-01T11:00:00Z", "2026-09-01T11:30:00Z", 1800, "task-1"),
+    ];
+    const episodes = segmentTaskExecutionEpisodes(blocks, "task-1");
+    const ep = episodes[0]!;
+    assert.strictEqual(ep.gapBreakdown.unattributedObservedSeconds, 0);
+    const serialized = JSON.stringify(ep);
+    assert.doesNotMatch(serialized, /interruption|distraction|fragmented/i);
+  });
+
+  test("gap categories remain neutral vocabulary", () => {
+    const episodes = segmentTaskExecutionEpisodes([
+      taskBlock("b1", "2026-09-01T10:00:00Z", "2026-09-01T10:30:00Z", 1800, "task-1"),
+      breakBlock("b2", "2026-09-01T10:30:00Z", "2026-09-01T11:00:00Z", 1800),
+      taskBlock("b3", "2026-09-01T11:00:00Z", "2026-09-01T11:30:00Z", 1800, "task-1"),
+    ], "task-1");
+    const serialized = JSON.stringify(episodes[0]!.gaps);
+    for (const banned of ["interruption", "distraction", "fragmented", "fractured"]) {
+      assert.ok(!serialized.toLowerCase().includes(banned), `banned term: ${banned}`);
+    }
+  });
+
   test("empty blocks returns empty episodes safely", () => {
     const episodes = segmentTaskExecutionEpisodes([], "task-1");
     assert.deepStrictEqual(episodes, []);

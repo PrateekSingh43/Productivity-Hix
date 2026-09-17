@@ -15,6 +15,7 @@ import { checkInsRouter } from "./routes/check-ins";
 import { learningRouter } from "./routes/learning";
 import { activityRouter } from "./routes/activity";
 import { analyticsRouter } from "./routes/analytics";
+import { patternsRouter, insightsRouter } from "./routes/patterns";
 import { telemetryRouter } from "./routes/telemetry";
 import { exportRouter } from "./routes/export";
 import { userRouter } from "./routes/user";
@@ -57,6 +58,8 @@ export function createApp(): Express {
   app.use("/api/learning", learningRouter);
   app.use("/api/activity", activityRouter);
   app.use("/api/analytics", analyticsRouter);
+  app.use("/api/patterns", patternsRouter);
+  app.use("/api/insights", insightsRouter);
   app.use("/api/telemetry", telemetryRouter);
   app.use("/api/export", exportRouter);
   app.use("/api/ai", aiRouter);

@@ -59,9 +59,12 @@ function serializeSession(session: {
   };
 }
 
-export async function listSessions(userId: string) {
+export async function listSessions(userId: string, window?: { from: Date; to: Date }) {
   const sessions = await getDb().workSession.findMany({
-    where: { userId },
+    where: {
+      userId,
+      ...(window ? { startedAt: { lt: window.to }, OR: [{ endedAt: { gt: window.from } }, { endedAt: null }] } : {}),
+    },
     include: {
       task: {
         select: {
@@ -73,8 +76,8 @@ export async function listSessions(userId: string) {
         },
       },
     },
-    orderBy: { startedAt: "desc" },
-    take: 50,
+    orderBy: [{ startedAt: "desc" }, { id: "asc" }],
+    ...(window ? {} : { take: 50 }),
   });
   return sessions.map(serializeSession);
 }

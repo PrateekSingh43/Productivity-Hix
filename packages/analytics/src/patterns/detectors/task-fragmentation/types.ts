@@ -92,6 +92,7 @@ export interface TaskExecutionGapBreakdown {
   otherTaskSeconds: number;
   unattributedObservedSeconds: number;
   explainedGapSeconds: number;
+  reportedUnobservedSeconds?: number;
 }
 
 /**
@@ -212,6 +213,12 @@ export interface TaskExecutionFragmentationPatternMetrics {
    * Calibrated contrast: currentMedianFragmentation - baselineMedianFragmentation.
    */
   deltaFragmentation: number | null;
+
+  /**
+   * Aggregated gap composition across qualifying episodes (W2-D2: gap meaning
+   * survives through pattern output; internal diagnostic, never user-facing).
+   */
+  gapComposition?: TaskExecutionGapBreakdown;
 }
 
 /**

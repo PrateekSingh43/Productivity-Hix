@@ -121,6 +121,41 @@ export class TaskExecutionBaselineProvider
         continue;
       }
 
+      // W2-D2 symmetric segmentation: when authoritative evidence blocks exist for
+      // this window, historical episodes are segmented from EVIDENCE exactly like
+      // current-window episodes — never from session-duration spans.
+      if (evidenceBlocks && evidenceBlocks.length > 0) {
+        const evidenceEpisodes = segmentTaskExecutionEpisodes(evidenceBlocks, task.id, {
+          continuationGapThresholdSeconds: continuationThreshold,
+          timezone,
+          window: { start: window.start, end: window.end },
+        });
+
+        for (const ep of evidenceEpisodes) {
+          if (Date.parse(ep.startedAt) >= windowEndMs || Date.parse(ep.endedAt) <= windowStartMs) {
+            continue;
+          }
+          episodes.push({
+            episodeId: `base-ep-${task.id}-${ep.startedAt}`,
+            taskId: task.id,
+            userId,
+            startedAt: ep.startedAt,
+            endedAt: ep.endedAt,
+            wallClockSpanSeconds: ep.wallClockSpanSeconds,
+            activeTaskDurationSeconds: ep.activeTaskDurationSeconds,
+            knownInterveningGapSeconds: ep.knownInterveningGapSeconds,
+            unknownSeconds: ep.unknownSeconds,
+            unknownFraction: ep.unknownFraction,
+            wallClockFragmentationRatio: ep.wallClockFragmentationRatio,
+            fragmentCount: ep.fragmentCount,
+            coverageRatio: Math.max(0, Math.min(1, 1 - ep.unknownFraction)),
+          });
+        }
+        continue;
+      }
+
+      // Fallback (no evidence blocks available): session-span derivation.
+      // Absence of telemetry between sessions is strictly UNKNOWN.
       // Filter and sort sessions strictly within [window.start, window.end)
       const validSessions = task.sessions
         .filter((s) => {

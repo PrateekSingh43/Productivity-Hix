@@ -25,6 +25,7 @@ export class ContextSwitchingDetector implements EpisodeDetector<ContextSwitchin
     const session: WorkSession = {
       id: context.canonicalSessionId,
       userId: context.userId,
+      taskId: context.targetTaskId ?? null,
       startedAt: context.timeline.windowStart,
       endedAt: context.timeline.windowEnd,
       durationSeconds: context.timeline.totalDurationSeconds,

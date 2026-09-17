@@ -1,3 +1,7 @@
+export * from "./catalog";
+export * from "./promotion";
+export * from "./copy";
+export * from "./lineage";
 export * from "./base/context";
 export * from "./base/detector";
 export * from "./qualification/evidence";

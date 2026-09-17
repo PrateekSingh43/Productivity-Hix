@@ -85,6 +85,7 @@ describe("Detector 1: detector.ts", () => {
       userId: "u1",
       timezone: "UTC",
       canonicalSessionId: "authoritative-session-123",
+      targetTaskId: "research-task",
       timeline: {
         windowStart: "2023-01-01T00:00:00Z",
         windowEnd: "2023-01-01T01:00:00Z",
@@ -108,6 +109,9 @@ describe("Detector 1: detector.ts", () => {
     assert.strictEqual(res.executionStatus, "QUALIFIED");
     assert.strictEqual(res.metrics.switchesPerHour, 1);
     assert.strictEqual(res.episodeEvidence.sessionId, "authoritative-session-123");
+    assert.strictEqual(res.episodeEvidence.taskId, "research-task");
+    assert.deepStrictEqual(res.metrics.switches, [{ key: "app:Chrome", fromKey: "app:Code", timestamp: blocks[1]!.startTime, dwellSeconds: 1800, blockId: blocks[1]!.id, taskId: "research-task", sessionId: "authoritative-session-123" }]);
+    assert.doesNotMatch(JSON.stringify(res), /interruption|distraction/i);
     
     // Determinism check by shuffling inputs
     const contextShuffled = { ...context, timeline: { ...context.timeline, blocks: [blocks[1], blocks[0]] }} as EpisodeExecutionContext;
@@ -173,7 +177,7 @@ describe("Detector 1: detector.ts", () => {
       async fetchPopulation(userId: string, window: { start: string; end: string }) {
         passedBaselineWindowStart = window.start;
         passedBaselineWindowEnd = window.end;
-        return baselinePop;
+        return baselinePop.map(s => ({ ...s, startedAt: new Date(Date.parse(s.startedAt) + 15 * 86400000).toISOString() }));
       }
     }
 
@@ -220,6 +224,11 @@ describe("Detector 1: detector.ts", () => {
     
     // 4. Preserved Recurrence Check
     assert.strictEqual(res.metrics.elevatedSessionFraction, 1.0);
+    const nullBaseline = new ContextSwitchingDetector(config, new MockCurrentEpisodesProvider(episodes), new MockBaselineProvider(baselinePop.map(s => ({ ...s, startedAt: new Date(Date.parse(s.startedAt) + 15 * 86400000).toISOString(), switchesPerHour: null }))));
+    const nullResult = await nullBaseline.evaluatePattern(context, "null-baseline", "pat-1");
+    assert.strictEqual(nullResult.executionStatus, "INSUFFICIENT_BASELINE_DATA");
+    assert.strictEqual(nullResult.baseline.comparisonStatus, "INSUFFICIENT_BASELINE_DATA");
+    assert.doesNotMatch(JSON.stringify(res), /interruption|distraction/i);
   });
 
   test("evaluatePattern: Baseline Distinct Days Guard", async () => {
@@ -310,7 +319,7 @@ describe("Detector 1: detector.ts", () => {
       generateOperationalMetadata: () => ({ detectorVersion: "1.0", configurationVersion: "1.0", generatedAt: "now" })
     };
 
-    const detectorSame = new ContextSwitchingDetector(config, new MockCurrentEpisodesProvider(localSameEpisodes), new MockBaselineProvider(baselinePop));
+    const detectorSame = new ContextSwitchingDetector(config, new MockCurrentEpisodesProvider(localSameEpisodes), new MockBaselineProvider(baselinePop.map(s => ({ ...s, startedAt: new Date(Date.parse(s.startedAt) + 15 * 86400000).toISOString() }))));
     
     const resSame = await detectorSame.evaluatePattern(contextLocalSame, "eval-pat-same", "pat-1");
     // Because it's only ONE local day, but minimumQualifyingCalendarDays is 3, it should fail with INSUFFICIENT_EVIDENCE
@@ -330,7 +339,7 @@ describe("Detector 1: detector.ts", () => {
       createEp(10, "2023-11-16T20:00:00Z", "5"), // Nov 16 local
     ];
 
-    const detectorDiff = new ContextSwitchingDetector(config, new MockCurrentEpisodesProvider(localDiffEpisodes), new MockBaselineProvider(baselinePop));
+    const detectorDiff = new ContextSwitchingDetector(config, new MockCurrentEpisodesProvider(localDiffEpisodes), new MockBaselineProvider(baselinePop.map(s => ({ ...s, startedAt: new Date(Date.parse(s.startedAt) + 15 * 86400000).toISOString() }))));
     const resDiff = await detectorDiff.evaluatePattern(contextLocalSame, "eval-pat-diff", "pat-1");
     
     // We have 5 sessions, 3 distinct local days. It should pass evidence sufficiency!
@@ -425,7 +434,7 @@ describe("Detector 1: detector.ts", () => {
       generateOperationalMetadata: () => ({ detectorVersion: "1.0", configurationVersion: "1.0", generatedAt: "now" })
     };
 
-    const detectorDiff = new ContextSwitchingDetector(config, new MockCurrentEpisodesProvider(episodes), new MockBaselineProvider(tzBaselinePopCorrected));
+    const detectorDiff = new ContextSwitchingDetector(config, new MockCurrentEpisodesProvider(episodes), new MockBaselineProvider(tzBaselinePopCorrected.map(s => ({ ...s, startedAt: new Date(Date.parse(s.startedAt) + 15 * 86400000).toISOString() }))));
     const resDiff = await detectorDiff.evaluatePattern(contextLocalSame, "eval-pat-diff", "pat-1");
     
     // Because we have 14 distinct LOCAL LA days, but only 13 distinct UTC days,

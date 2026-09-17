@@ -40,10 +40,18 @@ function serialize(row: {
 
 export async function activityInRange(userId: string, from: Date, to: Date) {
   const rows = await getDb().normalizedActivity.findMany({
-    where: { userId, timestamp: { gte: from, lt: to } },
-    orderBy: { timestamp: "asc" },
+    where: { userId, timestamp: { lt: to }, duration: { gt: 0 } },
+    orderBy: [{ timestamp: "asc" }, { id: "asc" }],
   });
-  return rows.map(serialize);
+  return rows.flatMap((row) => {
+    const timestamp = row.timestamp.getTime();
+    const duration = row.duration;
+    if (!Number.isFinite(timestamp) || !Number.isFinite(duration) || duration <= 0) return [];
+    const start = Math.max(from.getTime(), timestamp);
+    const end = Math.min(to.getTime(), timestamp + duration * 1000);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return [];
+    return [serialize({ ...row, timestamp: new Date(start), duration: (end - start) / 1000 })];
+  });
 }
 
 export async function activitySummary(

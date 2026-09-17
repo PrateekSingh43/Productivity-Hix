@@ -62,7 +62,9 @@ export function evaluateContextSwitchingPattern(
       populationType: "completed_sessions",
       metricName: "switchesPerHour",
       strategy: "median",
-      qualifier: (session) => true,
+      qualifier: (session) => session.switchesPerHour !== null && Number.isFinite(session.switchesPerHour) &&
+        session.activeDurationSeconds >= config.minimumEpisodeActiveDurationSeconds &&
+        session.coverageRatio >= config.minimumUsableCoverageRatio,
       timestampExtractor: (session) => session.startedAt,
       metricExtractor: (session) => session.switchesPerHour,
       aggregator: (vals) => median(vals),
@@ -169,6 +171,8 @@ export function evaluateContextSwitchingPattern(
         comparisonStatus
       },
       metrics: {
+        switches: qualifyingEpisodes.flatMap(e => e.metrics.switches ?? []).sort((a, b) =>
+          a.timestamp.localeCompare(b.timestamp) || (a.sessionId ?? "").localeCompare(b.sessionId ?? "") || a.blockId.localeCompare(b.blockId)),
         switchesPerHour: currentMedianSwitchesPerHour,
         medianDwellSeconds: currentMedianDwellSeconds,
         interquartileDwellSeconds: currentMedianIqrDwell,
@@ -183,7 +187,7 @@ export function evaluateContextSwitchingPattern(
           qualifyingEpisodeCount: qualifyingEpisodes.length,
           meanTelemetryCoverageRatio,
           temporalVariability: null,
-          baselineMaturityDays: 14, // Assuming mature if reached here
+          baselineMaturityDays: baselineResult.distinctCalendarDayCount,
           hasCorroboratingSelfReport: false
         }
       },

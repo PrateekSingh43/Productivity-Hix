@@ -6,7 +6,7 @@
  */
 
 export function sortStringsDeterministically(values: string[]): string[] {
-  return [...values].sort((a, b) => a.localeCompare(b, "en", { numeric: true, sensitivity: "base" }));
+  return [...values].sort((a, b) => a.localeCompare(b, "en", { numeric: true, sensitivity: "base" }) || (a < b ? -1 : a > b ? 1 : 0));
 }
 
 /**
@@ -26,9 +26,10 @@ export function sortObjectsDeterministically<T>(
     if (secondaryKey) {
       const secA = secondaryKey(a);
       const secB = secondaryKey(b);
-      return secA.localeCompare(secB, "en", { numeric: true, sensitivity: "base" });
+      const secondaryCmp = secA.localeCompare(secB, "en", { numeric: true, sensitivity: "base" }) || (secA < secB ? -1 : secA > secB ? 1 : 0);
+      if (secondaryCmp !== 0) return secondaryCmp;
     }
-    return 0;
+    return valA < valB ? -1 : valA > valB ? 1 : 0;
   });
 }
 

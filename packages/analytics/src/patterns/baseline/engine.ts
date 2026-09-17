@@ -119,7 +119,16 @@ export function evaluateBaseline<T>(
   enforceAntiLeakage(window, evaluationStart);
 
   // Apply qualification guards
-  const qualifiedItems = population.filter(config.qualifier);
+  const qualifiedItems = population.filter((item) => {
+    if (config.timestampExtractor) {
+      const timestamp = config.timestampExtractor(item);
+      if (timestamp !== null) {
+        const ms = Date.parse(timestamp);
+        if (!Number.isFinite(ms) || ms < Date.parse(window.start) || ms >= Date.parse(window.end)) return false;
+      }
+    }
+    return config.qualifier(item);
+  });
   const qualifiedCount = qualifiedItems.length;
 
   // Compute distinct calendar days if requested

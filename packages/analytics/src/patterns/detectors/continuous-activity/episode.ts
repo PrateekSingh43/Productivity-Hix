@@ -28,13 +28,21 @@ export function evaluateContinuousActivityEpisode(
   const windowEndMs = Date.parse(context.timeline.windowEnd);
   const totalWindowSpanSeconds = Math.max(0, (windowEndMs - windowStartMs) / 1000);
 
-  const validBlocks = blocks.filter(isValidTemporalBlock);
+  const validBlocks = blocks.filter(isValidTemporalBlock).flatMap(block => {
+    const start = Math.max(windowStartMs, Date.parse(block.startTime));
+    const end = Math.min(windowEndMs, Date.parse(block.endTime));
+    return end > start ? [{ ...block, startTime: new Date(start).toISOString(), endTime: new Date(end).toISOString(), durationSeconds: (end - start) / 1000 }] : [];
+  });
 
-  // Check for UNKNOWN coverage within the window
-  const unknownBlocks = validBlocks.filter((b) => b.coverage === "UNKNOWN");
+  const unknownBlocks = validBlocks.filter(b => b.coverage === "UNKNOWN")
+    .sort((a, b) => Date.parse(a.startTime) - Date.parse(b.startTime));
   let unknownSeconds = 0;
-  for (const ub of unknownBlocks) {
-    unknownSeconds += ub.durationSeconds;
+  let unknownEnd = windowStartMs;
+  for (const block of unknownBlocks) {
+    const start = Math.max(unknownEnd, Date.parse(block.startTime));
+    const end = Date.parse(block.endTime);
+    unknownSeconds += Math.max(0, end - start) / 1000;
+    unknownEnd = Math.max(unknownEnd, end);
   }
 
   const unknownFraction = totalWindowSpanSeconds > 0
@@ -66,6 +74,10 @@ export function evaluateContinuousActivityEpisode(
         activeDurationSeconds: 0,
         coverageRatio: 0,
         metrics: {
+          evaluationWindowSeconds: totalWindowSpanSeconds,
+          blockIds: [],
+          unknownFraction,
+          runCount: 0,
           continuousDurationSeconds: 0,
           observedDurationSeconds: 0,
           interruptionCount: 0,
@@ -97,9 +109,12 @@ export function evaluateContinuousActivityEpisode(
   let executionStatus: EpisodeExecutionStatus = "NOT_QUALIFIED";
   const caveats: string[] = [];
 
-  if (unknownFraction > config.maxUnknownFraction && config.maxUnknownFraction > 0) {
+  if (unknownFraction > config.maxUnknownFraction) {
     executionStatus = "INDETERMINATE_COVERAGE";
     caveats.push("UNKNOWN_COVERAGE_EXCEEDS_TOLERANCE");
+  } else if (coverageRatio < config.minimumCoverageRatio) {
+    executionStatus = "INDETERMINATE_COVERAGE";
+    caveats.push("OBSERVED_COVERAGE_BELOW_MINIMUM");
   } else if (continuousDurationSeconds >= config.minimumEpisodeDurationSeconds) {
     executionStatus = "QUALIFIED";
   } else {
@@ -131,6 +146,10 @@ export function evaluateContinuousActivityEpisode(
       activeDurationSeconds: observedDurationSeconds,
       coverageRatio,
       metrics: {
+        evaluationWindowSeconds: totalWindowSpanSeconds,
+        blockIds: [...new Set(validBlocks.filter(b => primaryRun.blockIds.includes(b.id) && Date.parse(b.startTime) < Date.parse(primaryRun.endTime) && Date.parse(b.endTime) > Date.parse(primaryRun.startTime)).map(b => b.id))].sort(),
+        unknownFraction,
+        runCount: runs.length,
         continuousDurationSeconds,
         observedDurationSeconds,
         interruptionCount,

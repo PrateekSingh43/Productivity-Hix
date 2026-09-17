@@ -4,6 +4,7 @@ export type StartDeltaStatus =
   | "OBSERVED"
   | "NOT_OBSERVED"
   | "INDETERMINATE_COVERAGE"
+  | "INTEGRITY_ERROR"
   | "NO_PLANNED_START";
 
 export type StartClassification = "EARLY" | "ON_TIME" | "LATE";
@@ -43,17 +44,35 @@ export interface ScheduleVarianceConfig {
 }
 
 /**
+ * Canonical execution session evidence item used by sort/dedupe/onset resolution.
+ */
+export interface SessionEvidenceItem {
+  id: string;
+  startedAt: string;
+  endedAt?: string | null;
+  durationSeconds?: number | null;
+  telemetry?: unknown;
+}
+
+/**
  * Authoritative task schedule instance representation.
+ * plannedStart must come from a plan snapshot when available (M1); plannedCapturedAt
+ * records when that plan value was captured (as-of marker, contract hook only).
+ * corroboration defaults to false: session.startedAt is an UNCORROBORATED start
+ * until telemetry independently confirms onset (contract only; no wiring required).
  */
 export interface TaskScheduleInstance {
   taskId: string;
   plannedStart: string | null;
+  plannedCapturedAt?: string | null;
+  corroboration?: boolean;
   plannedDurationMinutes?: number | null;
   sessions: Array<{
     id: string;
     startedAt: string;
     endedAt?: string | null;
     durationSeconds?: number | null;
+    telemetry?: unknown;
   }>;
 }
 
@@ -63,6 +82,10 @@ export interface TaskScheduleInstance {
 export interface ScheduleVarianceEpisodeMetrics {
   taskId: string;
   plannedStart: string | null;
+  /** As-of marker of the plan value used (from plan snapshot when available). */
+  plannedCapturedAt?: string | null;
+  /** False by default: session.startedAt is an uncorroborated declaration. */
+  corroboration: boolean;
   actualStart: string | null;
   /** Primary signed variance: actualStart - plannedStart in seconds (negative: early, 0: exact, positive: late). */
   startDeltaSeconds: number | null;

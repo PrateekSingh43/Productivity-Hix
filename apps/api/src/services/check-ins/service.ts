@@ -121,11 +121,19 @@ function serializeCheckIn(row: {
   };
 }
 
-export async function listCheckIns(userId: string): Promise<CheckIn[]> {
+export async function listCheckIns(userId: string, window?: { from: Date; to: Date }): Promise<CheckIn[]> {
   const rows = await getDb().checkIn.findMany({
-    where: { userId },
-    orderBy: { createdAt: "desc" },
-    take: 50,
+    where: {
+      userId,
+      ...(window ? {
+        OR: [
+          { windowStart: { lt: window.to }, windowEnd: { gt: window.from } },
+          { windowStart: null, createdAt: { gte: window.from, lt: window.to } },
+        ],
+      } : {}),
+    },
+    orderBy: [{ createdAt: "desc" }, { id: "asc" }],
+    ...(window ? {} : { take: 50 }),
   });
   return rows.map(serializeCheckIn);
 }

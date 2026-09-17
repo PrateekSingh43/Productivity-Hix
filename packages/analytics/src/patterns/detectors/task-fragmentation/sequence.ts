@@ -20,7 +20,10 @@ export interface TaskInterveningGap {
   startTime: string; // ISO 8601
   endTime: string;   // ISO 8601
   durationSeconds: number;
-  kind: "break" | "other_task" | "unattributed_observed" | "explained_gap" | "unknown";
+  kind: "break" | "other_task" | "unattributed_observed" | "reported_unobserved" | "explained_gap" | "unknown";
+  targetTaskId?: string;
+  otherTaskId?: string;
+  report?: TemporalEvidenceBlock["report"];
   blockIds: string[];
 }
 
@@ -51,6 +54,8 @@ export interface TaskSequenceOptions {
   continuationGapThresholdSeconds?: number;
   timezone?: string;
   maxUnknownFraction?: number;
+  completedAt?: string | null;
+  window?: { start: string; end: string };
 }
 
 /**
@@ -118,10 +123,12 @@ export function sortEvidenceBlocks(blocks: TemporalEvidenceBlock[]): TemporalEvi
 export function classifyInterveningBlock(
   block: TemporalEvidenceBlock,
   targetTaskId: string
-): { kind: TaskInterveningGap["kind"]; isKnown: boolean } {
+): { kind: TaskInterveningGap["kind"]; isKnown: boolean; otherTaskId?: string } {
   if (block.coverage === "UNKNOWN") {
     return { kind: "unknown", isKnown: false };
   }
+
+  if (block.coverage === "REPORTED") return { kind: "reported_unobserved", isKnown: true };
 
   // 1. Break / AFK
   if (block.observation?.category === "break" || block.observation?.isAfk === true) {
@@ -158,7 +165,14 @@ export function segmentTaskExecutionEpisodes(
   targetTaskId: string,
   options?: TaskSequenceOptions
 ): BoundedTaskExecutionEpisode[] {
-  const sortedBlocks = sortEvidenceBlocks(blocks);
+  const completionTimes = blocks.filter(b => b.outcome?.taskId === targetTaskId)
+    .map(b => Date.parse(b.outcome?.taskCompletedAt ?? "")).filter(Number.isFinite);
+  const completedAt = Math.min(...completionTimes, Date.parse(options?.completedAt ?? "") || Infinity);
+  const sortedBlocks = sortEvidenceBlocks(blocks.flatMap(block => {
+    const start = Math.max(Date.parse(block.startTime), options?.window ? Date.parse(options.window.start) : -Infinity);
+    const end = Math.min(Date.parse(block.endTime), options?.window ? Date.parse(options.window.end) : Infinity, completedAt);
+    return end > start ? [{ ...block, startTime: start === Date.parse(block.startTime) ? block.startTime : new Date(start).toISOString(), endTime: end === Date.parse(block.endTime) ? block.endTime : new Date(end).toISOString(), durationSeconds: (end - start) / 1000 }] : [];
+  }));
   const continuationThreshold = options?.continuationGapThresholdSeconds ?? 7200; // 2 hours
   const timezone = options?.timezone ?? "UTC";
 
@@ -198,6 +212,7 @@ export function segmentTaskExecutionEpisodes(
       };
     } else if (
       idx === currentFragment.lastBlockIndex + 1 &&
+      !isDifferentCalendarDay(currentFragment.startTime, block.startTime, timezone) &&
       Date.parse(block.startTime) <= Date.parse(currentFragment.endTime)
     ) {
       // Contiguous in sorted sequence with no temporal gap
@@ -252,7 +267,7 @@ export function segmentTaskExecutionEpisodes(
     const nextStartMs = Date.parse(nextFragment.startTime);
     const gapSeconds = Math.max(0, (nextStartMs - prevEndMs) / 1000);
 
-    const isDayCrossed = isDifferentCalendarDay(prevFragment.endTime, nextFragment.startTime, timezone);
+    const isDayCrossed = isDifferentCalendarDay(prevFragment.startTime, nextFragment.startTime, timezone);
 
     if (gapSeconds > continuationThreshold || isDayCrossed) {
       // Close current episode cluster, initiate a new one
@@ -288,6 +303,7 @@ export function segmentTaskExecutionEpisodes(
     let otherTaskSeconds = 0;
     let unattributedObservedSeconds = 0;
     let explainedGapSeconds = 0;
+    let reportedUnobservedSeconds = 0;
 
     const gaps: TaskInterveningGap[] = [];
 
@@ -338,7 +354,9 @@ export function segmentTaskExecutionEpisodes(
           const duration = (clampedEndMs - cursorMs) / 1000;
           const { kind, isKnown } = classifyInterveningBlock(b, targetTaskId);
 
-          if (isKnown) {
+          if (kind === "unknown") {
+            unknownSeconds += duration;
+          } else {
             knownInterveningGapSeconds += duration;
             switch (kind) {
               case "break":
@@ -350,12 +368,13 @@ export function segmentTaskExecutionEpisodes(
               case "unattributed_observed":
                 unattributedObservedSeconds += duration;
                 break;
+              case "reported_unobserved":
+                reportedUnobservedSeconds += duration;
+                break;
               case "explained_gap":
                 explainedGapSeconds += duration;
                 break;
             }
-          } else {
-            unknownSeconds += duration;
           }
 
           gaps.push({
@@ -422,6 +441,7 @@ export function segmentTaskExecutionEpisodes(
         otherTaskSeconds,
         unattributedObservedSeconds,
         explainedGapSeconds,
+        reportedUnobservedSeconds,
       },
       medianFragmentDurationSeconds: medianFragmentDuration,
       longestFragmentDurationSeconds: longestFragmentDuration,

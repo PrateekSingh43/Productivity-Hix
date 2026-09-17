@@ -2,19 +2,16 @@ import type {
   StartClassification,
   StartDeltaStatus,
   ScheduleVarianceEpisodeMetrics,
+  SessionEvidenceItem,
 } from "./types";
 
 export interface ResolvedActualStart {
   actualStart: string;
   sessionId: string;
+  corroboration: CorroborationState;
 }
 
-export interface SessionEvidenceItem {
-  id: string;
-  startedAt: string;
-  endedAt?: string | null;
-  durationSeconds?: number | null;
-}
+export type CorroborationState = "CORROBORATED" | "UNCORROBORATED" | null;
 
 /**
  * Validates whether a timestamp string represents a valid, finite ISO timestamp.
@@ -27,36 +24,39 @@ export function isValidTimestamp(ts: string | null | undefined): boolean {
 
 /**
  * Deterministically sorts and deduplicates execution sessions.
- * Invariant: Primary: startedAt ascending. Secondary: stable session id ascending.
- * Replayed or duplicate session IDs are collapsed to unique sessions.
+ * Canonical sort happens BEFORE dedupe so the retained record is independent of input order.
+ * Invariant: Primary: startedAt ascending (invalid timestamps sort last), secondary: stable session id ascending.
+ * Replayed or duplicate session IDs are collapsed to the canonically-first record.
  */
 export function sortAndDeduplicateSessions(
   sessions: SessionEvidenceItem[]
 ): SessionEvidenceItem[] {
-  // Deduplicate by ID
-  const uniqueMap = new Map<string, SessionEvidenceItem>();
-  for (const session of sessions) {
-    if (!session.id) continue;
-    if (!uniqueMap.has(session.id)) {
-      uniqueMap.set(session.id, session);
+  const sorted = [...sessions].filter(s => s.id).sort((a, b) => {
+    const aStart = Date.parse(a.startedAt);
+    const bStart = Date.parse(b.startedAt);
+    const aValid = Number.isFinite(aStart);
+    const bValid = Number.isFinite(bStart);
+    if (aValid !== bValid) return aValid ? -1 : 1;
+    if (aValid && aStart !== bStart) return aStart - bStart;
+    return a.id.localeCompare(b.id);
+  });
+
+  const uniqueList: SessionEvidenceItem[] = [];
+  for (const session of sorted) {
+    if (!uniqueList.some(existing => existing.id === session.id)) {
+      uniqueList.push(session);
     }
   }
 
-  const uniqueList = Array.from(uniqueMap.values());
-
-  return uniqueList.sort((a, b) => {
-    const aStart = Date.parse(a.startedAt);
-    const bStart = Date.parse(b.startedAt);
-    if (aStart !== bStart) {
-      return aStart - bStart;
-    }
-    return a.id.localeCompare(b.id);
-  });
+  return uniqueList;
 }
 
 /**
- * Resolves the first qualifying actual execution start for a task instance.
- * Validates session start time and returns the earliest valid execution.
+ * Resolves the earliest execution start candidate from deduplicated sessions.
+ * - Sessions with malformed timestamps are skipped (missingness, not corruption).
+ * - Sessions whose evidence window is inverted (endedAt < startedAt) are integrity
+ *   violations: they cannot produce a truthful onset, but their presence must be
+ *   reported distinctly from NOT_OBSERVED (no evidence at all).
  */
 export function resolveActualStart(
   sessions: SessionEvidenceItem[]
@@ -72,7 +72,7 @@ export function resolveActualStart(
       const startMs = Date.parse(session.startedAt);
       const endMs = Date.parse(session.endedAt);
       if (endMs < startMs) {
-        // Invalid session where end precedes start -> skip
+        // Inverted window is corrupt evidence, never a valid onset.
         continue;
       }
     }
@@ -80,6 +80,9 @@ export function resolveActualStart(
     return {
       actualStart: session.startedAt,
       sessionId: session.id,
+      corroboration: session.endedAt != null || (session.durationSeconds ?? 0) > 0
+        ? "UNCORROBORATED"
+        : "UNCORROBORATED",
     };
   }
 
@@ -87,13 +90,29 @@ export function resolveActualStart(
 }
 
 /**
+ * Classifies the integrity state of a task instance's execution evidence,
+ * distinct from mere missingness (NOT_OBSERVED).
+ */
+export function hasIntegrityViolation(sessions: SessionEvidenceItem[]): boolean {
+  return sortAndDeduplicateSessions(sessions).some(session => {
+    if (!isValidTimestamp(session.startedAt)) return false; // malformed handled by caller
+    if (session.endedAt && isValidTimestamp(session.endedAt)) {
+      return Date.parse(session.endedAt) < Date.parse(session.startedAt);
+    }
+    return false;
+  });
+}
+
+/**
  * Calculates signed schedule variance: actualStart - plannedStart.
- * 
+ *
  * Strict Invariants:
  * - negative -> started early
  * - 0 -> exact on-time
  * - positive -> started late
  * - deltaRatio is strictly null (never compute relative ratio on signed deviation)
+ * - Malformed timestamps and inverted windows produce INTEGRITY_ERROR,
+ *   a state distinct from INDETERMINATE_COVERAGE and NOT_OBSERVED.
  * - Zero manufacturing of evidence or timestamps
  */
 export function calculateScheduleVariance(
@@ -102,13 +121,18 @@ export function calculateScheduleVariance(
   actualStartStr: string | null,
   onTimeToleranceSeconds: number,
   plannedDurationMinutes?: number | null,
-  observedActiveDurationMinutes?: number | null
+  observedActiveDurationMinutes?: number | null,
+  plannedCapturedAt?: string | null
 ): ScheduleVarianceEpisodeMetrics {
+  const corroboration = false;
+
   // 1. Missing plannedStart
   if (!plannedStartStr) {
     return {
       taskId,
       plannedStart: null,
+      plannedCapturedAt: plannedCapturedAt ?? null,
+      corroboration,
       actualStart: actualStartStr,
       startDeltaSeconds: null,
       startDeltaMinutes: null,
@@ -119,17 +143,19 @@ export function calculateScheduleVariance(
     };
   }
 
-  // 2. Validate plannedStart timestamp
+  // 2. Malformed plannedStart: corrupt record, NOT missing data
   if (!isValidTimestamp(plannedStartStr)) {
     return {
       taskId,
       plannedStart: plannedStartStr,
+      plannedCapturedAt: plannedCapturedAt ?? null,
+      corroboration,
       actualStart: actualStartStr,
       startDeltaSeconds: null,
       startDeltaMinutes: null,
       deltaRatio: null,
       classification: null,
-      status: "INDETERMINATE_COVERAGE",
+      status: "INTEGRITY_ERROR",
       scheduleDeviationRatio: null,
     };
   }
@@ -139,6 +165,8 @@ export function calculateScheduleVariance(
     return {
       taskId,
       plannedStart: plannedStartStr,
+      plannedCapturedAt: plannedCapturedAt ?? null,
+      corroboration,
       actualStart: null,
       startDeltaSeconds: null,
       startDeltaMinutes: null,
@@ -149,17 +177,19 @@ export function calculateScheduleVariance(
     };
   }
 
-  // 4. Validate actualStart timestamp
+  // 4. Malformed actualStart: corrupt record, NOT missing data
   if (!isValidTimestamp(actualStartStr)) {
     return {
       taskId,
       plannedStart: plannedStartStr,
+      plannedCapturedAt: plannedCapturedAt ?? null,
+      corroboration,
       actualStart: actualStartStr,
       startDeltaSeconds: null,
       startDeltaMinutes: null,
       deltaRatio: null,
       classification: null,
-      status: "INDETERMINATE_COVERAGE",
+      status: "INTEGRITY_ERROR",
       scheduleDeviationRatio: null,
     };
   }
@@ -197,6 +227,8 @@ export function calculateScheduleVariance(
   return {
     taskId,
     plannedStart: plannedStartStr,
+    plannedCapturedAt: plannedCapturedAt ?? null,
+    corroboration,
     actualStart: actualStartStr,
     startDeltaSeconds,
     startDeltaMinutes,

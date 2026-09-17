@@ -29,6 +29,7 @@ dist
 
 
 # Internal documentation and review assets (kept local only)
+docs
 docs/
 
 # Debug

@@ -940,6 +940,60 @@ describe("Detector 2: detector.ts", () => {
   // Real Production Baseline Provider Integration
   // ==========================================
 
+  test("TaskExecutionBaselineProvider: symmetric segmentation derives historical episodes from evidence, not session spans", async () => {
+    class EvidenceSource implements TaskWorkSessionsDataSource {
+      async findTasksWithSessions(userId: string): Promise<TaskWithSessions[]> {
+        return [{
+          id: "task-sym",
+          userId,
+          title: "Sym",
+          description: null,
+          status: "done",
+          priority: "medium",
+          plannedDurationMinutes: 60,
+          dueAt: null,
+          completedAt: null,
+          createdAt: "2026-08-20T00:00:00Z",
+          updatedAt: "2026-08-25T17:00:00Z",
+          // Session span would claim 10:00-12:00 continuous; evidence proves 10:00-10:30 + 11:30-12:00
+          sessions: [{
+            id: "sess-sym",
+            startedAt: "2026-08-21T10:00:00Z",
+            endedAt: "2026-08-21T12:00:00Z",
+            durationSeconds: 7200,
+            isPaused: false,
+            lastResumedAt: null,
+            notes: null,
+          }],
+        }];
+      }
+      async findEvidenceBlocks(): Promise<TemporalEvidenceBlock[]> {
+        return [
+          createTaskBlock("eb1", "2026-08-21T10:00:00Z", "2026-08-21T10:30:00Z", 1800, "task-sym"),
+          createTaskBlock("eb2", "2026-08-21T11:30:00Z", "2026-08-21T12:00:00Z", 1800, "task-sym"),
+        ];
+      }
+    }
+
+    const provider = new TaskExecutionBaselineProvider(new EvidenceSource(), {});
+    const episodes = await provider.fetchPopulation("user-sym", {
+      start: "2026-08-15T00:00:00Z",
+      end: "2026-08-29T00:00:00Z",
+    });
+
+    assert.strictEqual(episodes.length, 1);
+    const ep = episodes[0]!;
+    // Evidence-derived: two 30m fragments, not one 2h session span
+    assert.strictEqual(ep.fragmentCount, 2);
+    assert.strictEqual(ep.activeTaskDurationSeconds, 3600);
+    // Conservation: unknown gap between fragments accounted, never session-span inflation
+    assert.strictEqual(
+      ep.wallClockSpanSeconds,
+      ep.activeTaskDurationSeconds + ep.knownInterveningGapSeconds + ep.unknownSeconds
+    );
+    assert.ok(ep.wallClockSpanSeconds < 7200 || ep.unknownSeconds > 0);
+  });
+
   test("TaskExecutionBaselineProvider: derives bounded episodes from authoritative TaskWithSessions data", async () => {
     class MockWorkSessionsDataSource implements TaskWorkSessionsDataSource {
       async findTasksWithSessions(userId: string): Promise<TaskWithSessions[]> {

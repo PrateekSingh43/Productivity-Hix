@@ -112,6 +112,8 @@ export function subtractCalendarDays(utcTimestamp: string, days: number, timezon
     }
   }
   
-  // Fallback if not found due to a missing hour (e.g. spring forward exact match failure)
+  // Fallback if not found due to a missing hour (e.g. spring forward exact match failure).
+  // DST note: this returns a fractional-hour-shifted timestamp (local wall time shifts by
+  // the DST offset) rather than failing; acceptable per W2-S spec — document, do not hide.
   return approx.toISOString();
 }

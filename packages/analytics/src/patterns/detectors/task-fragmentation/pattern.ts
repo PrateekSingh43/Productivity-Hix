@@ -42,11 +42,26 @@ export function evaluateTaskFragmentationPattern(
   let totalWallClockSeconds = 0;
   let weightedCoverageSum = 0;
 
+  // Aggregate gap composition across qualifying episodes
+  const aggregateGapBreakdown = {
+    breakSeconds: 0,
+    otherTaskSeconds: 0,
+    unattributedObservedSeconds: 0,
+    explainedGapSeconds: 0,
+    reportedUnobservedSeconds: 0,
+  };
+
   for (const ep of qualifyingEpisodes) {
     totalObservedActiveSeconds += ep.activeDurationSeconds;
     const span = ep.metrics.wallClockSpanSeconds;
     totalWallClockSeconds += span;
     weightedCoverageSum += ep.coverageRatio * span;
+
+    aggregateGapBreakdown.breakSeconds += ep.metrics.gapBreakdown.breakSeconds;
+    aggregateGapBreakdown.otherTaskSeconds += ep.metrics.gapBreakdown.otherTaskSeconds;
+    aggregateGapBreakdown.unattributedObservedSeconds += ep.metrics.gapBreakdown.unattributedObservedSeconds;
+    aggregateGapBreakdown.explainedGapSeconds += ep.metrics.gapBreakdown.explainedGapSeconds;
+    aggregateGapBreakdown.reportedUnobservedSeconds += ep.metrics.gapBreakdown.reportedUnobservedSeconds ?? 0;
   }
 
   const meanTelemetryCoverageRatio =
@@ -225,6 +240,7 @@ export function evaluateTaskFragmentationPattern(
         currentMedianFragmentCount,
         elevatedEpisodeFraction,
         deltaFragmentation,
+        gapComposition: aggregateGapBreakdown,
       },
       reliability: {
         tier: "PROVISIONAL",

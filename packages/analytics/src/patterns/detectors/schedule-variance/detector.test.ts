@@ -370,7 +370,7 @@ describe("Detector 4: Schedule Variance Detector", () => {
   });
 
   // Test 12 — invalid timestamp
-  test("Test 12: invalid timestamp does not produce NaN/Infinity/crash", () => {
+  test("Test 12: malformed timestamp yields INTEGRITY_ERROR, distinct from INDETERMINATE_COVERAGE", () => {
     const detector = new ScheduleVarianceDetector(defaultConfig);
     const instance: TaskScheduleInstance = {
       taskId: "task-12",
@@ -383,7 +383,8 @@ describe("Detector 4: Schedule Variance Detector", () => {
     assert.strictEqual(result.executionStatus, "INDETERMINATE_COVERAGE");
     assert.strictEqual(result.metrics.startDeltaSeconds, null);
     assert.strictEqual(result.metrics.deltaRatio, null);
-    assert.strictEqual(result.metrics.status, "INDETERMINATE_COVERAGE");
+    assert.strictEqual(result.metrics.status, "INTEGRITY_ERROR");
+    assert.ok(result.epistemicCaveats.includes("INTEGRITY_ERROR_CORRUPT_TIMESTAMPS"));
   });
 
   // Test 13 — pattern with early/late/on-time mixture
@@ -522,7 +523,6 @@ describe("Detector 4: Schedule Variance Detector", () => {
     assert.strictEqual(result.metrics.onTimeTaskFraction, 0.5);
   });
 
-  // Test 15 — insufficient current evidence
   test("Test 15: insufficient current evidence (below minimum qualifying tasks) emits INSUFFICIENT_EVIDENCE", () => {
     const detector = new ScheduleVarianceDetector({
       ...defaultConfig,
@@ -548,5 +548,87 @@ describe("Detector 4: Schedule Variance Detector", () => {
 
     assert.strictEqual(result.executionStatus, "INSUFFICIENT_EVIDENCE");
     assert.ok(result.epistemicCaveats.includes("INSUFFICIENT_QUALIFYING_SCHEDULED_TASKS"));
+  });
+
+  test("inverted session window is INTEGRITY_ERROR, distinct from NOT_OBSERVED missingness", () => {
+    const detector = new ScheduleVarianceDetector(defaultConfig);
+    const instance: TaskScheduleInstance = {
+      taskId: "task-reversed",
+      plannedStart: "2026-09-15T10:00:00.000Z",
+      sessions: [
+        {
+          id: "s-rev",
+          startedAt: "2026-09-15T10:30:00.000Z",
+          endedAt: "2026-09-15T10:00:00.000Z",
+        },
+      ],
+    };
+    const result = detector.evaluateTaskInstance(createEpisodeContext(), "eval-rev", instance);
+    assert.strictEqual(result.metrics.status, "INTEGRITY_ERROR");
+    assert.strictEqual(result.metrics.actualStart, null);
+    assert.ok(result.epistemicCaveats.includes("INTEGRITY_ERROR_CORRUPT_TIMESTAMPS"));
+    assert.notStrictEqual(result.metrics.status, "NOT_OBSERVED");
+  });
+
+  test("duplicate dedupe is deterministic under input shuffling (sort before dedupe)", () => {
+    const base = [
+      { id: "s1", startedAt: "2026-09-15T10:15:00.000Z" },
+      { id: "s1", startedAt: "2026-09-15T10:20:00.000Z" },
+      { id: "s2", startedAt: "2026-09-15T10:10:00.000Z" },
+    ];
+    const detector = new ScheduleVarianceDetector(defaultConfig);
+    const run = (order: typeof base) =>
+      detector.evaluateTaskInstance(
+        createEpisodeContext(),
+        "dedupe",
+        { taskId: "task-dedupe", plannedStart: "2026-09-15T10:00:00.000Z", sessions: order }
+      ).metrics.actualStart;
+    assert.strictEqual(run(base), run([...base].reverse()));
+    assert.strictEqual(run(base), run([base[2]!, base[1]!, base[0]!]));
+  });
+
+  test("uncorroborated session start defaults corroboration to false", () => {
+    const detector = new ScheduleVarianceDetector(defaultConfig);
+    const instance: TaskScheduleInstance = {
+      taskId: "task-corr",
+      plannedStart: "2026-09-15T10:00:00.000Z",
+      sessions: [{ id: "s1", startedAt: "2026-09-15T10:05:00.000Z" }],
+    };
+    const result = detector.evaluateTaskInstance(createEpisodeContext(), "eval-corr", instance);
+    assert.strictEqual(result.metrics.corroboration, false);
+    assert.ok(result.epistemicCaveats.includes("ONSET_UNCORROBORATED"));
+  });
+
+  test("plannedCapturedAt passes through when supplied", () => {
+    const detector = new ScheduleVarianceDetector(defaultConfig);
+    const instance: TaskScheduleInstance = {
+      taskId: "task-snap",
+      plannedStart: "2026-09-15T10:00:00.000Z",
+      plannedCapturedAt: "2026-09-14T20:00:00.000Z",
+      sessions: [{ id: "s1", startedAt: "2026-09-15T10:00:00.000Z" }],
+    };
+    const result = detector.evaluateTaskInstance(createEpisodeContext(), "eval-snap", instance);
+    assert.strictEqual(result.metrics.plannedCapturedAt, "2026-09-14T20:00:00.000Z");
+  });
+
+  test("provider clips sessions and evaluations to the pattern window without lifetime leakage", async () => {
+    const { InMemoryTaskScheduleProvider, DatabaseTaskScheduleProvider } = await import("./provider");
+    void DatabaseTaskScheduleProvider;
+    const inWindow = {
+      taskId: "in-window",
+      plannedStart: "2026-09-10T10:00:00.000Z",
+      sessions: [{ id: "s-in", startedAt: "2026-09-10T10:20:00.000Z", endedAt: "2026-09-10T11:00:00.000Z" }],
+    };
+    const outsidePlan = {
+      taskId: "outside-plan",
+      plannedStart: "2026-08-01T10:00:00.000Z",
+      sessions: [{ id: "s-out", startedAt: "2026-09-10T10:20:00.000Z" }],
+    };
+    const provider = new InMemoryTaskScheduleProvider([inWindow, outsidePlan]);
+    const instances = await provider.fetchTaskScheduleInstances("user", {
+      start: "2026-09-01T00:00:00.000Z",
+      end: "2026-09-15T00:00:00.000Z",
+    });
+    assert.deepStrictEqual(instances.map(i => i.taskId), ["in-window"]);
   });
 });

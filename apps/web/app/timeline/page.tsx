@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTimeline } from "../../src/hooks/queries/use-timeline";
+import { evidenceDate } from "../../src/lib/analytics-presentation";
 import type { TimelineSegment, TimelineCategory } from "@repo/types";
 
 // Animation presets: crisp, zero artificial delay
@@ -53,7 +54,7 @@ const categoryConfig: Record<
   }
 > = {
   focused: {
-    label: "Focused",
+label: "Editors & terminal",
     icon: Code,
     color: "text-indigo-400",
     bg: "bg-indigo-500/10",
@@ -73,7 +74,7 @@ const categoryConfig: Record<
     dot: "bg-violet-400 ring-violet-500/30",
   },
   break: {
-    label: "Break",
+    label: "Away (no input)",
     icon: Coffee,
     color: "text-amber-400",
     bg: "bg-amber-500/10",
@@ -165,6 +166,16 @@ function getTodayString(): string {
 export default function TimelinePage() {
   const queryClient = useQueryClient();
   const [selectedDate, setSelectedDate] = useState<string>(() => getTodayString());
+
+  useEffect(() => {
+    const syncDate = () => {
+      const date = new URLSearchParams(window.location.search).get("date");
+      if (date && evidenceDate(date)) setSelectedDate(date);
+    };
+    syncDate();
+    window.addEventListener("popstate", syncDate);
+    return () => window.removeEventListener("popstate", syncDate);
+  }, []);
   const [filterCategory, setFilterCategory] = useState<"all" | TimelineCategory>("all");
   const [expandedSegmentId, setExpandedSegmentId] = useState<string | null>(null);
   const [hoveredSegment, setHoveredSegment] = useState<TimelineSegment | null>(null);
@@ -398,7 +409,7 @@ export default function TimelinePage() {
         {/* Focused Work */}
         <div className="bg-bg-card border border-border-subtle rounded-2xl p-4 shadow-xs">
           <div className="flex items-center justify-between mb-1.5">
-            <span className="text-xs font-medium text-accent-default">Focused Work</span>
+            <span className="text-xs font-medium text-accent-default">Editors &amp; terminal</span>
             <Code className="w-4 h-4 text-accent-default" />
           </div>
           {isLoading ? (
@@ -421,7 +432,7 @@ export default function TimelinePage() {
         {/* Browser & Research */}
         <div className="bg-bg-card border border-border-subtle rounded-2xl p-4 shadow-xs">
           <div className="flex items-center justify-between mb-1.5">
-            <span className="text-xs font-medium text-violet-500 dark:text-violet-400">Browser / Research</span>
+            <span className="text-xs font-medium text-violet-500 dark:text-violet-400">Browser</span>
             <Globe className="w-4 h-4 text-violet-500 dark:text-violet-400" />
           </div>
           {isLoading ? (
@@ -444,7 +455,7 @@ export default function TimelinePage() {
         {/* Breaks / AFK */}
         <div className="bg-bg-card border border-border-subtle rounded-2xl p-4 shadow-xs">
           <div className="flex items-center justify-between mb-1.5">
-            <span className="text-xs font-medium text-amber-500 dark:text-amber-400">Breaks & AFK</span>
+            <span className="text-xs font-medium text-amber-500 dark:text-amber-400">Away (no input)</span>
             <Coffee className="w-4 h-4 text-amber-500 dark:text-amber-400" />
           </div>
           {isLoading ? (

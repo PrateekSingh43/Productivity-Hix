@@ -5,7 +5,7 @@
  */
 
 export function safeDivide(numerator: number | null | undefined, denominator: number | null | undefined): number | null {
-  if (numerator == null || denominator == null) {
+  if (numerator == null || denominator == null || !Number.isFinite(numerator) || !Number.isFinite(denominator)) {
     return null;
   }
   if (denominator === 0) {

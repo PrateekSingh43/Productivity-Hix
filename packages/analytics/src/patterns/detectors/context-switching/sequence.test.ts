@@ -45,6 +45,17 @@ describe("Detector 1: sequence.ts", () => {
     }
   });
 
+  test("AFK and break blocks terminate sequences without transitions or active time", () => {
+    for (const afk of [true, false]) {
+      const gap = appBlock("idle", 300, afk ? "work" : "break");
+      gap.observation!.isAfk = afk;
+      const result = parseContextSequence([appBlock("Code", 600), gap, browserBlock("Chrome", "research.org", 600)]);
+      assert.strictEqual(result.switchCount, 0);
+      assert.strictEqual(result.qualifyingObservedActiveDurationSeconds, 1200);
+      assert.deepStrictEqual(result.dwellDurations, [600, 600]);
+    }
+  });
+
   test("getCanonicalContextKey: browser observation", () => {
     assert.strictEqual(getCanonicalContextKey(browserBlock("Chrome", "github.com", 60)), "browser:github.com");
     assert.strictEqual(getCanonicalContextKey(browserBlock("Firefox", "github.com", 60)), "browser:github.com");
