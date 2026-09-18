@@ -136,7 +136,28 @@ export async function materializeBlocksForUserDay(
 
   const blocks = materializeTemporalBlocks(inputs, options);
 
+  const existingBlocks = await prisma.temporalActivityBlock.findMany({
+    where: {
+      userId,
+      startTime: { gte: from, lte: to },
+      track: "FOREGROUND",
+    },
+    select: {
+      id: true,
+      observationSetFingerprint: true,
+      _count: {
+        select: { claims: true },
+      },
+    },
+  });
+  const validFingerprints = new Set(
+    existingBlocks.filter((b) => b._count.claims > 0).map((b) => b.observationSetFingerprint)
+  );
+
   for (const block of blocks) {
+    if (validFingerprints.has(block.observationSetFingerprint)) {
+      continue;
+    }
     await persistBlock(prisma, userId, block, rules, overrides, intentCtx, result);
   }
 
@@ -565,6 +586,17 @@ async function detectCoverageGaps(
   const sorted = [...inputs].sort((a, b) => a.start - b.start);
   const minGapMs = minGapSeconds * 1000;
 
+  const existingGaps = typeof prisma.telemetryCoverageGap?.findMany === "function"
+    ? await prisma.telemetryCoverageGap.findMany({
+        where: {
+          userId,
+          startTime: { lte: new Date(sorted[sorted.length - 1]!.end) },
+          endTime: { gte: new Date(sorted[0]!.start) },
+        },
+        select: { startTime: true, endTime: true },
+      })
+    : [];
+
   for (let i = 1; i < sorted.length; i++) {
     const prev = sorted[i - 1]!;
     const curr = sorted[i]!;
@@ -572,14 +604,9 @@ async function detectCoverageGaps(
     const gapEnd = curr.start;
     if (gapEnd - gapStart < minGapMs) continue;
 
-    const overlapping = await prisma.telemetryCoverageGap.findFirst({
-      where: {
-        userId,
-        startTime: { lt: new Date(gapEnd) },
-        endTime: { gt: new Date(gapStart) },
-      },
-      select: { id: true },
-    });
+    const overlapping = existingGaps.some(
+      (g) => g.startTime.getTime() < gapEnd && g.endTime.getTime() > gapStart
+    );
     if (overlapping) continue;
 
     await prisma.telemetryCoverageGap.create({

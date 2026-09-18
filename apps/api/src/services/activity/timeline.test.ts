@@ -91,7 +91,11 @@ function dbFor(rows: unknown[]) {
         return Promise.resolve(row);
       }),
     },
-    telemetryCoverageGap: { findFirst: vi.fn().mockResolvedValue(null), create: vi.fn().mockResolvedValue({}) },
+    telemetryCoverageGap: {
+      findFirst: vi.fn().mockResolvedValue(null),
+      findMany: vi.fn().mockResolvedValue([]),
+      create: vi.fn().mockResolvedValue({}),
+    },
   };
 
   return db;

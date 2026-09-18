@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Code,
@@ -23,12 +23,13 @@ import {
   Gamepad2,
   Terminal,
   HelpCircle,
-  CheckCircle2,
   Edit3,
   X,
-  ShieldCheck,
-  Tag,
   Sparkles,
+  Search,
+  Keyboard,
+  SlidersHorizontal,
+  ExternalLink,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTimeline } from "../../src/hooks/queries/use-timeline";
@@ -36,8 +37,10 @@ import { evidenceDate } from "../../src/lib/analytics-presentation";
 import { createActivityOverride } from "../../src/lib/api/rules";
 import type { TimelineBlock } from "@repo/types";
 
-// Animation presets: crisp, zero artificial delay
-const containerVariants = {
+import type { Variants } from "framer-motion";
+
+// Linear-inspired animation presets: crisp, ~150ms, ease-out
+const containerVariants: Variants = {
   hidden: { opacity: 0 },
   show: {
     opacity: 1,
@@ -45,9 +48,9 @@ const containerVariants = {
   },
 };
 
-const itemVariants = {
-  hidden: { opacity: 0, y: 4 },
-  show: { opacity: 1, y: 0, transition: { duration: 0.15 } },
+const itemVariants: Variants = {
+  hidden: { opacity: 0, y: 2 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.12, ease: "easeOut" } },
 };
 
 export const modalityConfig: Record<
@@ -56,112 +59,90 @@ export const modalityConfig: Record<
     label: string;
     icon: typeof Code;
     color: string;
-    bg: string;
-    border: string;
-    badge: string;
-    bar: string;
     dot: string;
+    bar: string;
+    badge: string;
   }
 > = {
   development: {
     label: "Development",
     icon: Code,
     color: "text-emerald-400",
-    bg: "bg-emerald-500/10",
-    border: "border-emerald-500/25",
-    badge: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
+    dot: "bg-emerald-400",
     bar: "bg-emerald-500",
-    dot: "bg-emerald-400 ring-emerald-500/30",
+    badge: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
   },
   reading_research: {
     label: "Reading & Research",
     icon: Globe,
     color: "text-sky-400",
-    bg: "bg-sky-500/10",
-    border: "border-sky-500/25",
-    badge: "bg-sky-500/15 text-sky-300 border-sky-500/30",
+    dot: "bg-sky-400",
     bar: "bg-sky-500",
-    dot: "bg-sky-400 ring-sky-500/30",
+    badge: "bg-sky-500/10 text-sky-400 border-sky-500/20",
   },
   writing_documentation: {
     label: "Writing & Docs",
     icon: FileText,
     color: "text-indigo-400",
-    bg: "bg-indigo-500/10",
-    border: "border-indigo-500/25",
-    badge: "bg-indigo-500/15 text-indigo-300 border-indigo-500/30",
+    dot: "bg-indigo-400",
     bar: "bg-indigo-500",
-    dot: "bg-indigo-400 ring-indigo-500/30",
+    badge: "bg-indigo-500/10 text-indigo-400 border-indigo-500/20",
   },
   communication: {
     label: "Communication",
     icon: MessageSquare,
     color: "text-purple-400",
-    bg: "bg-purple-500/10",
-    border: "border-purple-500/25",
-    badge: "bg-purple-500/15 text-purple-300 border-purple-500/30",
+    dot: "bg-purple-400",
     bar: "bg-purple-500",
-    dot: "bg-purple-400 ring-purple-500/30",
+    badge: "bg-purple-500/10 text-purple-400 border-purple-500/20",
   },
   administration: {
     label: "Administration",
     icon: Briefcase,
     color: "text-amber-400",
-    bg: "bg-amber-500/10",
-    border: "border-amber-500/25",
-    badge: "bg-amber-500/15 text-amber-300 border-amber-500/30",
+    dot: "bg-amber-400",
     bar: "bg-amber-500",
-    dot: "bg-amber-400 ring-amber-500/30",
+    badge: "bg-amber-500/10 text-amber-400 border-amber-500/20",
   },
   media_consumption: {
     label: "Media",
     icon: PlaySquare,
     color: "text-rose-400",
-    bg: "bg-rose-500/10",
-    border: "border-rose-500/25",
-    badge: "bg-rose-500/15 text-rose-300 border-rose-500/30",
+    dot: "bg-rose-400",
     bar: "bg-rose-500",
-    dot: "bg-rose-400 ring-rose-500/30",
+    badge: "bg-rose-500/10 text-rose-400 border-rose-500/20",
   },
   gaming: {
     label: "Gaming",
     icon: Gamepad2,
     color: "text-fuchsia-400",
-    bg: "bg-fuchsia-500/10",
-    border: "border-fuchsia-500/25",
-    badge: "bg-fuchsia-500/15 text-fuchsia-300 border-fuchsia-500/30",
+    dot: "bg-fuchsia-400",
     bar: "bg-fuchsia-500",
-    dot: "bg-fuchsia-400 ring-fuchsia-500/30",
+    badge: "bg-fuchsia-500/10 text-fuchsia-400 border-fuchsia-500/20",
   },
   idle_away: {
     label: "Away (Idle)",
     icon: Coffee,
-    color: "text-amber-400",
-    bg: "bg-amber-500/10",
-    border: "border-amber-500/25",
-    badge: "bg-amber-500/15 text-amber-300 border-amber-500/30",
-    bar: "bg-amber-500/90",
-    dot: "bg-amber-400 ring-amber-500/30",
+    color: "text-zinc-400",
+    dot: "bg-zinc-400",
+    bar: "bg-zinc-600",
+    badge: "bg-zinc-500/10 text-zinc-400 border-zinc-500/20",
   },
   system_maintenance: {
     label: "System",
     icon: Terminal,
     color: "text-slate-400",
-    bg: "bg-slate-500/10",
-    border: "border-slate-500/25",
-    badge: "bg-slate-500/15 text-slate-300 border-slate-500/30",
+    dot: "bg-slate-400",
     bar: "bg-slate-600",
-    dot: "bg-slate-400 ring-slate-500/30",
+    badge: "bg-slate-500/10 text-slate-400 border-slate-500/20",
   },
   unknown: {
     label: "Unknown",
     icon: HelpCircle,
-    color: "text-zinc-400",
-    bg: "bg-zinc-500/10",
-    border: "border-zinc-500/25",
-    badge: "bg-zinc-500/15 text-zinc-300 border-zinc-500/30",
-    bar: "bg-zinc-600",
-    dot: "bg-zinc-400 ring-zinc-500/30",
+    color: "text-zinc-500",
+    dot: "bg-zinc-500",
+    bar: "bg-zinc-700",
+    badge: "bg-zinc-500/10 text-zinc-400 border-zinc-500/20",
   },
 };
 
@@ -195,8 +176,8 @@ function formatDateLong(dateStr: string): string {
     if (!y || !m || !d) return dateStr;
     const date = new Date(y, m - 1, d);
     return date.toLocaleDateString("en-US", {
-      weekday: "long",
-      month: "long",
+      weekday: "short",
+      month: "short",
       day: "numeric",
       year: "numeric",
     });
@@ -213,6 +194,41 @@ function getTodayString(): string {
   return `${year}-${month}-${day}`;
 }
 
+function formatActivityDescriptor(block: TimelineBlock): string {
+  if (block.isAfkBlock) {
+    return "Away from keyboard";
+  }
+  const actTypeMap: Record<string, string> = {
+    coding: "Coding",
+    debugging: "Debugging",
+    code_review: "Code Review",
+    documentation: "Documentation",
+    research: "Research",
+    tutorial: "Tutorial",
+    writing: "Writing",
+    planning: "Planning",
+    communication: "Communication",
+    meeting: "Meeting",
+    administration: "Administration",
+    media: "Media",
+    gaming: "Gaming",
+    idle_away: "Away",
+    unknown: "Activity",
+  };
+  const actType = block.activityType ? (actTypeMap[block.activityType] ?? block.activityType) : null;
+  const context = block.modality.context?.value ?? null;
+  const modLabel = modalityConfig[block.modality.primary?.value ?? "unknown"]?.label ?? "Activity";
+
+  const primaryLabel = actType || modLabel;
+  if (context && context.toLowerCase() !== primaryLabel.toLowerCase()) {
+    return `${primaryLabel} · ${context}`;
+  }
+  return primaryLabel;
+}
+
+// -----------------------------------------------------------------------------
+// CORRECTION MODAL (Linear Style: sharp, 1px border, fast)
+// -----------------------------------------------------------------------------
 interface CorrectionModalProps {
   block: TimelineBlock | null;
   onClose: () => void;
@@ -270,22 +286,22 @@ function CorrectionModal({ block, onClose, onSuccess }: CorrectionModalProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
-      <div className="bg-bg-card border border-border-default rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xs p-4 animate-in fade-in duration-100">
+      <div className="bg-bg-card border border-border-default rounded-lg max-w-lg w-full p-5 shadow-2xl space-y-4">
         <div className="flex items-center justify-between pb-3 border-b border-border-subtle">
           <div className="flex items-center gap-2">
             <Edit3 className="w-4 h-4 text-accent-default" />
-            <h3 className="text-base font-semibold text-text-primary">Correct Classification</h3>
+            <h3 className="text-sm font-semibold text-text-primary">Correct Classification</h3>
           </div>
           <button
             onClick={onClose}
-            className="p-1 rounded-lg text-text-secondary hover:text-text-primary hover:bg-bg-secondary transition-colors"
+            className="p-1 rounded text-text-tertiary hover:text-text-primary hover:bg-bg-secondary transition-colors"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        <div className="text-xs space-y-1 bg-bg-secondary p-3 rounded-xl border border-border-subtle font-mono">
+        <div className="text-xs space-y-1 bg-bg-secondary/70 p-3 rounded border border-border-subtle font-mono">
           <div className="flex justify-between">
             <span className="text-text-tertiary">Time Interval:</span>
             <span className="text-text-primary font-semibold">
@@ -304,26 +320,26 @@ function CorrectionModal({ block, onClose, onSuccess }: CorrectionModalProps) {
           )}
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4 text-xs">
+        <form onSubmit={handleSubmit} className="space-y-3.5 text-xs">
           <div>
-            <label className="block text-text-secondary font-medium mb-1.5">
-              Assigned Modality (Strict Functional Taxonomy)
+            <label className="block text-text-secondary font-medium mb-1">
+              Assigned Modality
             </label>
             <select
               value={selectedModality}
               onChange={(e) => setSelectedModality(e.target.value)}
-              className="w-full bg-bg-secondary border border-border-default rounded-xl px-3 py-2 text-text-primary focus:outline-hidden focus:border-accent-default"
+              className="w-full bg-bg-secondary border border-border-default rounded px-3 py-2 text-text-primary focus:outline-hidden focus:border-accent-default"
             >
               {Object.keys(modalityConfig).map((mod) => (
                 <option key={mod} value={mod}>
-                  {modalityConfig[mod]?.label ?? mod} ({mod})
+                  {modalityConfig[mod]?.label ?? mod}
                 </option>
               ))}
             </select>
           </div>
 
           <div>
-            <label className="block text-text-secondary font-medium mb-1.5">
+            <label className="block text-text-secondary font-medium mb-1">
               Topic / Project Context (Optional)
             </label>
             <input
@@ -331,12 +347,12 @@ function CorrectionModal({ block, onClose, onSuccess }: CorrectionModalProps) {
               placeholder="e.g. ProductiveHix, System Blueprint, Research"
               value={topicContext}
               onChange={(e) => setTopicContext(e.target.value)}
-              className="w-full bg-bg-secondary border border-border-default rounded-xl px-3 py-2 text-text-primary placeholder:text-text-tertiary focus:outline-hidden focus:border-accent-default font-mono"
+              className="w-full bg-bg-secondary border border-border-default rounded px-3 py-2 text-text-primary placeholder:text-text-tertiary focus:outline-hidden focus:border-accent-default font-mono"
             />
           </div>
 
           <div>
-            <label className="block text-text-secondary font-medium mb-1.5">
+            <label className="block text-text-secondary font-medium mb-1">
               Correction Reason (Optional)
             </label>
             <input
@@ -344,33 +360,33 @@ function CorrectionModal({ block, onClose, onSuccess }: CorrectionModalProps) {
               placeholder="e.g. Researching framework documentation for project"
               value={reason}
               onChange={(e) => setReason(e.target.value)}
-              className="w-full bg-bg-secondary border border-border-default rounded-xl px-3 py-2 text-text-primary placeholder:text-text-tertiary focus:outline-hidden focus:border-accent-default"
+              className="w-full bg-bg-secondary border border-border-default rounded px-3 py-2 text-text-primary placeholder:text-text-tertiary focus:outline-hidden focus:border-accent-default"
             />
           </div>
 
           {error && (
-            <div className="p-3 rounded-xl bg-error/10 border border-error/20 text-error flex items-center gap-2">
+            <div className="p-2.5 rounded bg-error/10 border border-error/20 text-error flex items-center gap-2">
               <AlertCircle className="w-4 h-4 shrink-0" />
               <span>{error}</span>
             </div>
           )}
 
-          <div className="flex items-center justify-end gap-2 pt-2 border-t border-border-subtle">
+          <div className="flex items-center justify-end gap-2 pt-3 border-t border-border-subtle">
             <button
               type="button"
               onClick={onClose}
               disabled={isSubmitting}
-              className="px-4 py-2 rounded-xl text-text-secondary hover:text-text-primary hover:bg-bg-secondary transition-colors"
+              className="px-3 py-1.5 rounded text-text-secondary hover:text-text-primary hover:bg-bg-secondary transition-colors"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
-              className="px-4 py-2 rounded-xl font-medium text-white bg-accent-default hover:bg-accent-hover transition-colors shadow-xs flex items-center gap-2"
+              className="px-3.5 py-1.5 rounded font-medium text-white bg-accent-default hover:bg-accent-hover transition-colors shadow-2xs flex items-center gap-1.5"
             >
-              {isSubmitting && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
-              Save Correction
+              {isSubmitting && <RefreshCw className="w-3 h-3 animate-spin" />}
+              Save Override
             </button>
           </div>
         </form>
@@ -379,38 +395,65 @@ function CorrectionModal({ block, onClose, onSuccess }: CorrectionModalProps) {
   );
 }
 
-function formatActivityDescriptor(block: TimelineBlock): string {
-  if (block.isAfkBlock) {
-    return "Away from keyboard";
-  }
-  const actTypeMap: Record<string, string> = {
-    coding: "Coding",
-    debugging: "Debugging",
-    code_review: "Code Review",
-    documentation: "Documentation",
-    research: "Research",
-    tutorial: "Tutorial",
-    writing: "Writing",
-    planning: "Planning",
-    communication: "Communication",
-    meeting: "Meeting",
-    administration: "Administration",
-    media: "Media",
-    gaming: "Game",
-    idle_away: "Away",
-    unknown: "Activity",
-  };
-  const actType = block.activityType ? (actTypeMap[block.activityType] ?? block.activityType) : null;
-  const context = block.modality.context?.value ?? null;
-  const modLabel = modalityConfig[block.modality.primary?.value ?? "unknown"]?.label ?? "Activity";
+// -----------------------------------------------------------------------------
+// KEYBOARD SHORTCUTS MODAL (Linear Style)
+// -----------------------------------------------------------------------------
+function KeyboardShortcutsModal({ onClose }: { onClose: () => void }) {
+  const shortcuts = [
+    { key: "j / ↓", desc: "Select next block" },
+    { key: "k / ↑", desc: "Select previous block" },
+    { key: "Enter / Space", desc: "Toggle block detail drawer" },
+    { key: "c / e", desc: "Correct selected block" },
+    { key: "t", desc: "Jump to today" },
+    { key: "[", desc: "Navigate to previous day" },
+    { key: "]", desc: "Navigate to next day" },
+    { key: "?", desc: "Toggle keyboard shortcuts" },
+    { key: "Esc", desc: "Close modal / drawer" },
+  ];
 
-  const primaryLabel = actType || modLabel;
-  if (context && context.toLowerCase() !== primaryLabel.toLowerCase()) {
-    return `${primaryLabel} · ${context}`;
-  }
-  return primaryLabel;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xs p-4 animate-in fade-in duration-100">
+      <div className="bg-bg-card border border-border-default rounded-lg max-w-md w-full p-5 shadow-2xl space-y-4">
+        <div className="flex items-center justify-between pb-2.5 border-b border-border-subtle">
+          <div className="flex items-center gap-2">
+            <Keyboard className="w-4 h-4 text-accent-default" />
+            <h3 className="text-sm font-semibold text-text-primary">Keyboard Navigation</h3>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1 rounded text-text-tertiary hover:text-text-primary hover:bg-bg-secondary transition-colors"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="divide-y divide-border-subtle text-xs">
+          {shortcuts.map((s) => (
+            <div key={s.key} className="flex items-center justify-between py-2">
+              <span className="text-text-secondary">{s.desc}</span>
+              <kbd className="px-2 py-0.5 font-mono text-[11px] bg-bg-secondary border border-border-default rounded text-text-primary">
+                {s.key}
+              </kbd>
+            </div>
+          ))}
+        </div>
+
+        <div className="pt-2 flex justify-end">
+          <button
+            onClick={onClose}
+            className="px-3 py-1.5 rounded text-xs font-medium text-text-primary bg-bg-secondary border border-border-default hover:bg-bg-tertiary transition-colors"
+          >
+            Got it
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
+// -----------------------------------------------------------------------------
+// MAIN TIMELINE PAGE
+// -----------------------------------------------------------------------------
 export default function TimelinePage() {
   const queryClient = useQueryClient();
   const [selectedDate, setSelectedDate] = useState<string>(() => getTodayString());
@@ -426,13 +469,17 @@ export default function TimelinePage() {
   }, []);
 
   const [filterModality, setFilterModality] = useState<string>("all");
+  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [density, setDensity] = useState<"compact" | "comfortable">("comfortable");
+  const [selectedBlockIndex, setSelectedBlockIndex] = useState<number | null>(null);
   const [expandedBlockId, setExpandedBlockId] = useState<string | null>(null);
   const [correctingBlock, setCorrectingBlock] = useState<TimelineBlock | null>(null);
   const [hoveredBlock, setHoveredBlock] = useState<TimelineBlock | null>(null);
+  const [isShortcutsHelpOpen, setIsShortcutsHelpOpen] = useState(false);
 
   const isToday = selectedDate === getTodayString();
 
-  // Fetch real timeline from backend via React Query (cached with live sync for today)
+  // Fetch real timeline from backend via React Query
   const { data, isLoading, isError, refetch, isFetching } = useTimeline(selectedDate);
 
   // Date Navigation Handlers
@@ -443,6 +490,7 @@ export default function TimelinePage() {
     date.setDate(date.getDate() - 1);
     const prevStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
     setSelectedDate(prevStr);
+    setSelectedBlockIndex(null);
   };
 
   const handleNextDay = () => {
@@ -453,21 +501,34 @@ export default function TimelinePage() {
     date.setDate(date.getDate() + 1);
     const nextStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
     setSelectedDate(nextStr);
+    setSelectedBlockIndex(null);
   };
 
   const handleGoToday = () => {
     setSelectedDate(getTodayString());
+    setSelectedBlockIndex(null);
   };
 
   const blocks = data?.blocks || [];
   const summary = data?.summary;
   const currentActivity = data?.currentActivity;
 
-  // Filter semantic blocks
+  // Filter semantic blocks (by modality and search query)
   const filteredBlocks = useMemo(() => {
-    if (filterModality === "all") return blocks;
-    return blocks.filter((b) => (b.modality.primary?.value ?? "unknown") === filterModality);
-  }, [blocks, filterModality]);
+    return blocks.filter((b) => {
+      const primaryMod = b.modality.primary?.value ?? "unknown";
+      const matchesMod = filterModality === "all" || primaryMod === filterModality;
+      if (!matchesMod) return false;
+
+      if (!searchQuery.trim()) return true;
+      const q = searchQuery.toLowerCase().trim();
+      const titleMatch = b.cleanTitle?.toLowerCase().includes(q);
+      const appMatch = b.primaryApplication.toLowerCase().includes(q);
+      const domainMatch = b.domain?.toLowerCase().includes(q);
+      const actMatch = b.activityType?.toLowerCase().includes(q);
+      return Boolean(titleMatch || appMatch || domainMatch || actMatch);
+    });
+  }, [blocks, filterModality, searchQuery]);
 
   // Filter counts for blocks
   const blockModalityCounts = useMemo(() => {
@@ -485,12 +546,79 @@ export default function TimelinePage() {
     [blocks]
   );
 
+  // Keyboard navigation listener (Linear principle #1: Keyboard-first)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.tagName === "SELECT" ||
+        target.isContentEditable ||
+        correctingBlock !== null ||
+        isShortcutsHelpOpen
+      ) {
+        if (e.key === "Escape") {
+          setIsShortcutsHelpOpen(false);
+          setCorrectingBlock(null);
+        }
+        return;
+      }
+
+      if (e.key === "j" || e.key === "ArrowDown") {
+        e.preventDefault();
+        setSelectedBlockIndex((prev) => {
+          if (filteredBlocks.length === 0) return null;
+          const next = prev === null ? 0 : Math.min(prev + 1, filteredBlocks.length - 1);
+          const el = document.getElementById(`block-${filteredBlocks[next]?.id}`);
+          if (el) el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+          return next;
+        });
+      } else if (e.key === "k" || e.key === "ArrowUp") {
+        e.preventDefault();
+        setSelectedBlockIndex((prev) => {
+          if (filteredBlocks.length === 0) return null;
+          const next = prev === null ? filteredBlocks.length - 1 : Math.max(prev - 1, 0);
+          const el = document.getElementById(`block-${filteredBlocks[next]?.id}`);
+          if (el) el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+          return next;
+        });
+      } else if (e.key === "Enter" || e.key === " ") {
+        if (selectedBlockIndex !== null && filteredBlocks[selectedBlockIndex]) {
+          e.preventDefault();
+          const bId = filteredBlocks[selectedBlockIndex].id;
+          setExpandedBlockId((prev) => (prev === bId ? null : bId));
+        }
+      } else if (e.key === "c" || e.key === "e") {
+        if (selectedBlockIndex !== null && filteredBlocks[selectedBlockIndex]) {
+          e.preventDefault();
+          setCorrectingBlock(filteredBlocks[selectedBlockIndex]);
+        }
+      } else if (e.key === "t") {
+        e.preventDefault();
+        handleGoToday();
+      } else if (e.key === "[") {
+        e.preventDefault();
+        handlePrevDay();
+      } else if (e.key === "]") {
+        e.preventDefault();
+        handleNextDay();
+      } else if (e.key === "?") {
+        e.preventDefault();
+        setIsShortcutsHelpOpen(true);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [filteredBlocks, selectedBlockIndex, correctingBlock, isShortcutsHelpOpen]);
+
   return (
     <motion.div
       variants={containerVariants}
       initial="hidden"
       animate="show"
-      className="space-y-6 max-w-[1440px] mx-auto pb-12"
+      className="space-y-4 max-w-[1440px] mx-auto pb-16"
     >
       {/* Correction Modal */}
       {correctingBlock && (
@@ -505,41 +633,43 @@ export default function TimelinePage() {
         />
       )}
 
-      {/* 1. Header & Date Navigation */}
+      {/* Keyboard Shortcuts Legend Modal */}
+      {isShortcutsHelpOpen && (
+        <KeyboardShortcutsModal onClose={() => setIsShortcutsHelpOpen(false)} />
+      )}
+
+      {/* 1. Header & Navigation (Linear Style) */}
       <motion.div
         variants={itemVariants}
-        className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-2 border-b border-border-subtle"
+        className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-border-subtle"
       >
-        <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold tracking-tight text-text-primary">Timeline</h1>
-            {isToday && (
-              <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-bg-secondary text-text-primary border border-border-strong">
-                <span className="w-1.5 h-1.5 rounded-full bg-text-primary animate-pulse" />
-                Live Today
-              </span>
-            )}
-          </div>
-          <p className="text-xs text-text-secondary mt-1 font-mono tracking-wide">
-            Observation-backed activity &bull; {formatDateLong(selectedDate)}
-          </p>
+        <div className="flex items-center gap-3">
+          <h1 className="text-lg font-semibold tracking-tight text-text-primary">Timeline</h1>
+          {isToday && (
+            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              Live
+            </span>
+          )}
+          <span className="text-xs font-mono text-text-tertiary">
+            {formatDateLong(selectedDate)}
+          </span>
         </div>
 
-        {/* Date Controls */}
-        <div className="flex flex-wrap items-center gap-2">
-
-          <div className="flex items-center bg-bg-card border border-border-default rounded-xl p-1 shadow-xs">
+        {/* Date Controls & Quick Actions */}
+        <div className="flex items-center gap-2">
+          <div className="inline-flex items-center rounded border border-border-default bg-bg-card p-0.5 shadow-2xs">
             <button
               onClick={handlePrevDay}
-              title="Previous Day"
-              className="p-1.5 rounded-lg text-text-secondary hover:text-text-primary hover:bg-bg-secondary transition-colors"
+              title="Previous Day (Press [)"
+              className="p-1 rounded text-text-secondary hover:text-text-primary hover:bg-bg-secondary transition-colors"
             >
-              <ChevronLeft className="w-4 h-4" />
+              <ChevronLeft className="w-3.5 h-3.5" />
             </button>
 
-            <label className="relative flex items-center gap-2 px-3 py-1 cursor-pointer group">
-              <Calendar className="w-3.5 h-3.5 text-accent-default group-hover:opacity-80 transition-opacity" />
-              <span className="text-xs font-medium text-text-primary font-mono">
+            <label className="relative flex items-center gap-1.5 px-2.5 py-0.5 cursor-pointer group">
+              <Calendar className="w-3 h-3 text-accent-default" />
+              <span className="text-xs font-mono font-medium text-text-primary">
                 {selectedDate}
               </span>
               <input
@@ -554,23 +684,24 @@ export default function TimelinePage() {
             <button
               onClick={handleNextDay}
               disabled={isToday}
-              title="Next Day"
-              className={`p-1.5 rounded-lg transition-colors ${
+              title="Next Day (Press ])"
+              className={`p-1 rounded transition-colors ${
                 isToday
-                  ? "text-text-tertiary cursor-not-allowed opacity-40"
+                  ? "text-text-tertiary cursor-not-allowed opacity-30"
                   : "text-text-secondary hover:text-text-primary hover:bg-bg-secondary"
               }`}
             >
-              <ChevronRight className="w-4 h-4" />
+              <ChevronRight className="w-3.5 h-3.5" />
             </button>
           </div>
 
           {!isToday && (
             <button
               onClick={handleGoToday}
-              className="px-3 py-1.5 rounded-xl text-xs font-medium text-accent-default bg-accent-subtle border border-accent-default/30 hover:bg-accent-default/20 transition-all"
+              title="Jump to Today (Press t)"
+              className="px-2.5 py-1 rounded text-xs font-medium text-accent-default bg-accent-subtle border border-accent-default/30 hover:bg-accent-default/20 transition-all"
             >
-              Jump to Today
+              Today
             </button>
           )}
 
@@ -578,278 +709,235 @@ export default function TimelinePage() {
             onClick={() => refetch()}
             disabled={isFetching}
             title="Refresh Timeline"
-            className="p-2 rounded-xl text-text-secondary hover:text-text-primary bg-bg-card border border-border-default hover:bg-bg-secondary transition-all shadow-xs"
+            className="p-1.5 rounded text-text-secondary hover:text-text-primary bg-bg-card border border-border-default hover:bg-bg-secondary transition-all"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isFetching ? "animate-spin text-accent-default" : ""}`} />
+          </button>
+
+          <button
+            onClick={() => setIsShortcutsHelpOpen(true)}
+            title="Keyboard Shortcuts (Press ?)"
+            className="p-1.5 rounded text-text-secondary hover:text-text-primary bg-bg-card border border-border-default hover:bg-bg-secondary transition-all"
+          >
+            <Keyboard className="w-3.5 h-3.5" />
           </button>
         </div>
       </motion.div>
 
-      {/* 2. Current Activity Banner */}
+      {/* 2. Live Activity Strip (Linear Style) */}
       {isToday && currentActivity && (
         <motion.div
           variants={itemVariants}
-          className="relative overflow-hidden bg-bg-card border border-accent-default/30 rounded-2xl p-4 shadow-sm"
+          className="flex items-center justify-between px-3.5 py-2 rounded-lg border border-border-subtle bg-bg-card/70 backdrop-blur-xs text-xs"
         >
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="flex items-center gap-3.5">
-              <div className="relative">
-                <div
-                  className={`w-3 h-3 rounded-full ${
-                    currentActivity.isActive ? "bg-text-primary" : "bg-amber-500 dark:bg-amber-400"
-                  }`}
-                />
-                {currentActivity.isActive && (
-                  <div className="absolute inset-0 w-3 h-3 rounded-full bg-text-primary animate-ping opacity-75" />
-                )}
-              </div>
+          <div className="flex items-center gap-2.5 truncate">
+            <span className="relative flex h-2 w-2 shrink-0">
+              {currentActivity.isActive && (
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+              )}
+              <span
+                className={`relative inline-flex rounded-full h-2 w-2 ${
+                  currentActivity.isActive ? "bg-emerald-400" : "bg-amber-400"
+                }`}
+              />
+            </span>
 
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] font-mono tracking-wider uppercase text-text-tertiary">
-                    CURRENT ACTIVITY
-                  </span>
-                  <span
-                    className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
-                      currentActivity.isActive
-                        ? "bg-bg-secondary text-text-primary border-border-strong"
-                        : "bg-amber-500/15 text-amber-600 dark:text-amber-300 border-amber-500/30"
+            <span className="font-semibold text-text-primary truncate">
+              {currentActivity.application || "Idle"}
+            </span>
+
+            {currentActivity.title && currentActivity.title !== currentActivity.application && (
+              <>
+                <span className="text-text-tertiary">&bull;</span>
+                <span className="text-text-secondary truncate max-w-md">
+                  {currentActivity.title}
+                </span>
+              </>
+            )}
+          </div>
+
+          {currentActivity.runningForSeconds !== null && (
+            <div className="shrink-0 flex items-center gap-1.5 text-text-tertiary font-mono text-[11px]">
+              <Clock className="w-3 h-3 text-accent-default" />
+              <span>Running:</span>
+              <span className="text-text-primary font-medium">
+                {formatDuration(currentActivity.runningForSeconds)}
+              </span>
+            </div>
+          )}
+        </motion.div>
+      )}
+
+      {/* 3. Metric Grid (Linear Pattern: Single border-connected grid) */}
+      <motion.div
+        variants={itemVariants}
+        className="grid grid-cols-2 md:grid-cols-4 rounded-lg border border-border-default bg-bg-card divide-y md:divide-y-0 md:divide-x divide-border-subtle overflow-hidden"
+      >
+        {/* Total Tracked */}
+        <div className="p-3.5 flex flex-col justify-between space-y-1">
+          <div className="flex items-center justify-between text-[11px] font-mono font-medium text-text-tertiary uppercase tracking-wider">
+            <span>Total Tracked</span>
+            <Clock className="w-3.5 h-3.5" />
+          </div>
+          <p className="text-xl sm:text-2xl font-bold font-mono tracking-tight text-text-primary">
+            {summary ? formatDuration(summary.totalTrackedMs / 1000) : "0m"}
+          </p>
+          <span className="text-[11px] text-text-tertiary font-mono">
+            {blocks.length} semantic blocks
+          </span>
+        </div>
+
+        {/* Development */}
+        <div className="p-3.5 flex flex-col justify-between space-y-1">
+          <div className="flex items-center justify-between text-[11px] font-mono font-medium text-emerald-400 uppercase tracking-wider">
+            <span>Development</span>
+            <Code className="w-3.5 h-3.5" />
+          </div>
+          <p className="text-xl sm:text-2xl font-bold font-mono tracking-tight text-text-primary">
+            {summary ? formatDuration((summary.developmentMs ?? 0) / 1000) : "0m"}
+          </p>
+          <span className="text-[11px] text-text-tertiary font-mono">
+            Coding, Debugging &amp; Review
+          </span>
+        </div>
+
+        {/* Reading & Docs */}
+        <div className="p-3.5 flex flex-col justify-between space-y-1">
+          <div className="flex items-center justify-between text-[11px] font-mono font-medium text-sky-400 uppercase tracking-wider">
+            <span>Reading &amp; Docs</span>
+            <Globe className="w-3.5 h-3.5" />
+          </div>
+          <p className="text-xl sm:text-2xl font-bold font-mono tracking-tight text-text-primary">
+            {summary
+              ? formatDuration(
+                  ((summary.readingResearchMs ?? 0) + (summary.writingDocumentationMs ?? 0)) / 1000
+                )
+              : "0m"}
+          </p>
+          <span className="text-[11px] text-text-tertiary font-mono">
+            Docs, Specs &amp; Research
+          </span>
+        </div>
+
+        {/* Comms & Media */}
+        <div className="p-3.5 flex flex-col justify-between space-y-1">
+          <div className="flex items-center justify-between text-[11px] font-mono font-medium text-purple-400 uppercase tracking-wider">
+            <span>Comms &amp; Media</span>
+            <MessageSquare className="w-3.5 h-3.5" />
+          </div>
+          <p className="text-xl sm:text-2xl font-bold font-mono tracking-tight text-text-primary">
+            {summary
+              ? formatDuration(
+                  ((summary.communicationModalityMs ?? 0) +
+                    (summary.mediaConsumptionMs ?? 0) +
+                    (summary.gamingMs ?? 0) +
+                    (summary.administrationMs ?? 0)) /
+                    1000
+                )
+              : "0m"}
+          </p>
+          <span className="text-[11px] text-text-tertiary font-mono">
+            Chat, Media, Games &amp; Admin
+          </span>
+        </div>
+      </motion.div>
+
+      {/* 4. Daily Flow Visualization Bar with Time Axis Markers */}
+      {blocks.length > 0 && totalSemanticTrackedMs > 0 && (
+        <motion.div
+          variants={itemVariants}
+          className="rounded-lg border border-border-default bg-bg-card p-3.5 space-y-2"
+        >
+          <div className="flex items-center justify-between text-xs">
+            <div className="flex items-center gap-1.5 text-text-secondary font-medium">
+              <Layers className="w-3.5 h-3.5" />
+              <span>Daily Flow Stream</span>
+            </div>
+            <span className="font-mono text-[11px] text-text-tertiary">
+              {formatClockTime(blocks[0]?.startTime ?? "")} &rarr;{" "}
+              {formatClockTime(blocks[blocks.length - 1]?.endTime ?? "")}
+            </span>
+          </div>
+
+          <div className="relative">
+            {/* Proportional Stream Bar */}
+            <div className="flex h-7 w-full rounded overflow-hidden bg-bg-secondary p-0.5 gap-px">
+              {blocks.map((block) => {
+                const blockDuration = block.wallClockDurationMs || block.observedActiveDurationMs;
+                const widthPercent = (blockDuration / totalSemanticTrackedMs) * 100;
+                const primaryMod = block.modality.primary?.value ?? "unknown";
+                const config = modalityConfig[primaryMod] ?? modalityConfig.unknown!;
+                const isHovered = hoveredBlock?.id === block.id;
+
+                return (
+                  <div
+                    key={block.id}
+                    onMouseEnter={() => setHoveredBlock(block)}
+                    onMouseLeave={() => setHoveredBlock(null)}
+                    onClick={() => {
+                      setExpandedBlockId(block.id);
+                      const el = document.getElementById(`block-${block.id}`);
+                      if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+                    }}
+                    className={`relative cursor-pointer transition-all duration-100 rounded-2xs ${config.bar} ${
+                      isHovered ? "brightness-125 scale-y-110 z-10 shadow-xs" : "opacity-90 hover:opacity-100"
                     }`}
-                  >
-                    {currentActivity.isActive ? "ACTIVE" : "AFK / AWAY"}
-                  </span>
-                </div>
-
-                <div className="flex items-baseline gap-2 mt-0.5">
-                  <h3 className="text-sm font-semibold text-text-primary">
-                    {currentActivity.application || "Idle"}
-                  </h3>
-                  {currentActivity.title && currentActivity.title !== currentActivity.application && (
-                    <span className="text-xs text-text-secondary truncate max-w-[360px] sm:max-w-[480px]">
-                      &bull; {currentActivity.title}
-                    </span>
-                  )}
-                </div>
-              </div>
+                    style={{ width: `${Math.max(widthPercent, 0.4)}%` }}
+                  />
+                );
+              })}
             </div>
 
-            {currentActivity.runningForSeconds !== null && (
-              <div className="flex items-center gap-2 self-start sm:self-auto bg-bg-secondary border border-border-subtle rounded-xl px-3 py-1.5">
-                <Clock className="w-3.5 h-3.5 text-accent-default" />
-                <span className="text-xs text-text-secondary">Running for:</span>
-                <span className="text-xs font-mono font-semibold text-text-primary">
-                  {formatDuration(currentActivity.runningForSeconds)}
+            {/* Hover Tooltip Card */}
+            {hoveredBlock && (
+              <div className="absolute -top-11 left-1/2 -translate-x-1/2 z-30 pointer-events-none bg-bg-default border border-border-strong rounded px-2.5 py-1 shadow-2xl flex items-center gap-2 whitespace-nowrap text-xs font-mono">
+                <span className="font-semibold text-text-primary">{hoveredBlock.primaryApplication}</span>
+                <span className="text-text-tertiary">&bull;</span>
+                <span className="text-accent-default">{formatActivityDescriptor(hoveredBlock)}</span>
+                <span className="text-text-tertiary">&bull;</span>
+                <span className="text-text-secondary">
+                  {formatClockTime(hoveredBlock.startTime)}–{formatClockTime(hoveredBlock.endTime)}
+                </span>
+                <span className="text-text-tertiary">&bull;</span>
+                <span className="text-text-primary font-bold">
+                  {formatDuration(hoveredBlock.observedActiveDurationMs / 1000)}
                 </span>
               </div>
             )}
           </div>
+
+          {/* Time Axis Markers */}
+          <div className="flex justify-between text-[10px] font-mono text-text-tertiary px-0.5 select-none pt-0.5">
+            <span>12 AM</span>
+            <span>3 AM</span>
+            <span>6 AM</span>
+            <span>9 AM</span>
+            <span>12 PM</span>
+            <span>3 PM</span>
+            <span>6 PM</span>
+            <span>9 PM</span>
+            <span>12 AM</span>
+          </div>
         </motion.div>
       )}
 
-      {/* 3. Top Summary KPI Cards */}
-      <motion.div variants={itemVariants} className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {/* Total Tracked */}
-        <div className="bg-bg-card border border-border-subtle rounded-2xl p-4 shadow-xs">
-          <div className="flex items-center justify-between mb-1.5">
-            <span className="text-xs font-medium text-text-secondary">Total Tracked</span>
-            <Clock className="w-4 h-4 text-text-tertiary" />
-          </div>
-          {isLoading ? (
-            <div className="space-y-1.5 py-1">
-              <div className="h-7 w-20 bg-bg-secondary animate-pulse rounded-lg" />
-              <div className="h-3 w-28 bg-bg-secondary animate-pulse rounded" />
-            </div>
-          ) : (
-            <>
-              <p className="text-2xl font-bold tracking-tight text-text-primary">
-                {summary ? formatDuration(summary.totalTrackedMs / 1000) : "0m"}
-              </p>
-              <p className="text-[11px] text-text-tertiary mt-1 font-mono">
-                {blocks.length} semantic blocks
-              </p>
-            </>
-          )}
-        </div>
-
-        {/* Development */}
-        <div className="bg-bg-card border border-border-subtle rounded-2xl p-4 shadow-xs">
-          <div className="flex items-center justify-between mb-1.5">
-            <span className="text-xs font-medium text-emerald-400">Development</span>
-            <Code className="w-4 h-4 text-emerald-400" />
-          </div>
-          {isLoading ? (
-            <div className="space-y-1.5 py-1">
-              <div className="h-7 w-20 bg-bg-secondary animate-pulse rounded-lg" />
-              <div className="h-3 w-28 bg-bg-secondary animate-pulse rounded" />
-            </div>
-          ) : (
-            <>
-              <p className="text-2xl font-bold tracking-tight text-text-primary">
-                {summary ? formatDuration((summary.developmentMs ?? 0) / 1000) : "0m"}
-              </p>
-              <p className="text-[11px] text-text-tertiary mt-1 font-mono">
-                Coding, Debugging &amp; Review
-              </p>
-            </>
-          )}
-        </div>
-
-        {/* Reading & Research */}
-        <div className="bg-bg-card border border-border-subtle rounded-2xl p-4 shadow-xs">
-          <div className="flex items-center justify-between mb-1.5">
-            <span className="text-xs font-medium text-sky-400">Reading &amp; Docs</span>
-            <Globe className="w-4 h-4 text-sky-400" />
-          </div>
-          {isLoading ? (
-            <div className="space-y-1.5 py-1">
-              <div className="h-7 w-20 bg-bg-secondary animate-pulse rounded-lg" />
-              <div className="h-3 w-28 bg-bg-secondary animate-pulse rounded" />
-            </div>
-          ) : (
-            <>
-              <p className="text-2xl font-bold tracking-tight text-text-primary">
-                {summary
-                  ? formatDuration(
-                      ((summary.readingResearchMs ?? 0) + (summary.writingDocumentationMs ?? 0)) / 1000
-                    )
-                  : "0m"}
-              </p>
-              <p className="text-[11px] text-text-tertiary mt-1 font-mono">
-                Docs, Specs &amp; Research
-              </p>
-            </>
-          )}
-        </div>
-
-        {/* Other / Communication / Media / Gaming */}
-        <div className="bg-bg-card border border-border-subtle rounded-2xl p-4 shadow-xs">
-          <div className="flex items-center justify-between mb-1.5">
-            <span className="text-xs font-medium text-purple-400">Comms &amp; Media</span>
-            <MessageSquare className="w-4 h-4 text-purple-400" />
-          </div>
-          {isLoading ? (
-            <div className="space-y-1.5 py-1">
-              <div className="h-7 w-20 bg-bg-secondary animate-pulse rounded-lg" />
-              <div className="h-3 w-28 bg-bg-secondary animate-pulse rounded" />
-            </div>
-          ) : (
-            <>
-              <p className="text-2xl font-bold tracking-tight text-text-primary">
-                {summary
-                  ? formatDuration(
-                      ((summary.communicationModalityMs ?? 0) +
-                        (summary.mediaConsumptionMs ?? 0) +
-                        (summary.gamingMs ?? 0) +
-                        (summary.administrationMs ?? 0)) /
-                        1000
-                    )
-                  : "0m"}
-              </p>
-              <p className="text-[11px] text-text-tertiary mt-1 font-mono">
-                Comms, Media, Games &amp; Admin
-              </p>
-            </>
-          )}
-        </div>
-      </motion.div>
-
-      {/* 4. Daily Flow Proportional Visualization Bar */}
-      {isLoading ? (
-        <div className="bg-bg-card border border-border-subtle rounded-2xl p-5 shadow-xs space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Layers className="w-4 h-4 text-text-secondary" />
-              <div className="h-3 w-20 bg-bg-secondary animate-pulse rounded" />
-            </div>
-            <div className="h-3 w-24 bg-bg-secondary animate-pulse rounded" />
-          </div>
-          <div className="h-9 w-full rounded-xl bg-bg-secondary animate-pulse" />
-        </div>
-      ) : (
-        blocks.length > 0 && totalSemanticTrackedMs > 0 && (
-          <motion.div
-            variants={itemVariants}
-            className="bg-bg-card border border-border-subtle rounded-2xl p-5 shadow-xs space-y-3"
-          >
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Layers className="w-4 h-4 text-text-secondary" />
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
-                  Daily Flow
-                </h3>
-              </div>
-              <span className="text-xs font-mono text-text-secondary">
-                {formatClockTime(blocks[0]?.startTime ?? "")} &rarr;{" "}
-                {formatClockTime(blocks[blocks.length - 1]?.endTime ?? "")}
-              </span>
-            </div>
-
-            <div className="relative">
-              <div className="flex h-9 w-full rounded-xl overflow-hidden bg-bg-secondary p-0.5 gap-0.5">
-                {blocks.map((block) => {
-                  const blockDuration = block.wallClockDurationMs || block.observedActiveDurationMs;
-                  const widthPercent = (blockDuration / totalSemanticTrackedMs) * 100;
-                  const primaryMod = block.modality.primary?.value ?? "unknown";
-                  const config = modalityConfig[primaryMod] ?? modalityConfig.unknown!;
-                  const isHovered = hoveredBlock?.id === block.id;
-
-                  return (
-                    <div
-                      key={block.id}
-                      onMouseEnter={() => setHoveredBlock(block)}
-                      onMouseLeave={() => setHoveredBlock(null)}
-                      onClick={() => {
-                        setExpandedBlockId(block.id);
-                        const el = document.getElementById(`block-${block.id}`);
-                        if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
-                      }}
-                      className={`relative cursor-pointer transition-all duration-150 rounded-[4px] ${config.bar} ${
-                        isHovered ? "brightness-125 scale-y-110 z-10 shadow-lg" : "opacity-90 hover:opacity-100"
-                      }`}
-                      style={{ width: `${Math.max(widthPercent, 0.4)}%` }}
-                    />
-                  );
-                })}
-              </div>
-
-              {hoveredBlock && (
-                <div className="absolute -top-12 left-1/2 -translate-x-1/2 z-30 pointer-events-none bg-bg-default border border-border-strong rounded-lg px-3 py-1.5 shadow-2xl flex items-center gap-2 whitespace-nowrap text-xs">
-                  <span className="font-semibold text-text-primary">{hoveredBlock.primaryApplication}</span>
-                  <span className="text-text-tertiary">&bull;</span>
-                  <span className="text-accent-default font-mono">{formatActivityDescriptor(hoveredBlock)}</span>
-                  <span className="text-text-tertiary">&bull;</span>
-                  <span className="text-text-secondary font-mono">
-                    {formatClockTime(hoveredBlock.startTime)}–{formatClockTime(hoveredBlock.endTime)}
-                  </span>
-                  <span className="text-text-tertiary">&bull;</span>
-                  <span className="font-mono text-text-primary">
-                    {formatDuration(hoveredBlock.observedActiveDurationMs / 1000)}
-                  </span>
-                </div>
-              )}
-            </div>
-          </motion.div>
-        )
-      )}
-
-      {/* 5. Filter Tabs */}
-      <motion.div variants={itemVariants} className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-1.5 bg-bg-card border border-border-subtle rounded-xl p-1 shadow-xs">
-          <div className="flex items-center px-2.5 text-xs text-text-secondary">
-            <Filter className="w-3.5 h-3.5 mr-1.5 text-text-tertiary" />
-            <span>Modality:</span>
-          </div>
-
+      {/* 5. Filter & Search Controls (Linear Filter Bar Pattern) */}
+      <motion.div
+        variants={itemVariants}
+        className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pt-1"
+      >
+        {/* Modality Filter Pills */}
+        <div className="flex flex-wrap items-center gap-1">
           <button
             onClick={() => setFilterModality("all")}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+            className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded transition-colors ${
               filterModality === "all"
-                ? "bg-bg-secondary border border-border-default text-text-primary shadow-xs"
-                : "text-text-secondary hover:text-text-primary hover:bg-bg-secondary/60"
+                ? "bg-bg-secondary border border-border-default text-text-primary"
+                : "text-text-secondary hover:text-text-primary hover:bg-bg-secondary/50 border border-transparent"
             }`}
           >
-            <span>All Modalities</span>
-            <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-md bg-accent-subtle text-accent-default">
+            <span>All</span>
+            <span className="text-[10px] font-mono px-1 rounded bg-bg-tertiary text-text-tertiary">
               {blockModalityCounts.all ?? 0}
             </span>
           </button>
@@ -862,14 +950,15 @@ export default function TimelinePage() {
                 <button
                   key={key}
                   onClick={() => setFilterModality(key)}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded transition-colors ${
                     isActive
-                      ? "bg-bg-secondary border border-border-default text-text-primary shadow-xs"
-                      : "text-text-secondary hover:text-text-primary hover:bg-bg-secondary/60"
+                      ? "bg-bg-secondary border border-border-default text-text-primary"
+                      : "text-text-secondary hover:text-text-primary hover:bg-bg-secondary/50 border border-transparent"
                   }`}
                 >
+                  <span className={`w-1.5 h-1.5 rounded-full ${config.dot}`} />
                   <span>{config.label}</span>
-                  <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-md bg-bg-secondary text-text-tertiary">
+                  <span className="text-[10px] font-mono px-1 rounded bg-bg-tertiary text-text-tertiary">
                     {blockModalityCounts[key] ?? 0}
                   </span>
                 </button>
@@ -877,359 +966,289 @@ export default function TimelinePage() {
             })}
         </div>
 
-        <div className="text-xs font-mono text-text-secondary">
-          Showing <span className="text-text-primary font-semibold">{filteredBlocks.length}</span> of{" "}
-          {blocks.length} semantic blocks
+        {/* Right Search & Density Controls */}
+        <div className="flex items-center gap-2 self-end sm:self-auto">
+          {/* Quick Search Input */}
+          <div className="relative">
+            <Search className="w-3 h-3 text-text-tertiary absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              type="text"
+              placeholder="Search activity..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="bg-bg-card border border-border-default rounded pl-7 pr-2.5 py-1 text-xs text-text-primary placeholder:text-text-tertiary focus:outline-hidden focus:border-accent-default w-36 sm:w-48 font-mono"
+            />
+          </div>
+
+          {/* Density Toggle */}
+          <button
+            onClick={() => setDensity((d) => (d === "comfortable" ? "compact" : "comfortable"))}
+            title={`Switch to ${density === "comfortable" ? "Compact" : "Comfortable"} view`}
+            className="p-1.5 rounded border border-border-default bg-bg-card text-text-secondary hover:text-text-primary hover:bg-bg-secondary transition-colors"
+          >
+            <SlidersHorizontal className="w-3.5 h-3.5" />
+          </button>
+
+          <span className="text-xs font-mono text-text-tertiary hidden md:inline">
+            {filteredBlocks.length} / {blocks.length}
+          </span>
         </div>
       </motion.div>
 
-      {/* 6. Main Chronological Timeline Area */}
+      {/* 6. Chronological Block List (Linear Issue Table Pattern) */}
       {isLoading ? (
-        <div className="space-y-3">
-          {[...Array(6)].map((_, i) => (
-            <div
-              key={i}
-              className="h-16 bg-bg-card border border-border-subtle rounded-xl animate-pulse"
-            />
+        <div className="space-y-1 rounded-lg border border-border-default bg-bg-card p-2">
+          {[...Array(8)].map((_, i) => (
+            <div key={i} className="h-10 bg-bg-secondary/60 animate-pulse rounded" />
           ))}
         </div>
       ) : isError ? (
-        <div className="bg-bg-card border border-error/20 rounded-2xl p-8 text-center space-y-4 shadow-xs">
-          <div className="w-12 h-12 rounded-full bg-error/10 border border-error/20 text-error flex items-center justify-center mx-auto">
-            <AlertCircle className="w-6 h-6" />
+        <div className="bg-bg-card border border-error/20 rounded-lg p-6 text-center space-y-3">
+          <div className="w-10 h-10 rounded-full bg-error/10 border border-error/20 text-error flex items-center justify-center mx-auto">
+            <AlertCircle className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="text-base font-semibold text-text-primary">Unable to load timeline</h3>
-            <p className="text-xs text-text-secondary mt-1 max-w-sm mx-auto">
-              We couldn't retrieve telemetry activity for this day. Please check backend connectivity.
+            <h3 className="text-sm font-semibold text-text-primary">Unable to load timeline</h3>
+            <p className="text-xs text-text-secondary mt-1">
+              Could not retrieve telemetry activity. Please verify backend connection.
             </p>
           </div>
           <button
             onClick={() => refetch()}
-            className="px-4 py-2 rounded-xl text-xs font-medium text-white bg-accent-default hover:bg-accent-hover transition-colors shadow-xs"
+            className="px-3 py-1.5 rounded text-xs font-medium text-white bg-accent-default hover:bg-accent-hover transition-colors"
           >
             Retry Loading
           </button>
         </div>
       ) : filteredBlocks.length === 0 ? (
-        <div className="bg-bg-card border border-border-subtle rounded-2xl p-12 text-center space-y-4 shadow-xs">
-          <div className="w-12 h-12 rounded-full bg-bg-secondary border border-border-default text-text-secondary flex items-center justify-center mx-auto">
-            <Clock className="w-6 h-6" />
+        <div className="bg-bg-card border border-border-default rounded-lg p-8 text-center space-y-2">
+          <div className="w-9 h-9 rounded-full bg-bg-secondary border border-border-default text-text-secondary flex items-center justify-center mx-auto">
+            <Clock className="w-4 h-4" />
           </div>
           <div>
-            <h3 className="text-base font-semibold text-text-primary">
-              {blocks.length === 0 ? "No activity recorded" : "No semantic blocks matching filter"}
+            <h3 className="text-sm font-semibold text-text-primary">
+              {blocks.length === 0 ? "No activity recorded" : "No blocks matching filter"}
             </h3>
-            <p className="text-xs text-text-secondary mt-1 max-w-sm mx-auto">
+            <p className="text-xs text-text-secondary mt-0.5">
               {blocks.length === 0
-                ? "There isn't enough activity recorded for this day yet."
-                : "No temporal activity blocks were classified under this modality for this day."}
+                ? "There is no telemetry data captured for this day."
+                : "Try clearing filters or search query."}
             </p>
           </div>
         </div>
       ) : (
-          <motion.div
-            variants={containerVariants}
-            className="bg-bg-card border border-border-subtle rounded-2xl p-4 sm:p-6 shadow-xs divide-y divide-border-subtle"
-          >
-            {filteredBlocks.map((block, index) => {
-              const primaryMod = block.modality.primary?.value ?? "unknown";
-              const modCfg = modalityConfig[primaryMod] ?? modalityConfig.unknown!;
-              const ModIcon = modCfg.icon;
-              const isExpanded = expandedBlockId === block.id;
+        <motion.div
+          variants={containerVariants}
+          className="rounded-lg border border-border-default bg-bg-card divide-y divide-border-subtle overflow-hidden shadow-2xs"
+        >
+          {/* Table Header Row (Linear Style) */}
+          <div className="flex items-center gap-3 px-3.5 py-2 bg-bg-secondary/40 text-[11px] font-mono text-text-tertiary uppercase tracking-wider select-none">
+            <span className="w-28 sm:w-32 shrink-0">Time Interval</span>
+            <span className="w-2.5 shrink-0" />
+            <span className="w-36 shrink-0 hidden sm:inline">Application</span>
+            <span className="flex-1 min-w-0">Activity &amp; Context</span>
+            <span className="w-28 text-right hidden md:inline">Modality</span>
+            <span className="w-10 text-right">Actions</span>
+          </div>
 
-              const activeSec = Math.round(block.observedActiveDurationMs / 1000);
-              const pausedSec = Math.round(block.pausedDurationMs / 1000);
+          {/* Activity Rows */}
+          {filteredBlocks.map((block, index) => {
+            const primaryMod = block.modality.primary?.value ?? "unknown";
+            const modCfg = modalityConfig[primaryMod] ?? modalityConfig.unknown!;
+            const ModIcon = modCfg.icon;
+            const isExpanded = expandedBlockId === block.id;
+            const isSelected = selectedBlockIndex === index;
 
-              const attentionState = block.attention?.focusEvidenceState;
+            const activeSec = Math.round(block.observedActiveDurationMs / 1000);
+            const pausedSec = Math.round(block.pausedDurationMs / 1000);
 
-              return (
-                <div key={block.id} id={`block-${block.id}`} className="py-3 first:pt-0 last:pb-0 scroll-mt-24">
-                  <div
-                    onClick={() => setExpandedBlockId(isExpanded ? null : block.id)}
-                    className="group flex items-start gap-3 sm:gap-4 p-2.5 sm:p-3 rounded-xl hover:bg-bg-secondary/60 transition-all cursor-pointer"
-                  >
-                    {/* Time Range Column */}
-                    <div className="w-28 sm:w-32 shrink-0 pt-0.5">
-                      <div className="text-xs font-mono font-semibold text-text-primary">
-                        {formatTimeInterval(block.startTime, block.endTime)}
-                      </div>
-                      <div className="text-[11px] font-mono text-text-tertiary mt-0.5">
-                        <span>{formatDuration(activeSec)}</span>
-                        {pausedSec > 0 && (
-                          <span className="text-amber-500 dark:text-amber-400">
-                            {" "}
-                            &bull; {formatDuration(pausedSec)} idle
-                          </span>
-                        )}
-                      </div>
+            return (
+              <div
+                key={block.id}
+                id={`block-${block.id}`}
+                className="group transition-colors"
+              >
+                {/* Main Clickable Row */}
+                <div
+                  onClick={() => setExpandedBlockId(isExpanded ? null : block.id)}
+                  className={`flex items-center gap-3 px-3.5 cursor-pointer transition-colors ${
+                    density === "compact" ? "py-1.5" : "py-2.5"
+                  } ${
+                    isSelected
+                      ? "bg-bg-secondary/80 ring-1 ring-inset ring-accent-default/60"
+                      : "hover:bg-bg-secondary/40"
+                  }`}
+                >
+                  {/* Column 1: Time Interval & Durations */}
+                  <div className="w-28 sm:w-32 shrink-0 font-mono">
+                    <div className="text-xs font-medium text-text-primary">
+                      {formatTimeInterval(block.startTime, block.endTime)}
                     </div>
-
-                    {/* Vertical Connector Dot */}
-                    <div className="relative flex flex-col items-center self-stretch shrink-0 pt-1.5 px-1">
-                      <div className={`w-2.5 h-2.5 rounded-full ${modCfg.bar} ring-4 ${modCfg.dot}`} />
-                      {index < filteredBlocks.length - 1 && (
-                        <div className="w-px flex-1 bg-border-subtle mt-2 group-hover:bg-border-default transition-colors" />
+                    <div className="text-[10px] text-text-tertiary mt-0.5 flex items-center gap-1">
+                      <span>{formatDuration(activeSec)}</span>
+                      {pausedSec > 0 && (
+                        <span className="text-amber-400">
+                          &bull; {formatDuration(pausedSec)} idle
+                        </span>
                       )}
-                    </div>
-
-                    {/* Block Info Column (Clean Non-Judgmental Primary Row) */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-0.5">
-                        <ModIcon className={`w-3.5 h-3.5 ${modCfg.color} shrink-0`} />
-                        <span className="text-xs sm:text-sm font-semibold text-text-primary tracking-tight truncate">
-                          {block.primaryApplication}
-                        </span>
-                        {block.domain && (
-                          <span className="text-[10px] font-mono text-text-tertiary bg-bg-secondary px-1.5 py-0.2 rounded border border-border-subtle truncate max-w-[140px]">
-                            {block.domain}
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Clean Activity Descriptor + Optional Window Context */}
-                      <div className="flex items-center gap-1.5 text-xs text-text-secondary truncate">
-                        <span className="text-accent-default font-medium">
-                          {formatActivityDescriptor(block)}
-                        </span>
-                        {block.cleanTitle && (
-                          <>
-                            <span className="text-text-tertiary">&bull;</span>
-                            <span className="truncate text-text-tertiary group-hover:text-text-secondary transition-colors">
-                              {block.cleanTitle}
-                            </span>
-                          </>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Actions & Toggle */}
-                    <div className="shrink-0 flex items-center gap-2 pt-1">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setCorrectingBlock(block);
-                        }}
-                        title="Correct Classification"
-                        className="p-1 rounded-md text-text-tertiary hover:text-accent-default hover:bg-accent-subtle transition-colors"
-                      >
-                        <Edit3 className="w-3.5 h-3.5" />
-                      </button>
-                      <div className="text-text-tertiary group-hover:text-text-secondary transition-colors">
-                        {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                      </div>
                     </div>
                   </div>
 
-                  {/* Expandable Evidence & Provenance Drawer */}
-                  <AnimatePresence>
-                    {isExpanded && (
-                      <motion.div
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: "auto" }}
-                        exit={{ opacity: 0, height: 0 }}
-                        transition={{ duration: 0.2 }}
-                        className="overflow-hidden"
-                      >
-                        <div className="mt-2 mb-3 ml-28 sm:ml-36 p-4 rounded-xl bg-bg-secondary border border-border-subtle shadow-xs space-y-4 text-xs">
-                          {/* Metrics Grid */}
-                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pb-3 border-b border-border-subtle">
-                            <div>
-                              <span className="text-[10px] text-text-tertiary uppercase font-mono">
-                                Wall-Clock Duration
-                              </span>
-                              <p className="font-mono font-semibold text-text-primary mt-0.5">
-                                {formatDuration(block.wallClockDurationMs / 1000)}
-                              </p>
-                            </div>
-                            <div>
-                              <span className="text-[10px] text-text-tertiary uppercase font-mono">
-                                Active Duration
-                              </span>
-                              <p className="font-mono font-semibold text-emerald-400 mt-0.5">
-                                {formatDuration(block.observedActiveDurationMs / 1000)}
-                              </p>
-                            </div>
-                            <div>
-                              <span className="text-[10px] text-text-tertiary uppercase font-mono">
-                                Paused / Idle Inside
-                              </span>
-                              <p className="font-mono font-semibold text-amber-400 mt-0.5">
-                                {formatDuration(block.pausedDurationMs / 1000)}
-                              </p>
-                            </div>
-                            <div>
-                              <span className="text-[10px] text-text-tertiary uppercase font-mono">
-                                Raw Observations
-                              </span>
-                              <p className="font-mono text-text-secondary mt-0.5">
-                                {block.rawEventCount} events ({block.sourceChannel})
-                              </p>
-                            </div>
-                          </div>
+                  {/* Column 2: Status Dot Indicator */}
+                  <div className="flex items-center justify-center w-2.5 shrink-0">
+                    <span className={`w-2 h-2 rounded-full ${modCfg.dot}`} />
+                  </div>
 
-                          {/* Primary Modality & Activity Classification Claim Card */}
+                  {/* Column 3: Application & Domain */}
+                  <div className="w-36 shrink-0 hidden sm:flex items-center gap-1.5 truncate">
+                    <ModIcon className={`w-3.5 h-3.5 ${modCfg.color} shrink-0`} />
+                    <span className="text-xs font-medium text-text-primary truncate">
+                      {block.primaryApplication}
+                    </span>
+                  </div>
+
+                  {/* Column 4: Activity Descriptor & Clean Title */}
+                  <div className="flex-1 min-w-0 flex items-center gap-2 text-xs truncate">
+                    <span className="text-accent-default font-medium shrink-0">
+                      {formatActivityDescriptor(block)}
+                    </span>
+                    {block.cleanTitle && (
+                      <>
+                        <span className="text-text-tertiary shrink-0">&bull;</span>
+                        <span className="text-text-tertiary truncate group-hover:text-text-secondary transition-colors">
+                          {block.cleanTitle}
+                        </span>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Column 5: Modality Pill Badge */}
+                  <div className="w-28 text-right hidden md:flex justify-end shrink-0">
+                    <span
+                      className={`text-[10px] font-mono font-medium px-2 py-0.5 rounded border ${modCfg.badge}`}
+                    >
+                      {modCfg.label}
+                    </span>
+                  </div>
+
+                  {/* Column 6: Actions & Chevron */}
+                  <div className="w-10 shrink-0 flex items-center justify-end gap-1">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setCorrectingBlock(block);
+                      }}
+                      title="Correct Classification (Press c)"
+                      className="p-1 rounded text-text-tertiary hover:text-accent-default hover:bg-accent-subtle opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                    </button>
+                    <div className="text-text-tertiary group-hover:text-text-secondary transition-colors">
+                      {isExpanded ? (
+                        <ChevronUp className="w-3.5 h-3.5" />
+                      ) : (
+                        <ChevronDown className="w-3.5 h-3.5" />
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Expandable Linear-Style Detail Drawer */}
+                <AnimatePresence>
+                  {isExpanded && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: "auto" }}
+                      exit={{ opacity: 0, height: 0 }}
+                      transition={{ duration: 0.12 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="bg-bg-inset border-t border-border-subtle p-4 font-mono text-xs space-y-3.5">
+                        {/* 4-Cell Metadata Strip */}
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-3 rounded bg-bg-card border border-border-subtle">
                           <div>
-                            <div className="flex items-center justify-between mb-1.5">
-                              <span className="text-[10px] text-text-tertiary uppercase font-mono flex items-center gap-1.5">
-                                <Sparkles className="w-3 h-3 text-accent-default" />
-                                Semantic Activity &amp; Modality
-                              </span>
-                              <button
-                                onClick={() => setCorrectingBlock(block)}
-                                className="text-[10px] font-medium text-accent-default hover:underline flex items-center gap-1"
-                              >
-                                <Edit3 className="w-2.5 h-2.5" />
-                                Correct Claim
-                              </button>
-                            </div>
-
-                            <div className="bg-bg-card p-3 rounded-lg border border-border-subtle grid grid-cols-2 sm:grid-cols-4 gap-2 font-mono text-[11px]">
-                              <div>
-                                <span className="text-text-tertiary">Activity Type:</span>{" "}
-                                <span className="text-accent-default font-semibold capitalize">
-                                  {block.activityType ? block.activityType.replace(/_/g, " ") : "unknown"}
-                                </span>
-                              </div>
-                              <div>
-                                <span className="text-text-tertiary">Modality:</span>{" "}
-                                <span className="text-text-primary font-semibold">{primaryMod}</span>
-                              </div>
-                              <div>
-                                <span className="text-text-tertiary">Topic/Project:</span>{" "}
-                                <span className="text-text-secondary">
-                                  {block.modality.context?.value ?? "None"}
-                                </span>
-                              </div>
-                              <div>
-                                <span className="text-text-tertiary">Authority:</span>{" "}
-                                <span className="text-text-secondary inline-flex items-center gap-1">
-                                  {block.modality.primary?.authority ?? "SYSTEM"}
-                                  {block.modality.primary?.authority === "USER" && (
-                                    <span className="text-[9px] px-1 py-0.2 rounded bg-purple-500/15 text-purple-300 border border-purple-500/30">
-                                      OVERRIDE
-                                    </span>
-                                  )}
-                                </span>
-                              </div>
-                            </div>
+                            <span className="text-[10px] text-text-tertiary uppercase">Wall-Clock</span>
+                            <p className="font-semibold text-text-primary mt-0.5">
+                              {formatDuration(block.wallClockDurationMs / 1000)}
+                            </p>
                           </div>
-
-                          {/* Intent Association Section */}
-                          {block.intentLink && (
-                            <div>
-                              <span className="text-[10px] text-text-tertiary uppercase font-mono block mb-1.5">
-                                Intention Association
-                              </span>
-                              <div className="bg-bg-card p-3 rounded-lg border border-border-subtle flex flex-wrap items-center justify-between gap-2 font-mono text-[11px]">
-                                <div className="flex items-center gap-2">
-                                  <span className="text-text-tertiary">Scope:</span>
-                                  <span className="text-text-primary font-semibold">{block.intentLink.targetScope}</span>
-                                  <span className="text-text-tertiary">&bull;</span>
-                                  <span className="text-text-tertiary">Relationship:</span>
-                                  <span
-                                    className={`font-semibold ${
-                                      block.intentLink.intentionRelationship === "TASK_RELEVANT" ||
-                                      block.intentLink.intentionRelationship === "GOAL_RELEVANT"
-                                        ? "text-emerald-400"
-                                        : block.intentLink.intentionRelationship === "PROJECT_RELEVANT"
-                                          ? "text-blue-400"
-                                          : block.intentLink.intentionRelationship === "DIVERGENT"
-                                            ? "text-amber-400"
-                                            : "text-text-tertiary"
-                                    }`}
-                                  >
-                                    {block.intentLink.intentionRelationship}
-                                  </span>
-                                </div>
-                                {block.intentLink.relevance && (
-                                  <span className="text-[10px] text-text-tertiary">
-                                    relevance: {block.intentLink.relevance}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Attention Evidence Section */}
-                          {attentionState && (
-                            <div>
-                              <span className="text-[10px] text-text-tertiary uppercase font-mono block mb-1.5">
-                                Attention Evidence
-                              </span>
-                              <div className="bg-bg-card p-3 rounded-lg border border-border-subtle flex items-center justify-between font-mono text-[11px]">
-                                <div className="flex items-center gap-2">
-                                  <span
-                                    className={`text-[9px] font-semibold px-2 py-0.5 rounded border ${
-                                      attentionState === "SUPPORTED"
-                                        ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
-                                        : attentionState === "CONTRADICTORY"
-                                          ? "bg-rose-500/15 text-rose-300 border-rose-500/30"
-                                          : "bg-zinc-500/15 text-zinc-300 border-zinc-500/30"
-                                    }`}
-                                  >
-                                    {attentionState}
-                                  </span>
-                                  <span className="text-text-secondary">
-                                    {attentionState === "SUPPORTED"
-                                      ? "Corroborated by interaction continuity and foreground track focus"
-                                      : attentionState === "CONTRADICTORY"
-                                        ? "Conflicting interaction patterns or unexpected AFK overlap"
-                                        : "Sparse interaction signals; reading or passive absorption expected"}
-                                  </span>
-                                </div>
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Evidence Citations */}
-                          {block.modality.primary?.evidence && block.modality.primary.evidence.length > 0 && (
-                            <div>
-                              <span className="text-[10px] text-text-tertiary uppercase font-mono block mb-1.5">
-                                Signal Evidence Citations
-                              </span>
-                              <div className="space-y-1">
-                                {block.modality.primary.evidence.map((ev, evIdx) => (
-                                  <div
-                                    key={evIdx}
-                                    className="bg-bg-card px-2.5 py-1.5 rounded-lg border border-border-subtle flex items-center justify-between font-mono text-[11px]"
-                                  >
-                                    <div className="flex items-center gap-2">
-                                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-bg-secondary text-text-secondary border border-border-subtle">
-                                        {ev.evidenceType}
-                                      </span>
-                                      <span className="text-text-primary truncate max-w-md">
-                                        {ev.evidenceReference}
-                                      </span>
-                                    </div>
-                                    <span className="text-text-tertiary text-[10px]">
-                                      wt: {ev.weight}
-                                    </span>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Fingerprint and Provenance Tracking */}
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2 border-t border-border-subtle text-[10px] font-mono text-text-tertiary">
-                            <div className="truncate">
-                              <span>Observation Fingerprint:</span>{" "}
-                              <span className="text-text-secondary">{block.observationSetFingerprint}</span>
-                            </div>
-                            <div className="sm:text-right">
-                              <span>Track:</span>{" "}
-                              <span className="text-text-secondary">{block.track}</span>
-                            </div>
+                          <div>
+                            <span className="text-[10px] text-text-tertiary uppercase">Active Engagement</span>
+                            <p className="font-semibold text-emerald-400 mt-0.5">
+                              {formatDuration(block.observedActiveDurationMs / 1000)}
+                            </p>
+                          </div>
+                          <div>
+                            <span className="text-[10px] text-text-tertiary uppercase">Idle / Paused</span>
+                            <p className="font-semibold text-amber-400 mt-0.5">
+                              {formatDuration(block.pausedDurationMs / 1000)}
+                            </p>
+                          </div>
+                          <div>
+                            <span className="text-[10px] text-text-tertiary uppercase">Raw Observations</span>
+                            <p className="font-semibold text-text-secondary mt-0.5">
+                              {block.rawEventCount} events ({block.sourceChannel})
+                            </p>
                           </div>
                         </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
-              );
-            })}
-          </motion.div>
+
+                        {/* Semantic Claims & Inferences Strip */}
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                          {/* Classification */}
+                          <div className="p-3 rounded bg-bg-card border border-border-subtle space-y-1">
+                            <span className="text-[10px] text-text-tertiary uppercase">Classification</span>
+                            <p className="font-semibold text-text-primary capitalize">
+                              {block.activityType ? block.activityType.replace(/_/g, " ") : "Unknown"}
+                            </p>
+                            <span className="text-[11px] text-text-tertiary">
+                              Modality: <span className="text-text-secondary">{primaryMod}</span>
+                            </span>
+                          </div>
+
+                          {/* Intent Association */}
+                          <div className="p-3 rounded bg-bg-card border border-border-subtle space-y-1">
+                            <span className="text-[10px] text-text-tertiary uppercase">Intent Alignment</span>
+                            <p className="font-semibold text-text-primary">
+                              {block.intentLink?.intentionRelationship ?? "UNLINKED"}
+                            </p>
+                            <span className="text-[11px] text-text-tertiary">
+                              Scope: <span className="text-text-secondary">{block.intentLink?.targetScope ?? "None"}</span>
+                            </span>
+                          </div>
+
+                          {/* Attention Evidence */}
+                          <div className="p-3 rounded bg-bg-card border border-border-subtle space-y-1">
+                            <span className="text-[10px] text-text-tertiary uppercase">Attention Evidence</span>
+                            <p className="font-semibold text-text-primary">
+                              {block.attention?.focusEvidenceState ?? "UNKNOWN"}
+                            </p>
+                            <span className="text-[11px] text-text-tertiary">
+                              Track: <span className="text-text-secondary">{block.track}</span>
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Technical Provenance Footer */}
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-border-subtle text-[11px] text-text-tertiary">
+                          <span className="truncate max-w-lg">
+                            Fingerprint: <span className="text-text-secondary">{block.observationSetFingerprint}</span>
+                          </span>
+                          <button
+                            onClick={() => setCorrectingBlock(block)}
+                            className="inline-flex items-center gap-1 text-accent-default hover:underline"
+                          >
+                            <Edit3 className="w-3 h-3" />
+                            <span>Correct Classification</span>
+                          </button>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            );
+          })}
+        </motion.div>
       )}
     </motion.div>
   );
