@@ -12,41 +12,34 @@ import {
 } from "@repo/analytics";
 import { getDb } from "../../lib/prisma";
 import { materializeBlocksForUserDay } from "./blocks";
+import type { TimelineBlock } from "@repo/types";
 
-export interface TimelineBlockPayload {
-  id: string;
-  startTime: string;
-  endTime: string;
-  wallClockDurationMs: number;
-  observedActiveDurationMs: number;
-  pausedDurationMs: number;
-  track: string;
-  primaryApplication: string;
-  cleanTitle: string;
-  domain: string | null;
-  sanitizedUrl: string | null;
-  sourceChannel: string;
-  rawEventCount: number;
-  observationSetFingerprint: string;
-  isAfkBlock: boolean;
-  modality: {
-    primary: { value: string; confidence: number | null; provenance: string; authority: string } | null;
-    secondary: Array<{ value: string; provenance: string }>;
-    context: { value: string; provenance: string } | null;
-  };
-  attention: { focusEvidenceState: string } | null;
-  coverageGaps: Array<{ id: string; startTime: string; endTime: string; coverageState: string; reconciliationState: string }>;
-  pendingInterpretation: boolean;
-}
+export type TimelineBlockPayload = TimelineBlock;
 
 function toTimelineBlockPayload(
   block: { id: string; [key: string]: unknown },
-  claims: Array<{ claimType: string; value: string; confidence: number | null; provenance: string }>,
-  attention: { focusEvidenceState: string } | null
+  claims: Array<{
+    claimType: string;
+    value: string;
+    confidence: number | null;
+    provenance: string;
+    authority?: string;
+    evidence?: Array<{ evidenceType: string; evidenceReference: string; weight: number }>;
+  }>,
+  attention: { focusEvidenceState: string } | null,
+  intentLink: {
+    targetScope: string;
+    taskId: string | null;
+    goalId: string | null;
+    projectTag: string | null;
+    relevance: string;
+    intentionRelationship: string;
+  } | null = null
 ): TimelineBlockPayload {
   const primary = claims.find((c) => c.claimType === "MODALITY_PRIMARY") ?? null;
   const secondary = claims.filter((c) => c.claimType === "MODALITY_SECONDARY");
   const context = claims.find((c) => c.claimType === "TOPIC_CONTEXT") ?? null;
+  const behavior = claims.find((c) => c.claimType === "INFERRED_BEHAVIOR") ?? null;
   return {
     id: block.id,
     startTime: (block.startTime as Date).toISOString(),
@@ -63,13 +56,42 @@ function toTimelineBlockPayload(
     rawEventCount: block.rawEventCount as number,
     observationSetFingerprint: block.observationSetFingerprint as string,
     isAfkBlock: (block.track as string) === "FOREGROUND" && (block.primaryApplication as string) === "afk",
+    activityType: behavior?.value ?? null,
     modality: {
       primary: primary
-        ? { value: primary.value, confidence: primary.confidence, provenance: primary.provenance, authority: "SYSTEM" }
+        ? {
+            value: primary.value,
+            confidence: primary.confidence,
+            provenance: primary.provenance,
+            authority: primary.authority ?? "SYSTEM",
+            evidence: primary.evidence,
+          }
         : null,
-      secondary: secondary.map((c) => ({ value: c.value, provenance: c.provenance })),
-      context: context ? { value: context.value, provenance: context.provenance } : null,
+      secondary: secondary.map((c) => ({
+        value: c.value,
+        provenance: c.provenance,
+        authority: c.authority,
+        evidence: c.evidence,
+      })),
+      context: context
+        ? {
+            value: context.value,
+            provenance: context.provenance,
+            authority: context.authority,
+            evidence: context.evidence,
+          }
+        : null,
     },
+    intentLink: intentLink
+      ? {
+          targetScope: intentLink.targetScope,
+          taskId: intentLink.taskId,
+          goalId: intentLink.goalId,
+          projectTag: intentLink.projectTag,
+          relevance: intentLink.relevance,
+          intentionRelationship: intentLink.intentionRelationship,
+        }
+      : null,
     attention,
     coverageGaps: [],
     pendingInterpretation: !primary,
@@ -246,26 +268,113 @@ export async function getTimelineForDay(
       where: { userId, startTime: { gte: startOfDay, lte: endOfDay }, track: "FOREGROUND" },
       orderBy: { startTime: "asc" },
       include: {
-        claims: { where: { isCurrent: true }, select: { claimType: true, value: true, confidence: true, provenance: true } },
+        claims: {
+          where: { isCurrent: true },
+          select: {
+            claimType: true,
+            value: true,
+            confidence: true,
+            provenance: true,
+            authority: true,
+            evidence: {
+              select: {
+                evidenceType: true,
+                evidenceReference: true,
+                weight: true,
+              },
+            },
+          },
+        },
         attentionInferences: { select: { focusEvidenceState: true } },
+        contextLinks: {
+          select: {
+            targetScope: true,
+            taskId: true,
+            goalId: true,
+            projectTag: true,
+            relevance: true,
+            intentionRelationship: true,
+          },
+        },
       },
     });
     blocks = blockRows.map((row) =>
       toTimelineBlockPayload(
         row as unknown as { id: string; [key: string]: unknown },
-        row.claims as Array<{ claimType: string; value: string; confidence: number | null; provenance: string }>,
-        row.attentionInferences[0] ? { focusEvidenceState: row.attentionInferences[0]!.focusEvidenceState } : null
+        row.claims as any,
+        row.attentionInferences[0] ? { focusEvidenceState: row.attentionInferences[0]!.focusEvidenceState } : null,
+        row.contextLinks[0] ?? null
       )
     );
   } catch (materializeError) {
     console.error("[Timeline] Block materialization failed, returning legacy timeline only:", materializeError);
   }
 
+  // Compute canonical semantic breakdowns from blocks
+  let developmentMs = 0;
+  let readingResearchMs = 0;
+  let writingDocumentationMs = 0;
+  let communicationModalityMs = 0;
+  let mediaConsumptionMs = 0;
+  let gamingMs = 0;
+  let idleAwayMs = 0;
+  let administrationMs = 0;
+  let unknownMs = 0;
+
+  for (const b of blocks) {
+    const mod = b.modality.primary?.value ?? "unknown";
+    const dur = b.wallClockDurationMs;
+    switch (mod) {
+      case "development":
+        developmentMs += dur;
+        break;
+      case "reading_research":
+        readingResearchMs += dur;
+        break;
+      case "writing_documentation":
+        writingDocumentationMs += dur;
+        break;
+      case "communication":
+        communicationModalityMs += dur;
+        break;
+      case "media_consumption":
+        mediaConsumptionMs += dur;
+        break;
+      case "gaming":
+        gamingMs += dur;
+        break;
+      case "idle_away":
+        idleAwayMs += dur;
+        break;
+      case "administration":
+      case "system_maintenance":
+        administrationMs += dur;
+        break;
+      default:
+        unknownMs += dur;
+        break;
+    }
+  }
+
+  const enrichedSummary: TimelineSummary = {
+    ...summary,
+    developmentMs,
+    readingResearchMs,
+    writingDocumentationMs,
+    communicationModalityMs,
+    mediaConsumptionMs,
+    gamingMs,
+    idleAwayMs,
+    administrationMs,
+    unknownMs,
+    blocksCount: blocks.length,
+  };
+
   return {
     date: effectiveDateStr,
     timezone,
     totalDurationMs: summary.totalTrackedMs,
-    summary,
+    summary: enrichedSummary,
     currentActivity,
     segments,
     blocks,

@@ -70,6 +70,12 @@ function rowToInput(row: NormalizedRow, userId: string, deviceId: string | null)
   };
 }
 
+export interface IntentContext {
+  tasks: Array<{ id: string; title: string; description: string | null; status: string }>;
+  dailyGoals: Array<{ id: string; title: string }>;
+  workSessions: Array<{ id: string; taskId: string | null; startedAt: Date; endedAt: Date | null }>;
+}
+
 export async function materializeBlocksForUserDay(
   prisma: PrismaClient,
   userId: string,
@@ -87,12 +93,34 @@ export async function materializeBlocksForUserDay(
     gapsCreated: 0,
   };
 
-  const [userPref, rules, overrides] = await Promise.all([
+  const [userPref, rules, overrides, tasks, dailyGoals, workSessions] = await Promise.all([
     prisma.userPreference.findUnique({ where: { userId }, select: { quietHoursEnabled: true, quietHoursStart: true, quietHoursEnd: true } }),
     prisma.userActivityRule.findMany({ where: { userId, isEnabled: true }, orderBy: [{ priority: "asc" }, { createdAt: "asc" }] }),
     prisma.userActivityOverride.findMany({ where: { userId }, orderBy: { createdAt: "asc" } }),
+    prisma.task.findMany({
+      where: { userId, createdAt: { lte: to } },
+      select: { id: true, title: true, description: true, status: true },
+    }),
+    prisma.dailyGoal.findMany({
+      where: { userId, createdAt: { lte: to } },
+      select: { id: true, title: true },
+    }),
+    prisma.workSession.findMany({
+      where: {
+        userId,
+        startedAt: { lte: to },
+        OR: [{ endedAt: null }, { endedAt: { gte: from } }],
+      },
+      select: { id: true, taskId: true, startedAt: true, endedAt: true },
+    }),
   ]);
   void userPref;
+
+  const intentCtx: IntentContext = {
+    tasks: tasks.map((t) => ({ id: t.id, title: t.title, description: t.description, status: t.status })),
+    dailyGoals: dailyGoals.map((g) => ({ id: g.id, title: g.title })),
+    workSessions: workSessions.map((w) => ({ id: w.id, taskId: w.taskId, startedAt: w.startedAt, endedAt: w.endedAt })),
+  };
 
   const rows = (await prisma.normalizedActivity.findMany({
     where: { userId, timestamp: { gte: from, lt: to }, duration: { gt: 0 } },
@@ -109,7 +137,7 @@ export async function materializeBlocksForUserDay(
   const blocks = materializeTemporalBlocks(inputs, options);
 
   for (const block of blocks) {
-    await persistBlock(prisma, userId, block, rules, overrides, result);
+    await persistBlock(prisma, userId, block, rules, overrides, intentCtx, result);
   }
 
   await detectCoverageGaps(prisma, userId, inputs, options.minGapSeconds ?? 50 * 60);
@@ -159,12 +187,140 @@ function evidenceRows(
   return evidence;
 }
 
+function evaluateIntentAlignment(
+  startTime: Date,
+  endTime: Date,
+  block: ReturnType<typeof materializeTemporalBlocks>[number],
+  semantics: BlockSemantics,
+  intentCtx: IntentContext
+): {
+  targetScope: "TASK" | "GOAL" | "UNLINKED";
+  taskId: string | null;
+  goalId: string | null;
+  relevance: "DIRECT" | "SUPPORTIVE" | "UNRELATED" | "UNKNOWN";
+  intentionRelationship: "ALIGNED" | "DIVERGENT" | "UNLINKED" | "UNKNOWN";
+} {
+  const startMs = startTime.getTime();
+  const endMs = endTime.getTime();
+
+  // 1. Overlapping active work session
+  const activeSession = intentCtx.workSessions.find((s) => {
+    const sStart = s.startedAt.getTime();
+    const sEnd = s.endedAt ? s.endedAt.getTime() : Infinity;
+    return sStart < endMs && sEnd > startMs;
+  });
+
+  if (activeSession && activeSession.taskId) {
+    const task = intentCtx.tasks.find((t) => t.id === activeSession.taskId);
+    if (task) {
+      if (
+        semantics.primaryModality === "gaming" ||
+        (semantics.primaryModality === "media_consumption" && semantics.activityType === "media")
+      ) {
+        return {
+          targetScope: "TASK",
+          taskId: task.id,
+          goalId: null,
+          relevance: "UNRELATED",
+          intentionRelationship: "DIVERGENT",
+        };
+      }
+      return {
+        targetScope: "TASK",
+        taskId: task.id,
+        goalId: null,
+        relevance: "DIRECT",
+        intentionRelationship: "ALIGNED",
+      };
+    }
+  }
+
+  // 2. Keyword/description match with active task
+  const contextStr = `${semantics.context ?? ""} ${block.cleanTitle} ${block.primaryApplication}`.toLowerCase();
+  for (const task of intentCtx.tasks) {
+    if (task.status === "done" || task.status === "archived") continue;
+    const taskTitle = task.title.toLowerCase();
+    const taskDesc = task.description?.toLowerCase();
+    const matchesTitle = taskTitle.length >= 4 && contextStr.includes(taskTitle);
+    const matchesDesc = Boolean(taskDesc && taskDesc.length >= 4 && contextStr.includes(taskDesc));
+    if (matchesTitle || matchesDesc) {
+      return {
+        targetScope: "TASK",
+        taskId: task.id,
+        goalId: null,
+        relevance: "DIRECT",
+        intentionRelationship: "ALIGNED",
+      };
+    }
+  }
+
+  // 3. Keyword match with daily goal
+  for (const goal of intentCtx.dailyGoals) {
+    const goalTitle = goal.title.toLowerCase();
+    if (goalTitle.length >= 4 && contextStr.includes(goalTitle)) {
+      return {
+        targetScope: "GOAL",
+        taskId: null,
+        goalId: goal.id,
+        relevance: "SUPPORTIVE",
+        intentionRelationship: "ALIGNED",
+      };
+    }
+  }
+
+  return {
+    targetScope: "UNLINKED",
+    taskId: null,
+    goalId: null,
+    relevance: "UNKNOWN",
+    intentionRelationship: "UNLINKED",
+  };
+}
+
+function evaluateAttentionState(
+  block: ReturnType<typeof materializeTemporalBlocks>[number],
+  semantics: BlockSemantics
+): "SUPPORTED" | "INSUFFICIENT" | "CONTRADICTORY" | "UNKNOWN" {
+  if (block.isAfkBlock || semantics.primaryModality === "idle_away") {
+    return "UNKNOWN";
+  }
+
+  // Reading / documentation allows sparse interaction
+  if (semantics.primaryModality === "reading_research" || semantics.primaryModality === "writing_documentation") {
+    return block.observedActiveDurationMs >= 30_000 ? "SUPPORTED" : "INSUFFICIENT";
+  }
+
+  // Development requires active engagement
+  if (semantics.primaryModality === "development") {
+    if (block.observedActiveDurationMs >= 60_000) {
+      return "SUPPORTED";
+    }
+    if (block.pausedDurationMs > block.observedActiveDurationMs * 3) {
+      return "INSUFFICIENT";
+    }
+    return block.observedActiveDurationMs >= 30_000 ? "SUPPORTED" : "INSUFFICIENT";
+  }
+
+  // Gaming / media playback
+  if (semantics.primaryModality === "gaming" || semantics.primaryModality === "media_consumption") {
+    return block.observedActiveDurationMs >= 60_000 ? "SUPPORTED" : "INSUFFICIENT";
+  }
+
+  // Transient window switches < 15 seconds
+  if (block.wallClockDurationMs < 15_000) {
+    return "INSUFFICIENT";
+  }
+
+  return block.observedActiveDurationMs >= 60_000 ? "SUPPORTED" : "INSUFFICIENT";
+}
+
 async function persistBlock(
   prisma: PrismaClient,
   userId: string,
   block: ReturnType<typeof materializeTemporalBlocks>[number],
   rules: Array<Record<string, unknown> & { id: string; priority: number; isEnabled: boolean; applicationPattern: string | null; domainPattern: string | null; titlePattern: string | null; urlPattern: string | null; assignedModality: string | null; assignedContext: string | null; defaultRelevance: string | null }>,
   overrides: Array<{ id: string; targetTimeWindowStart: Date; targetTimeWindowEnd: Date; targetApplication: string; targetClaimFamily: string; targetClaimType: string; overriddenValue: string }>,
+  intentCtx: IntentContext,
   result: MaterializerResult
 ): Promise<void> {
   const startTime = new Date(block.startTime);
@@ -216,10 +372,8 @@ async function persistBlock(
     }
   );
 
-  const existing = await prisma.temporalActivityBlock.findFirst({
-    where: { userId, observationSetFingerprint: block.observationSetFingerprint },
-    select: { id: true },
-  });
+  const alignment = evaluateIntentAlignment(startTime, endTime, block, semantics, intentCtx);
+  const focusState = evaluateAttentionState(block, semantics);
 
   const blockData = {
     userId,
@@ -241,106 +395,162 @@ async function persistBlock(
     sourceComposition: block.sourceComposition as Prisma.InputJsonValue,
   };
 
-  const blockId = existing?.id ?? (await prisma.temporalActivityBlock.create({ data: blockData, select: { id: true } })).id;
-  if (existing) {
-    await prisma.temporalActivityBlock.update({ where: { id: blockId }, data: { startTime, endTime, updatedAt: new Date() } });
-    result.blocksUpdated++;
-    await prisma.blockObservation.deleteMany({ where: { blockId } });
-    await prisma.semanticClaim.deleteMany({ where: { blockId } });
-    await prisma.attentionInference.deleteMany({ where: { blockId } });
-  } else {
-    result.blocksCreated++;
-  }
-
-  for (const obs of block.observations) {
-    const validity = validateContributionInterval(
-      {
-        contributionStart: new Date(obs.contributionStart),
-        contributionEnd: new Date(obs.contributionEnd),
-        contributionDurationMs: obs.contributionDurationMs,
-      },
-      {
-        temporalBlock: { startTime, endTime },
-      }
-    );
-    if (!validity.isValid) continue;
-    await prisma.blockObservation.create({
-      data: {
-        blockId,
-        activityId: obs.activityId,
-        contributionStart: new Date(obs.contributionStart),
-        contributionEnd: new Date(obs.contributionEnd),
-        contributionDurationMs: obs.contributionDurationMs,
-      },
+  await prisma.$transaction(async (tx) => {
+    const existing = await tx.temporalActivityBlock.findFirst({
+      where: { userId, observationSetFingerprint: block.observationSetFingerprint },
+      select: { id: true },
     });
-    result.observationsCreated++;
-  }
 
-  const claim = await prisma.semanticClaim.create({
-    data: {
-      blockId,
-      claimType: "MODALITY_PRIMARY",
-      value: toSafeModality(semantics.primaryModality),
-      confidence: semantics.primaryConfidence,
-      provenance: semantics.primaryProvenance,
-      authority: semantics.primaryProvenance === "USER_OVERRIDE" ? "USER" : "SYSTEM",
-      engineVersion: ENGINE_VERSION,
-      evaluatedAt: new Date(),
-      inputFingerprint: block.observationSetFingerprint,
-      isCurrent: true,
-    },
-    select: { id: true },
-  });
-  result.claimsCreated++;
+    let blockId: string;
+    if (existing) {
+      blockId = existing.id;
+      await tx.temporalActivityBlock.update({
+        where: { id: blockId },
+        data: {
+          startTime,
+          endTime,
+          wallClockDurationMs: block.wallClockDurationMs,
+          observedActiveDurationMs: block.observedActiveDurationMs,
+          pausedDurationMs: block.pausedDurationMs,
+          track: block.track,
+          primaryApplication: block.primaryApplication,
+          cleanTitle: block.cleanTitle.slice(0, 512),
+          domain: block.domain,
+          sanitizedUrl: block.sanitizedUrl,
+          sourceChannel: block.sourceChannel,
+          rawEventCount: block.rawEventCount,
+          interactionDensity: block.interactionDensity as Prisma.InputJsonValue,
+          sourceComposition: block.sourceComposition as Prisma.InputJsonValue,
+          updatedAt: new Date(),
+        },
+      });
+      result.blocksUpdated++;
 
-  if (semantics.context) {
-    const link = await prisma.activityContextLink.create({
+      await tx.activityContextLink.deleteMany({ where: { blockId } });
+      await tx.claimEvidence.deleteMany({ where: { claim: { blockId } } });
+      await tx.semanticClaim.deleteMany({ where: { blockId } });
+      await tx.blockObservation.deleteMany({ where: { blockId } });
+      await tx.attentionInference.deleteMany({ where: { blockId } });
+    } else {
+      const created = await tx.temporalActivityBlock.create({ data: blockData, select: { id: true } });
+      blockId = created.id;
+      result.blocksCreated++;
+    }
+
+    for (const obs of block.observations) {
+      const validity = validateContributionInterval(
+        {
+          contributionStart: new Date(obs.contributionStart),
+          contributionEnd: new Date(obs.contributionEnd),
+          contributionDurationMs: obs.contributionDurationMs,
+        },
+        {
+          temporalBlock: { startTime, endTime },
+        }
+      );
+      if (!validity.isValid) continue;
+      await tx.blockObservation.create({
+        data: {
+          blockId,
+          activityId: obs.activityId,
+          contributionStart: new Date(obs.contributionStart),
+          contributionEnd: new Date(obs.contributionEnd),
+          contributionDurationMs: obs.contributionDurationMs,
+        },
+      });
+      result.observationsCreated++;
+    }
+
+    // Primary modality claim
+    const claim = await tx.semanticClaim.create({
       data: {
         blockId,
-        userId,
-        targetScope: "UNLINKED",
-        relevance: (semantics.relevance ?? "UNKNOWN") as never,
-        intentionRelationship: "UNKNOWN",
-        confidence: null,
-        provenance: (semantics.contextProvenance ?? "INFERRED") as never,
-        authority: semantics.contextProvenance === "USER_RULE" ? "USER" : "SYSTEM",
+        claimType: "MODALITY_PRIMARY",
+        value: toSafeModality(semantics.primaryModality),
+        confidence: semantics.primaryConfidence,
+        provenance: semantics.primaryProvenance,
+        authority: semantics.primaryProvenance === "USER_OVERRIDE" ? "USER" : "SYSTEM",
+        engineVersion: ENGINE_VERSION,
+        evaluatedAt: new Date(),
+        inputFingerprint: block.observationSetFingerprint,
+        isCurrent: true,
       },
       select: { id: true },
     });
-    await prisma.semanticClaim.create({
+    result.claimsCreated++;
+
+    // Inferred behavior (Activity Type) claim
+    if (semantics.activityType) {
+      await tx.semanticClaim.create({
+        data: {
+          blockId,
+          claimType: "INFERRED_BEHAVIOR",
+          value: semantics.activityType,
+          confidence: semantics.primaryConfidence,
+          provenance: semantics.primaryProvenance,
+          authority: semantics.primaryProvenance === "USER_OVERRIDE" ? "USER" : "SYSTEM",
+          engineVersion: ENGINE_VERSION,
+          evaluatedAt: new Date(),
+          isCurrent: true,
+        },
+      });
+      result.claimsCreated++;
+    }
+
+    // Topic context claim
+    if (semantics.context) {
+      await tx.semanticClaim.create({
+        data: {
+          blockId,
+          claimType: "TOPIC_CONTEXT",
+          value: semantics.context,
+          confidence: null,
+          provenance: (semantics.contextProvenance ?? "CONTEXT_HEURISTIC") as never,
+          authority: semantics.contextProvenance === "USER_RULE" || semantics.contextProvenance === "USER_OVERRIDE" ? "USER" : "SYSTEM",
+          engineVersion: ENGINE_VERSION,
+          evaluatedAt: new Date(),
+          isCurrent: true,
+        },
+      });
+      result.claimsCreated++;
+    }
+
+    // Activity context link (Intent association)
+    await tx.activityContextLink.create({
       data: {
         blockId,
-        claimType: "TOPIC_CONTEXT",
-        value: semantics.context,
+        userId,
+        targetScope: alignment.targetScope as never,
+        taskId: alignment.taskId,
+        goalId: alignment.goalId,
+        relevance: alignment.relevance as never,
+        intentionRelationship: alignment.intentionRelationship as never,
         confidence: null,
-        provenance: (semantics.contextProvenance ?? "CONTEXT_HEURISTIC") as never,
-        authority: semantics.contextProvenance === "USER_RULE" ? "USER" : "SYSTEM",
-        engineVersion: ENGINE_VERSION,
-        evaluatedAt: new Date(),
-        isCurrent: true,
+        provenance: alignment.intentionRelationship === "ALIGNED" || alignment.intentionRelationship === "DIVERGENT" ? "ACTIVE_SESSION_AFFINITY" : "INFERRED",
+        authority: "SYSTEM",
       },
     });
-    result.claimsCreated++;
-    void link;
-  }
 
-  const evidence = evidenceRows({ claimId: claim.id }, semantics);
-  for (const ev of evidence) {
-    await prisma.claimEvidence.create({ data: { claimId: claim.id, ...ev } });
-    result.evidenceCreated++;
-  }
+    // Evidence citations
+    const evidence = evidenceRows({ claimId: claim.id }, semantics);
+    for (const ev of evidence) {
+      await tx.claimEvidence.create({ data: { claimId: claim.id, ...ev } });
+      result.evidenceCreated++;
+    }
 
-  const focusState = block.isAfkBlock ? "UNKNOWN" : block.observedActiveDurationMs >= 10 * 60_000 ? "SUPPORTED" : "INSUFFICIENT";
-  await prisma.attentionInference.create({
-    data: {
-      blockId,
-      focusEvidenceState: focusState,
-      confidence: null,
-      provenance: "INFERRED",
-      authority: "SYSTEM",
-    },
+    // Attention inference
+    await tx.attentionInference.create({
+      data: {
+        blockId,
+        focusEvidenceState: focusState,
+        confidence: null,
+        provenance: "INFERRED",
+        authority: "SYSTEM",
+      },
+    });
+    result.attentionCreated++;
   });
-  result.attentionCreated++;
+
   void validateClaimEvidenceTarget;
   void validateTenantBoundary;
 }

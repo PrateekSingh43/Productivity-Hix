@@ -190,24 +190,46 @@ export function buildFingerprint(
   });
 }
 
+export function unionIntervals(intervals: Array<{ start: number; end: number }>): Array<{ start: number; end: number }> {
+  const valid = intervals.filter((iv) => iv.end > iv.start);
+  if (valid.length === 0) return [];
+  const sorted = [...valid].sort((a, b) => a.start - b.start || a.end - b.end);
+  const merged: Array<{ start: number; end: number }> = [{ start: sorted[0]!.start, end: sorted[0]!.end }];
+  for (let i = 1; i < sorted.length; i++) {
+    const current = sorted[i]!;
+    const last = merged[merged.length - 1]!;
+    if (current.start <= last.end) {
+      last.end = Math.max(last.end, current.end);
+    } else {
+      merged.push({ start: current.start, end: current.end });
+    }
+  }
+  return merged;
+}
+
 function buildBlock(events: WorkingEvent[], start: number, end: number): MaterializedBlock {
   const isAfkBlock = events.every((ev) => ev.isAfk);
   const contributions: BlockContribution[] = events.map((ev) => ({
     activityId: ev.id,
     contributionStart: Math.max(ev.start, start),
     contributionEnd: Math.min(ev.end, end),
-    contributionDurationMs: Math.min(ev.end, end) - Math.max(ev.start, start),
+    contributionDurationMs: Math.max(0, Math.min(ev.end, end) - Math.max(ev.start, start)),
   }));
-  const observedActive = contributions.reduce((s, c) => s + c.contributionDurationMs, 0);
+  const activeIntervals = unionIntervals(
+    contributions.map((c) => ({ start: c.contributionStart, end: c.contributionEnd }))
+  );
+  const observedActive = activeIntervals.reduce((s, iv) => s + (iv.end - iv.start), 0);
+  const wallClock = end - start;
+  const paused = Math.max(0, wallClock - observedActive);
   const primary = events[events.length - 1]!;
   const desktopCount = events.filter((ev) => ev.raw.source === "desktop").length;
   const browserCount = events.filter((ev) => ev.raw.source === "browser").length;
   return {
     startTime: start,
     endTime: end,
-    wallClockDurationMs: end - start,
+    wallClockDurationMs: wallClock,
     observedActiveDurationMs: observedActive,
-    pausedDurationMs: end - start - observedActive,
+    pausedDurationMs: paused,
     track: "FOREGROUND",
     primaryApplication: primary.raw.application,
     cleanTitle: primary.raw.title,
@@ -222,3 +244,4 @@ function buildBlock(events: WorkingEvent[], start: number, end: number): Materia
     observationSetFingerprint: buildFingerprint(primary.raw.userId, primary.raw.deviceId, contributions),
   };
 }
+

@@ -46,6 +46,17 @@ export interface TimelineSummary {
   communicationMs: number;
   generalMs: number;
   segmentsCount: number;
+  // Canonical semantic modality rollups
+  developmentMs?: number;
+  readingResearchMs?: number;
+  writingDocumentationMs?: number;
+  communicationModalityMs?: number;
+  mediaConsumptionMs?: number;
+  gamingMs?: number;
+  idleAwayMs?: number;
+  administrationMs?: number;
+  unknownMs?: number;
+  blocksCount?: number;
 }
 
 export interface CurrentActivityState {
@@ -66,4 +77,65 @@ export interface TimelineResponse {
   summary: TimelineSummary;
   currentActivity: CurrentActivityState | null;
   segments: TimelineSegment[];
+  /** Phase 3B semantic blocks (observation-backed TemporalActivityBlock projections). */
+  blocks?: TimelineBlock[];
 }
+
+export interface TimelineClaimEvidence {
+  evidenceType: string;
+  evidenceReference: string;
+  weight: number;
+}
+
+export interface TimelineBlockModalityClaim {
+  value: string;
+  confidence: number | null;
+  provenance: string;
+  authority: string;
+  evidence?: TimelineClaimEvidence[];
+}
+
+export interface TimelineBlockContextClaim {
+  value: string;
+  provenance: string;
+  authority?: string;
+  evidence?: TimelineClaimEvidence[];
+}
+
+export interface TimelineBlockIntentLink {
+  targetScope: string;
+  taskId: string | null;
+  goalId: string | null;
+  projectTag: string | null;
+  relevance: string;
+  intentionRelationship: string;
+}
+
+export interface TimelineBlock {
+  id: string;
+  startTime: string;
+  endTime: string;
+  wallClockDurationMs: number;
+  observedActiveDurationMs: number;
+  pausedDurationMs: number;
+  track: string;
+  primaryApplication: string;
+  cleanTitle: string;
+  domain: string | null;
+  sanitizedUrl: string | null;
+  sourceChannel: string;
+  rawEventCount: number;
+  observationSetFingerprint: string;
+  isAfkBlock: boolean;
+  activityType?: string | null;
+  modality: {
+    primary: TimelineBlockModalityClaim | null;
+    secondary: Array<{ value: string; provenance: string; authority?: string; evidence?: TimelineClaimEvidence[] }>;
+    context: TimelineBlockContextClaim | null;
+  };
+  intentLink?: TimelineBlockIntentLink | null;
+  attention: { focusEvidenceState: string } | null;
+  coverageGaps: Array<{ id: string; startTime: string; endTime: string; coverageState: string; reconciliationState: string }>;
+  pendingInterpretation: boolean;
+}
+

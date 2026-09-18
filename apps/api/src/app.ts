@@ -17,6 +17,7 @@ import { activityRouter } from "./routes/activity";
 import { analyticsRouter } from "./routes/analytics";
 import { patternsRouter, insightsRouter } from "./routes/patterns";
 import { telemetryRouter } from "./routes/telemetry";
+import { activityRulesRouter } from "./routes/activity-rules";
 import { exportRouter } from "./routes/export";
 import { userRouter } from "./routes/user";
 import { aiRouter } from "./routes/ai";
@@ -61,6 +62,7 @@ export function createApp(): Express {
   app.use("/api/patterns", patternsRouter);
   app.use("/api/insights", insightsRouter);
   app.use("/api/telemetry", telemetryRouter);
+  app.use("/api/activity-rules", activityRulesRouter);
   app.use("/api/export", exportRouter);
   app.use("/api/ai", aiRouter);
   app.use(errorHandler);

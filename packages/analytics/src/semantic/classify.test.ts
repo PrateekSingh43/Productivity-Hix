@@ -133,3 +133,92 @@ test("override outside window does not apply", () => {
   }, { rules: [], overrides: [override] });
   assert.notEqual(r.primaryProvenance, "USER_OVERRIDE");
 });
+
+test("VS Code coding resolves activityType coding and extracts project context", () => {
+  const r = resolveBlockSemantics({
+    start: 0,
+    end: 18 * 60_000,
+    application: "Code",
+    title: "timeline.ts - ProductiveHix - Visual Studio Code",
+    isAfk: false,
+    source: "desktop",
+  });
+  assert.equal(r.primaryModality, "development");
+  assert.equal(r.activityType, "coding");
+  assert.equal(r.context, "ProductiveHix");
+});
+
+test("VS Code running vitest resolves activityType debugging", () => {
+  const r = resolveBlockSemantics({
+    start: 0,
+    end: 10 * 60_000,
+    application: "Code",
+    title: "terminal: vitest run - ProductiveHix",
+    isAfk: false,
+    source: "desktop",
+  });
+  assert.equal(r.primaryModality, "development");
+  assert.equal(r.activityType, "debugging");
+  assert.equal(r.context, "ProductiveHix");
+});
+
+test("YouTube tutorial resolves activityType tutorial", () => {
+  const r = resolveBlockSemantics({
+    start: 0,
+    end: 15 * 60_000,
+    application: "Chrome",
+    domain: "youtube.com",
+    title: "Rust Async Tutorial for Beginners - YouTube",
+    isAfk: false,
+    source: "browser",
+  });
+  assert.equal(r.primaryModality, "media_consumption");
+  assert.equal(r.activityType, "tutorial");
+  assert.ok(r.context?.includes("Rust Async"));
+});
+
+test("YouTube music resolves activityType media with Music context", () => {
+  const r = resolveBlockSemantics({
+    start: 0,
+    end: 30 * 60_000,
+    application: "Chrome",
+    domain: "youtube.com",
+    title: "Lofi Hip Hop Radio - Beats to Relax/Study to",
+    isAfk: false,
+    source: "browser",
+  });
+  assert.equal(r.primaryModality, "media_consumption");
+  assert.equal(r.activityType, "media");
+  assert.equal(r.context, "Music");
+});
+
+test("Chess on chess.com resolves activityType gaming with Chess context", () => {
+  const r = resolveBlockSemantics({
+    start: 0,
+    end: 15 * 60_000,
+    application: "Chrome",
+    domain: "chess.com",
+    title: "Play Chess Online - Chess.com",
+    isAfk: false,
+    source: "browser",
+  });
+  assert.equal(r.primaryModality, "gaming");
+  assert.equal(r.activityType, "gaming");
+  assert.equal(r.context, "Chess");
+});
+
+test("Documentation on tanstack.com resolves activityType documentation and React Query context", () => {
+  const r = resolveBlockSemantics({
+    start: 0,
+    end: 10 * 60_000,
+    application: "Chrome",
+    domain: "tanstack.com",
+    title: "TanStack Query Overview | TanStack",
+    isAfk: false,
+    source: "browser",
+  });
+  assert.equal(r.primaryModality, "reading_research");
+  assert.equal(r.activityType, "documentation");
+  assert.equal(r.context, "React Query");
+});
+

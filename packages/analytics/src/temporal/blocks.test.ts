@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   materializeTemporalBlocks,
+  unionIntervals,
   type BlockEngineInput,
 } from "./blocks.js";
 
@@ -52,7 +53,7 @@ test("AFK >= minBreakMs carves the block: wall clock conserved across split", ()
   assert.equal(totalWall, 60 * MS_MIN, "wall clock conserved across AFK carve");
 });
 
-test("contributions stay inside block bounds and observations sum to observedActive", () => {
+test("contributions stay inside block bounds and interval unioning prevents double counting", () => {
   const blocks = materializeTemporalBlocks([
     input({ activityId: "a1", start: 0, end: 10 * MS_MIN }),
     input({ activityId: "a2", start: 9 * MS_MIN, end: 25 * MS_MIN }),
@@ -61,16 +62,20 @@ test("contributions stay inside block bounds and observations sum to observedAct
   for (const b of blocks) {
     assert.equal(b.wallClockDurationMs, b.endTime - b.startTime);
     assert.equal(b.observedActiveDurationMs + b.pausedDurationMs, b.wallClockDurationMs);
-    let activeSum = 0;
+    assert.ok(b.observedActiveDurationMs <= b.wallClockDurationMs, "active time cannot exceed wall clock");
+    assert.ok(b.pausedDurationMs >= 0, "paused time cannot be negative");
+    // With interval unioning of [0, 10] and [9, 25], active time is exactly 25 min, not 26 min
+    assert.equal(b.observedActiveDurationMs, 25 * MS_MIN);
+    assert.equal(b.pausedDurationMs, 0);
+
     for (const o of b.observations) {
       assert.ok(o.contributionStart >= b.startTime, "contribution starts within block");
       assert.ok(o.contributionEnd <= b.endTime, "contribution ends within block");
       assert.equal(o.contributionDurationMs, o.contributionEnd - o.contributionStart);
-      activeSum += o.contributionDurationMs;
     }
-    assert.equal(activeSum, b.observedActiveDurationMs);
   }
 });
+
 
 test("materialization is idempotent: same input -> same fingerprints and blocks", () => {
   const events = [
@@ -112,3 +117,34 @@ test("browser events group by domain, not just application", () => {
   ]);
   assert.equal(blocks.length, 2, "different domains stay separate");
 });
+
+test("unionIntervals merges overlapping and adjacent intervals and preserves disjoint intervals", () => {
+  const intervals = [
+    { start: 0, end: 100 },
+    { start: 50, end: 150 },
+    { start: 200, end: 300 },
+    { start: 250, end: 350 },
+    { start: 400, end: 450 },
+  ];
+  const merged = unionIntervals(intervals);
+  assert.deepEqual(merged, [
+    { start: 0, end: 150 },
+    { start: 200, end: 350 },
+    { start: 400, end: 450 },
+  ]);
+});
+
+test("multiple overlapping events conserve wall clock duration and active <= wallClock", () => {
+  const blocks = materializeTemporalBlocks([
+    input({ activityId: "e1", start: 0, end: 10 * MS_MIN, application: "Code" }),
+    input({ activityId: "e2", start: 5 * MS_MIN, end: 15 * MS_MIN, application: "Code" }),
+    input({ activityId: "e3", start: 8 * MS_MIN, end: 20 * MS_MIN, application: "Code" }),
+  ]);
+  assert.equal(blocks.length, 1);
+  const b = blocks[0]!;
+  assert.equal(b.wallClockDurationMs, 20 * MS_MIN);
+  assert.equal(b.observedActiveDurationMs, 20 * MS_MIN);
+  assert.equal(b.pausedDurationMs, 0);
+  assert.ok(b.observedActiveDurationMs <= b.wallClockDurationMs);
+});
+

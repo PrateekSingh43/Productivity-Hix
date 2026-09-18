@@ -238,6 +238,143 @@ function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+export type SemanticActivityType =
+  | "coding"
+  | "debugging"
+  | "code_review"
+  | "documentation"
+  | "research"
+  | "tutorial"
+  | "writing"
+  | "planning"
+  | "communication"
+  | "meeting"
+  | "administration"
+  | "media"
+  | "gaming"
+  | "idle_away"
+  | "unknown";
+
+export function extractProjectContext(title: string, app: string): string | null {
+  if (!title) return null;
+  const bracketMatch = title.match(/\[([a-zA-Z0-9_\-.]+)\]/);
+  if (bracketMatch && bracketMatch[1]) return bracketMatch[1];
+
+  const parts = title.split(/\s+[-—–·|]\s+/).map((p) => p.trim()).filter(Boolean);
+  if (parts.length >= 2) {
+    const last = parts[parts.length - 1]!;
+    if (/\b(visual studio code|vscode|cursor|pycharm|webstorm|sublime)\b/i.test(last) && parts.length >= 3) {
+      return parts[parts.length - 2] ?? null;
+    }
+    if (!/\b(visual studio code|vscode|cursor)\b/i.test(parts[1]!)) {
+      return parts[1] ?? null;
+    }
+  }
+  return null;
+}
+
+export function extractDocContext(domain: string | null, title: string): string | null {
+  const dom = (domain ?? "").toLowerCase();
+  if (dom.includes("tanstack")) return "React Query";
+  if (dom.includes("react.dev")) return "React";
+  if (dom.includes("nextjs.org")) return "Next.js";
+  if (dom.includes("python.org")) return "Python";
+  if (dom.includes("developer.mozilla.org")) return "MDN Web Docs";
+  if (dom.includes("rust-lang.org") || dom.includes("docs.rs")) return "Rust Docs";
+  if (dom.includes("github.com")) {
+    const parts = title.split(/[-—–|]/).map((p) => p.trim());
+    return parts[0] || "GitHub";
+  }
+  if (title) {
+    const docMatch = title.match(/([a-zA-Z0-9_.-]+)\s+(?:docs|documentation|guide|api)/i);
+    if (docMatch && docMatch[1]) return docMatch[1];
+  }
+  return domain || null;
+}
+
+export function extractMediaContext(title: string, domain: string | null): string | null {
+  const dom = (domain ?? "").toLowerCase();
+  if (dom.includes("spotify") || dom.includes("music.youtube")) return "Music";
+  if (/\b(music|lofi|ost|song|playlist|synthwave|ambient)\b/i.test(title)) return "Music";
+  if (/\b(chess\.com|lichess)\b/i.test(dom) || /\bchess\b/i.test(title)) return "Chess";
+  const cleaned = title.replace(/\s*[-—–|]\s*(?:YouTube|Netflix|Twitch).*$/i, "").trim();
+  return cleaned.slice(0, 60) || null;
+}
+
+export function inferActivityType(
+  modality: ActivityModality,
+  obs: ObservationFeatures
+): { activityType: SemanticActivityType; context: string | null } {
+  if (obs.isAfk || modality === "idle_away") {
+    return { activityType: "idle_away", context: null };
+  }
+
+  const title = obs.title ?? "";
+  const domain = obs.domain ?? null;
+  const app = obs.application ?? "";
+
+  // 1. Gaming / Chess
+  if (modality === "gaming" || /chess\.com|lichess/i.test(domain ?? "") || /chess/i.test(app)) {
+    return { activityType: "gaming", context: "Chess" };
+  }
+
+  // 2. Development
+  if (modality === "development") {
+    if (/\b(debug|debugger|test|vitest|jest|pytest|cargo test|pwsh|powershell|terminal|cmd)\b/i.test(title)) {
+      return { activityType: "debugging", context: extractProjectContext(title, app) };
+    }
+    if (/\b(git diff|pull request|pr #|review|commit)\b/i.test(title)) {
+      return { activityType: "code_review", context: extractProjectContext(title, app) };
+    }
+    return { activityType: "coding", context: extractProjectContext(title, app) };
+  }
+
+  // 3. Media consumption / YouTube
+  if (modality === "media_consumption" || /youtube\.com|youtu\.be/i.test(domain ?? "")) {
+    if (/\b(tutorial|course|learn|guide|how to|lecture|workshop)\b/i.test(title)) {
+      return { activityType: "tutorial", context: extractMediaContext(title, domain) };
+    }
+    if (/\b(music|lofi|ost|song|soundtrack|playlist|spotify)\b/i.test(title) || /music\.youtube|spotify/i.test(domain ?? "")) {
+      return { activityType: "media", context: "Music" };
+    }
+    return { activityType: "media", context: extractMediaContext(title, domain) };
+  }
+
+  // 4. Reading & Research
+  if (modality === "reading_research") {
+    if (/\b(tutorial|course|learn|guide)\b/i.test(title)) {
+      return { activityType: "tutorial", context: extractDocContext(domain, title) };
+    }
+    if (/\b(docs|documentation|reference|api|manual)\b/i.test(title) || /tanstack|react\.dev|nextjs\.org|python\.org|docs\./i.test(domain ?? "")) {
+      return { activityType: "documentation", context: extractDocContext(domain, title) };
+    }
+    return { activityType: "research", context: extractDocContext(domain, title) };
+  }
+
+  // 5. Writing & Docs
+  if (modality === "writing_documentation") {
+    if (/\b(plan|roadmap|spec|blueprint|rfc|todo|jira|linear)\b/i.test(title)) {
+      return { activityType: "planning", context: extractProjectContext(title, app) };
+    }
+    return { activityType: "writing", context: extractDocContext(domain, title) };
+  }
+
+  // 6. Communication
+  if (modality === "communication") {
+    if (/\b(meet|zoom|call|huddle|sync|standup)\b/i.test(title) || /zoom|meet\.google/i.test(app) || /meet\.google/i.test(domain ?? "")) {
+      return { activityType: "meeting", context: "Meeting" };
+    }
+    return { activityType: "communication", context: null };
+  }
+
+  // 7. Administration
+  if (modality === "administration" || modality === "system_maintenance") {
+    return { activityType: "administration", context: null };
+  }
+
+  return { activityType: "unknown", context: null };
+}
+
 export interface BlockSemanticsRequest {
   start: number;
   end: number;
@@ -253,6 +390,7 @@ export interface BlockSemantics {
   primaryModality: ActivityModality;
   primaryConfidence: number | null;
   primaryProvenance: ClaimProvenance;
+  activityType: SemanticActivityType;
   evidence: ClassificationEvidence[];
   context: string | null;
   contextProvenance: ClaimProvenance | null;
@@ -260,17 +398,16 @@ export interface BlockSemantics {
 }
 
 export function resolveBlockSemantics(block: BlockSemanticsRequest, ctx: ClassificationContext = {}): BlockSemantics {
-  const base = classifyObservation(
-    {
-      application: block.application,
-      title: block.title,
-      domain: block.domain,
-      url: block.url,
-      isAfk: block.isAfk,
-      source: block.source,
-    },
-    ctx
-  );
+  const obsFeatures: ObservationFeatures = {
+    application: block.application,
+    title: block.title,
+    domain: block.domain,
+    url: block.url,
+    isAfk: block.isAfk,
+    source: block.source,
+  };
+
+  const base = classifyObservation(obsFeatures, ctx);
 
   let primaryModality = base.modality;
   let primaryConfidence = base.confidence;
@@ -288,13 +425,33 @@ export function resolveBlockSemantics(block: BlockSemanticsRequest, ctx: Classif
     break;
   }
 
+  const inferred = inferActivityType(primaryModality, obsFeatures);
+
+  let activityType = inferred.activityType;
+  let contextValue = base.context ?? inferred.context;
+  let contextProvenance = base.contextProvenance ?? (inferred.context ? "CONTEXT_HEURISTIC" : null);
+
+  for (const ov of ctx.overrides ?? []) {
+    if (overrideApplies(ov, { start: block.start, end: block.end, application: block.application })) {
+      if (ov.targetClaimFamily === "CLASSIFICATION" && ov.targetClaimType === "INFERRED_BEHAVIOR") {
+        activityType = ov.overriddenValue as SemanticActivityType;
+      }
+      if (ov.targetClaimFamily === "INTENT_ASSOCIATION" && ov.targetClaimType === "TOPIC_CONTEXT") {
+        contextValue = ov.overriddenValue;
+        contextProvenance = "USER_OVERRIDE";
+      }
+    }
+  }
+
   return {
     primaryModality,
     primaryConfidence,
     primaryProvenance,
+    activityType,
     evidence,
-    context: base.context,
-    contextProvenance: base.contextProvenance,
+    context: contextValue,
+    contextProvenance,
     relevance: base.relevance,
   };
 }
+

@@ -10,3 +10,4 @@ export * from "./device-auth";
 export * from "./plan";
 export * from "./semantic-timeline";
 export * from "./user-preferences";
+export * from "./activity-rules";

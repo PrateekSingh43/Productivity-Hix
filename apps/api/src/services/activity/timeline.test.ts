@@ -26,13 +26,19 @@ function dbFor(rows: unknown[]) {
   const storedBlocks: Array<Record<string, unknown>> = [];
   const storedClaims: Array<Record<string, unknown>> = [];
   const storedAttention: Array<Record<string, unknown>> = [];
-  return {
+  const storedLinks: Array<Record<string, unknown>> = [];
+
+  const db: any = {
     __storedBlocks: storedBlocks,
     __storedClaims: storedClaims,
+    $transaction: vi.fn().mockImplementation(async (callback: (tx: any) => Promise<any>) => callback(db)),
     userPreference: { findUnique: vi.fn().mockResolvedValue(null) },
     normalizedActivity: { findMany: vi.fn().mockResolvedValue(rows) },
     userActivityRule: { findMany: vi.fn().mockResolvedValue([]) },
     userActivityOverride: { findMany: vi.fn().mockResolvedValue([]) },
+    task: { findMany: vi.fn().mockResolvedValue([]) },
+    dailyGoal: { findMany: vi.fn().mockResolvedValue([]) },
+    workSession: { findMany: vi.fn().mockResolvedValue([]) },
     desktopDevice: { findFirst: vi.fn().mockResolvedValue(null) },
     temporalActivityBlock: {
       findFirst: vi.fn().mockResolvedValue(null),
@@ -42,16 +48,15 @@ function dbFor(rows: unknown[]) {
             ...b,
             claims: storedClaims.filter((c) => c.blockId === b.id),
             attentionInferences: storedAttention.filter((a) => a.blockId === b.id),
+            contextLinks: storedLinks.filter((l) => l.blockId === b.id),
           }))
         )
       ),
-      create: vi
-        .fn()
-        .mockImplementation(({ data }) => {
-          const row = { id: `blk-${storedBlocks.length + 1}`, ...data };
-          storedBlocks.push(row);
-          return Promise.resolve(row);
-        }),
+      create: vi.fn().mockImplementation(({ data }) => {
+        const row = { id: `blk-${storedBlocks.length + 1}`, ...data };
+        storedBlocks.push(row);
+        return Promise.resolve(row);
+      }),
       update: vi.fn().mockResolvedValue({}),
     },
     blockObservation: {
@@ -60,27 +65,36 @@ function dbFor(rows: unknown[]) {
     },
     semanticClaim: {
       deleteMany: vi.fn().mockResolvedValue({}),
-      create: vi
-        .fn()
-        .mockImplementation(({ data }) => {
-          const row = { id: `claim-${storedClaims.length + 1}`, ...data };
-          storedClaims.push(row);
-          return Promise.resolve(row);
-        }),
+      create: vi.fn().mockImplementation(({ data }) => {
+        const row = { id: `claim-${storedClaims.length + 1}`, ...data };
+        storedClaims.push(row);
+        return Promise.resolve(row);
+      }),
     },
-    claimEvidence: { create: vi.fn().mockResolvedValue({}) },
+    activityContextLink: {
+      deleteMany: vi.fn().mockResolvedValue({}),
+      create: vi.fn().mockImplementation(({ data }) => {
+        const row = { id: `link-${storedLinks.length + 1}`, ...data };
+        storedLinks.push(row);
+        return Promise.resolve(row);
+      }),
+    },
+    claimEvidence: {
+      deleteMany: vi.fn().mockResolvedValue({}),
+      create: vi.fn().mockResolvedValue({}),
+    },
     attentionInference: {
       deleteMany: vi.fn().mockResolvedValue({}),
-      create: vi
-        .fn()
-        .mockImplementation(({ data }) => {
-          const row = { id: `att-${storedAttention.length + 1}`, ...data };
-          storedAttention.push(row);
-          return Promise.resolve(row);
-        }),
+      create: vi.fn().mockImplementation(({ data }) => {
+        const row = { id: `att-${storedAttention.length + 1}`, ...data };
+        storedAttention.push(row);
+        return Promise.resolve(row);
+      }),
     },
     telemetryCoverageGap: { findFirst: vi.fn().mockResolvedValue(null), create: vi.fn().mockResolvedValue({}) },
   };
+
+  return db;
 }
 
 beforeEach(() => {
