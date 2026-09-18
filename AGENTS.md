@@ -6,6 +6,7 @@ This file is automatically loaded by AI coding assistants working in the Product
 Before planning or implementing any feature, database migration, analytical detector, AI synthesis prompt, or UI change, you **MUST** consult:
 - **[docs/PRODUCTIVEHIX_SYSTEM_BLUEPRINT.md](file:///c:/Users/prate/ProductiveHix/docs/PRODUCTIVEHIX_SYSTEM_BLUEPRINT.md)**: Master product philosophy, the Four Kinds of Truth, the 5 core questions, the "missing telemetry" gap recovery mechanism, the DuckDB analytical pipeline, the closed-loop retention engine, and the 9-phase roadmap.
 - **[docs/PRODUCTIVEHIX_UX_CONTRACT.md](file:///c:/Users/prate/ProductiveHix/docs/PRODUCTIVEHIX_UX_CONTRACT.md)**: UX contract, presentation states, page layouts, and information architecture.
+- **[docs/PRODUCTIVEHIX_MAINTAINABILITY_STANDARD.md](file:///c:/Users/prate/ProductiveHix/docs/PRODUCTIVEHIX_MAINTAINABILITY_STANDARD.md)**: Permanent maintainability, traceability, and future-refactorability standard, domain feature ownership, and TanStack Query v5 invalidation contracts.
 
 ## 2. Inviolable Core Principles
 1. **Zero Fake Data**: Never invent metrics, hardcoded trends (`+12%`), synthetic multipliers (`* 0.65`), or fake baseline placeholders. Use explicit `loading`, `empty`, or `insufficient` states.
@@ -23,3 +24,10 @@ Before planning or implementing any feature, database migration, analytical dete
    - `Recommendation`: *"Consider doing Y."*
    Never collapse these four into one object.
 6. **Decouple Goal Outcome from Task Completion**: Completing 5/5 tasks does not mean a Daily Goal was achieved. Goal outcome is a subjective self-assessment at day's end.
+7. **Permanent Maintainability, Traceability & Refactorability**:
+   - Assume code will be maintained by someone with zero context.
+   - Enforce domain colocation under `apps/web/src/features/<domain>/` with strict public boundaries via `index.ts`.
+   - TanStack Query factories (`queryOptions`) must govern all query keys.
+   - All mutations must explicitly declare their cache invalidation blast radius.
+   - Complex functions, detectors, and converters must include explicit JSDoc contracts stating purpose, units, assumptions, and edge cases.
+
