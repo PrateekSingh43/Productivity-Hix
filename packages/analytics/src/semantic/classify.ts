@@ -149,9 +149,6 @@ function systemClassify(obs: ObservationFeatures): { modality: ActivityModality;
       return { modality, confidence: conf, evidence: [{ kind: "APPLICATION", reference: app }] };
     }
   }
-  if (obs.source === "browser") {
-    return { modality: "reading_research", confidence: 0.3, evidence: [{ kind: "BROWSER_FALLBACK", reference: domain ?? "browser" }] };
-  }
   const title = obs.title ?? "";
   for (const re of TITLE_DEV_PATTERNS) {
     if (re.test(title)) {

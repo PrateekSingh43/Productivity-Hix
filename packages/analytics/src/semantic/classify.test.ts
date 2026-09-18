@@ -29,6 +29,11 @@ test("system classifier: unknown app yields unknown", () => {
   assert.equal(r.modality, "unknown");
 });
 
+test("system classifier: unknown browser tab yields unknown, never assumes reading_research", () => {
+  const r = classifyObservation({ application: "Chrome", domain: null, title: "New Tab", source: "browser" });
+  assert.equal(r.modality, "unknown");
+});
+
 test("AFK yields idle_away regardless of application", () => {
   const r = classifyObservation({ application: "Code.exe", title: "auth.ts", isAfk: true });
   assert.equal(r.modality, "idle_away");
