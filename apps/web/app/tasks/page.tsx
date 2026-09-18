@@ -1,4 +1,6 @@
-import { TaskPageClient } from "../../components/tasks/task-page-client";
+"use client";
+
+import { TaskPageClient } from "@features/tasks";
 
 export default function TasksPage() {
   return <TaskPageClient />;

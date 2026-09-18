@@ -1,9 +1,7 @@
 "use client";
 
-import { PageContainer } from "../../components/layout/page-container";
-import { PageHeader } from "../../components/layout/page-header";
-import { Section } from "../../components/layout/section";
-import { EmptyState } from "../../components/primitives/empty-state";
+import { PageContainer, PageHeader, Section } from "@shared/components/layout";
+import { EmptyState } from "@shared/components/primitives";
 import { BookOpen } from "lucide-react";
 
 export default function LearningPage() {

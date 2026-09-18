@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { MINIMUM_DAYS_FOR_FINDINGS, onboardingMessage } from "../../components/primitives/analytics-evidence";
+import { MINIMUM_DAYS_FOR_FINDINGS, onboardingMessage } from "../features/analytics";
 
 test("onboarding at 14 recorded days keeps building message", () => {
   const message = onboardingMessage({ firstObservationAt: "2026-09-03T09:00:00Z", lastObservationAt: "2026-09-17T09:00:00Z", recordedDays: 14, connected: true });

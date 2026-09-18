@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { displayCopy, diagnosticLines } from "./analytics-presentation";
+import { displayCopy, diagnosticLines } from "../features/analytics";
 
 test("displayCopy rejects UUIDs", () => {
   assert.equal(displayCopy("Occasion 3f2b9c1a-7d4e-4f6a-9b2c-1e5d8a7f6b3c recorded"), "");
