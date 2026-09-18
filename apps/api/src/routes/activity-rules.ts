@@ -11,6 +11,13 @@ export const activityRulesRouter: Router = Router();
 
 activityRulesRouter.use(requireAuth);
 
+async function invalidateUserTimelineCache(userId: string): Promise<void> {
+  const db = getDb();
+  if (typeof (db as any).temporalActivityBlock?.deleteMany === "function") {
+    await (db as any).temporalActivityBlock.deleteMany({ where: { userId } });
+  }
+}
+
 activityRulesRouter.get("/rules", async (request, response, next) => {
   try {
     const userId = userIdFrom(request);
@@ -43,6 +50,7 @@ activityRulesRouter.post("/rules", async (request, response, next) => {
         defaultRelevance: input.defaultRelevance ?? null,
       },
     });
+    await invalidateUserTimelineCache(userId);
     response.status(201).json({ rule });
   } catch (error) {
     next(error);
@@ -76,6 +84,7 @@ activityRulesRouter.patch("/rules/:id", async (request, response, next) => {
         ...(input.defaultRelevance !== undefined ? { defaultRelevance: input.defaultRelevance } : {}),
       },
     });
+    await invalidateUserTimelineCache(userId);
     response.json({ rule });
   } catch (error) {
     next(error);
@@ -94,6 +103,7 @@ activityRulesRouter.delete("/rules/:id", async (request, response, next) => {
       return;
     }
     await getDb().userActivityRule.delete({ where: { id: existing.id } });
+    await invalidateUserTimelineCache(userId);
     response.json({ deleted: true });
   } catch (error) {
     next(error);
@@ -136,6 +146,7 @@ activityRulesRouter.post("/overrides", async (request, response, next) => {
         reason: input.reason ?? null,
       },
     });
+    await invalidateUserTimelineCache(userId);
     response.status(201).json({ override });
   } catch (error) {
     next(error);
@@ -154,6 +165,7 @@ activityRulesRouter.delete("/overrides/:id", async (request, response, next) => 
       return;
     }
     await getDb().userActivityOverride.delete({ where: { id: existing.id } });
+    await invalidateUserTimelineCache(userId);
     response.json({ deleted: true });
   } catch (error) {
     next(error);
