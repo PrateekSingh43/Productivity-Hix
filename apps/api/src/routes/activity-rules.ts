@@ -20,20 +20,23 @@ async function emitRuleChangedEventTx(
   params: {
     userId: string;
     correlationId: string;
-    targetWindow?: { start: Date; end: Date };
+    targetWindow?: { start?: Date | null; end?: Date | null };
   }
 ): Promise<void> {
   const now = new Date();
-  const localDate = params.targetWindow
-    ? params.targetWindow.start.toISOString().slice(0, 10)
+  const hasValidStart = params.targetWindow?.start instanceof Date && !isNaN(params.targetWindow.start.getTime());
+  const hasValidEnd = params.targetWindow?.end instanceof Date && !isNaN(params.targetWindow.end.getTime());
+
+  const localDate = hasValidStart
+    ? params.targetWindow!.start!.toISOString().slice(0, 10)
     : now.toISOString().slice(0, 10);
 
-  const startIso = params.targetWindow
-    ? params.targetWindow.start.toISOString()
+  const startIso = hasValidStart
+    ? params.targetWindow!.start!.toISOString()
     : new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())).toISOString();
 
-  const endIso = params.targetWindow
-    ? params.targetWindow.end.toISOString()
+  const endIso = hasValidEnd
+    ? params.targetWindow!.end!.toISOString()
     : new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59, 999)).toISOString();
 
   const dayState = await tx.timelineDayState.upsert({

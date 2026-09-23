@@ -81,7 +81,7 @@ export const handleTelemetryBatch: RequestHandler = async (request, response, ne
 
     // Step 1: PostgreSQL is authoritative. Persist updates, inserts, day revision, and outbox in ONE transaction.
     const correlationId =
-      (request.headers["x-correlation-id"] as string) ||
+      (request.headers?.["x-correlation-id"] as string) ||
       `corr-${Date.now()}-${Math.random().toString(36).substring(7)}`;
 
     await prisma.$transaction(async (tx) => {

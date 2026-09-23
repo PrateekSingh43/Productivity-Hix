@@ -40,7 +40,9 @@ export async function getDuckDB(): Promise<DuckDBClient> {
 
 export async function closeDuckDB(): Promise<void> {
   if (duckdbClient) {
-    await duckdbClient.close();
+    if (typeof duckdbClient.close === "function") {
+      await duckdbClient.close();
+    }
     duckdbClient = null;
     isSynchronized = false;
   }
@@ -107,7 +109,10 @@ export async function rebuildDuckDBFromPostgres(userId?: string): Promise<number
 export async function ensureDuckDBSynchronized(): Promise<void> {
   isSynchronized = false;
   const client = await getDuckDB();
-  const isCompatible = await client.isSchemaCompatible();
+  const isCompatible =
+    typeof client.isSchemaCompatible === "function"
+      ? await client.isSchemaCompatible()
+      : true;
 
   if (!isCompatible) {
     // Schema mismatch/corrupted: reset schema and rebuild from PostgreSQL source of truth
