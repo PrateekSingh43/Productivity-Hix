@@ -14,6 +14,7 @@ import {
 } from './runtime/redis';
 import { QueueManager } from './runtime/queue';
 import { WorkerRuntime } from './runtime/worker-runtime';
+import { PatternWorker } from './pattern/pattern-worker';
 import { OutboxPublisher } from './outbox/publisher';
 import { MemoryWorkerMetricsCollector } from './shared/metrics';
 
@@ -57,7 +58,9 @@ export async function bootstrap(): Promise<BootstrapResult> {
     batchSize: Number(process.env.OUTBOX_BATCH_SIZE ?? 25),
   });
 
-  // 5. Start Execution in Deterministic Order
+  // 5. Register domain workers, then start execution in deterministic order
+  runtime.registerWorker(new PatternWorker());
+
   await runtime.start();
   console.log('[WorkerBootstrap] Worker runtime started and listening for jobs.');
 

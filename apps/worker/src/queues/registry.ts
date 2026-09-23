@@ -57,6 +57,7 @@ export const EVENT_TO_QUEUE_MAPPING: Record<string, ProductiveHixQueueName> = {
   'gap.explained': PRODUCTIVEHIX_QUEUES.TIMELINE_MATERIALIZATION,
   'timeline.window.materialized': PRODUCTIVEHIX_QUEUES.ANALYTICAL_PROJECTION,
   'projection.window.updated': PRODUCTIVEHIX_QUEUES.PATTERN_ANALYSIS,
+  'pattern.analysis.requested': PRODUCTIVEHIX_QUEUES.PATTERN_ANALYSIS,
   'pattern.qualified': PRODUCTIVEHIX_QUEUES.INSIGHT_GENERATION,
   'pattern.changed': PRODUCTIVEHIX_QUEUES.INSIGHT_GENERATION,
 };
