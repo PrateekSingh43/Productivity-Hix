@@ -5,8 +5,11 @@ import { resolveProductiveDay } from "@repo/types";
 import { randomUUID } from "node:crypto";
 import {
   composeInsights,
+  contextConfig,
+  continuousThresholds,
   countDistinctCalendarDays,
   evaluatePatterns,
+  fragmentationConfig,
   isDetectorIdentity,
   subtractCalendarDays,
   type DetectorDiagnostics,
@@ -191,6 +194,27 @@ function emptyDiagnostics(): PatternsResponse["diagnostics"] {
 }
 
 /**
+ * Minimum evidence bar per available detector, sourced from the same
+ * configuration objects the pipeline enforces — never duplicated literals.
+ * D4 (schedule_variance) is intentionally absent: NOT_AVAILABLE detectors
+ * cannot contribute sufficiency.
+ */
+const EVIDENCE_BAR: Record<string, { occasions: number; days: number }> = {
+  context_switching_density: {
+    occasions: contextConfig.minimumQualifyingSessions,
+    days: contextConfig.minimumQualifyingCalendarDays,
+  },
+  task_execution_fragmentation: {
+    occasions: fragmentationConfig.minimumQualifyingEpisodes,
+    days: fragmentationConfig.minimumQualifyingCalendarDays,
+  },
+  extended_continuous_activity: {
+    occasions: continuousThresholds.minimumComparableOccasions,
+    days: continuousThresholds.minimumDistinctDays,
+  },
+};
+
+/**
  * Durable analytical state machine (§5–§6).
  *
  * RUNNING beats everything (a retry may be in flight). Otherwise the latest
@@ -238,9 +262,15 @@ export async function getPersistedPatterns(userId: string, window: AnalyticalWin
     });
     const patterns = findings.map((f) => f.resultJson as unknown as BehavioralPatternOutput);
     const diagnostics = (completed.diagnosticsJson ?? emptyDiagnostics()) as unknown as PatternsResponse["diagnostics"];
-    const evidence: PatternReadiness["evidence"] = diagnostics.perDetector.some(
-      (d) => (d.eligibleOccasions ?? 0) > 0,
-    ) ? "sufficient" : "insufficient";
+    // Detector-aware sufficiency (§10): an available detector meets ITS OWN
+    // configured minimum occasions AND days. NOT_AVAILABLE detectors (D4) and
+    // below-bar counts never qualify as "sufficient".
+    const evidence: PatternReadiness["evidence"] = diagnostics.perDetector.some((d) => {
+      if (d.availability === "NOT_AVAILABLE") return false;
+      const bar = EVIDENCE_BAR[d.identity];
+      if (!bar) return false;
+      return (d.eligibleOccasions ?? 0) >= bar.occasions && (d.eligibleDays ?? 0) >= bar.days;
+    }) ? "sufficient" : "insufficient";
     return {
       state: (completed.state ?? "ok") as PatternsState, runStatus: "COMPLETED",
       runId: completed.id, computedAt: completed.computedAt?.toISOString() ?? null,

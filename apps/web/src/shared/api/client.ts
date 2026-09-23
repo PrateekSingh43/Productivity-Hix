@@ -34,7 +34,14 @@ export class ApiClientError extends Error {
  * device-token auth). Never inline a literal user id at call sites.
  */
 export function getBrowserDevUserId(): string {
-  return process.env.NEXT_PUBLIC_DEV_USER_ID ?? "00000000-0000-0000-0000-000000000001";
+  const configured = process.env.NEXT_PUBLIC_DEV_USER_ID;
+  // Explicitly configured (including "") always wins.
+  if (configured !== undefined) return configured;
+  // Local-development convenience only: production builds omit the header so
+  // the browser can never silently impersonate a fixed user in production.
+  // The API remains authoritative (device/session auth, else 401).
+  if (process.env.NODE_ENV !== "production") return "00000000-0000-0000-0000-000000000001";
+  return "";
 }
 
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -44,19 +51,35 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
     ...(devUserId ? { "x-user-id": devUserId } : {}),
     ...((init?.headers as Record<string, string>) || {}),
   };
-  const response = await fetch(`${apiUrl}${path}`, {
-    ...init,
-    credentials: "include",
-    headers,
-  });
-  if (!response.ok) {
-    const errorBody = await response.json().catch(() => null);
-    throw new ApiClientError(
-      errorBody?.error ?? `API request failed (${response.status})`,
-      response.status
-    );
+
+  const timeoutMs = 15_000;
+  const controller = new AbortController();
+  const timer = setTimeout(() => {
+    controller.abort(new Error(`API request timed out after ${timeoutMs}ms: ${path}`));
+  }, timeoutMs);
+
+  if (init?.signal) {
+    init.signal.addEventListener("abort", () => controller.abort(init.signal?.reason));
   }
-  return response.json() as Promise<T>;
+
+  try {
+    const response = await fetch(`${apiUrl}${path}`, {
+      ...init,
+      signal: controller.signal,
+      credentials: "include",
+      headers,
+    });
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => null);
+      throw new ApiClientError(
+        errorBody?.error ?? `API request failed (${response.status})`,
+        response.status
+      );
+    }
+    return response.json() as Promise<T>;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export function jsonBody(body: unknown, method: "POST" | "PUT" | "PATCH" | "DELETE" = "POST"): RequestInit {

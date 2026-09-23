@@ -139,10 +139,83 @@ describe("persisted pattern reads", () => {
     expect(res.body.patterns).toEqual([]);
     expect(res.body.readiness).toEqual({
       activity: "none",
-      evidence: "sufficient",
+      evidence: "insufficient",
       analysis: "completed",
       patterns: "none",
     });
+  });
+
+  it("readiness: below-bar detector evidence is insufficient, at-bar is sufficient", async () => {
+    const diag = (occasions: number, days: number) => ({
+      perDetector: [{
+        identity: "extended_continuous_activity",
+        status: "INSUFFICIENT_EVIDENCE",
+        eligibleOccasions: occasions,
+        eligibleDays: days,
+        meanCoverageRatio: 0.9,
+        availability: "AVAILABLE",
+      }],
+    });
+    // Below bar (2 < 3 occasions, 2 < 3 days): insufficient, not sufficient.
+    setTestDb({
+      ...emptyRunDb(),
+      patternAnalysisRun: {
+        findFirst: async ({ where }: { where: Record<string, unknown> }) =>
+          where.status === "COMPLETED"
+            ? { id: "run-below", state: "insufficient-evidence", computedAt: new Date(), diagnosticsJson: diag(2, 2) }
+            : null,
+      },
+    });
+    const below = await request(createApp())
+      .get("/api/patterns?from=2026-09-01&to=2026-09-15")
+      .set(auth);
+    expect(below.body.readiness.evidence).toBe("insufficient");
+    expect(below.body.readiness.patterns).toBe("none");
+
+    // At bar (3 occasions, 3 days): sufficient.
+    setTestDb({
+      ...emptyRunDb(),
+      patternAnalysisRun: {
+        findFirst: async ({ where }: { where: Record<string, unknown> }) =>
+          where.status === "COMPLETED"
+            ? { id: "run-at", state: "insufficient-evidence", computedAt: new Date(), diagnosticsJson: diag(3, 3) }
+            : null,
+      },
+    });
+    const at = await request(createApp())
+      .get("/api/patterns?from=2026-09-01&to=2026-09-15")
+      .set(auth);
+    expect(at.body.readiness.evidence).toBe("sufficient");
+  });
+
+  it("readiness: NOT_AVAILABLE detectors never count as sufficient evidence", async () => {
+    setTestDb({
+      ...emptyRunDb(),
+      patternAnalysisRun: {
+        findFirst: async ({ where }: { where: Record<string, unknown> }) =>
+          where.status === "COMPLETED"
+            ? {
+                id: "run-na",
+                state: "insufficient-evidence",
+                computedAt: new Date(),
+                diagnosticsJson: {
+                  perDetector: [{
+                    identity: "schedule_variance",
+                    status: "INSUFFICIENT_EVIDENCE",
+                    eligibleOccasions: 99,
+                    eligibleDays: 99,
+                    meanCoverageRatio: 1,
+                    availability: "NOT_AVAILABLE",
+                  }],
+                },
+              }
+            : null,
+      },
+    });
+    const res = await request(createApp())
+      .get("/api/patterns?from=2026-09-01&to=2026-09-15")
+      .set(auth);
+    expect(res.body.readiness.evidence).toBe("insufficient");
   });
 
   it("returns persisted patterns and diagnostics from the completed run", async () => {
