@@ -31,3 +31,21 @@ Before planning or implementing any feature, database migration, analytical dete
    - All mutations must explicitly declare their cache invalidation blast radius.
    - Complex functions, detectors, and converters must include explicit JSDoc contracts stating purpose, units, assumptions, and edge cases.
 
+## 3. Worker Subsystem & Runtime Invariants (Plan v3)
+All background and analytical execution must conform to Section 10 of **[docs/PRODUCTIVEHIX_SYSTEM_BLUEPRINT.md](file:///c:/Users/prate/ProductiveHix/docs/PRODUCTIVEHIX_SYSTEM_BLUEPRINT.md)**:
+1. **Worker Ownership Boundary**:
+   - `apps/api`: HTTP routes + authoritative transactions only. Never run heavy background computation or DuckDB materializations in request handlers.
+   - `apps/worker`: Single dedicated runtime hosting all 8 domain workers (`TimelineWorker`, `AnalyticalProjectionWorker`, `FeatureWorker`, `PatternWorker`, `InsightWorker`, `FinalizationWorker`, `ReconciliationWorker`, `AIAnalysisWorker`).
+   - `packages/analytics`: Pure deterministic algorithms; `simple-statistics` stays strictly here.
+   - `packages/data`: DuckDB client and projection queries.
+   - `PostgreSQL`: Durable source of truth and durable derived states.
+   - `Redis / BullMQ`: Transient queueing, distributed locking, and job orchestration.
+2. **AI Isolation**: Lower-level workers and `BaseWorker` must NEVER import `@repo/ai`. Only `InsightWorker` (automatic synthesis from qualified candidates) and `AIAnalysisWorker` (asynchronous user questions) may touch AI.
+3. **Retry Ownership**: BullMQ manages job attempts and backoff. `BaseWorker` normalizes errors and classifies them as `RETRYABLE_ERROR` or `PERMANENT_ERROR`. `BaseWorker` must not implement internal sleep/retry loops.
+4. **Cooperative Timeout**: Timeouts emit an `AbortSignal`. Operations must handle cooperative cancellation.
+5. **Idempotency vs. Locking**:
+   - `jobId` provides queue-level deduplication.
+   - Distributed lock (`IdempotencyProvider`) serializes active execution.
+   - Domain `checkIdempotency()` verifies whether output already exists in PostgreSQL.
+6. **Pre- and Post-Execution Supersession**: Check `checkSuperseded()` before execution (skip obsolete) and immediately after execution before persistence (discard stale results if source data mutated during computation).
+7. **Strict Dependency Execution Order**: Features must be built strictly in order of foundational dependencies: `Group 0 (Reconciliation) → Group 1 (BaseWorker) → Group 2 (Queue/Events) → Group 3 (Timeline) → Group 4 (DuckDB Projection) → ...`.

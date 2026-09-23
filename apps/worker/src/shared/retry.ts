@@ -4,6 +4,7 @@
  */
 
 import type { WorkerRetryPolicy } from '@repo/types';
+import { WorkerError } from '../base/errors';
 
 export function calculateBackoffDelayMs(attempt: number, policy: WorkerRetryPolicy): number {
   if (policy.backoffType === 'fixed') {
@@ -16,12 +17,32 @@ export function calculateBackoffDelayMs(attempt: number, policy: WorkerRetryPoli
 }
 
 export function isRetryableError(error: unknown): boolean {
-  if (!error || typeof error !== 'object') return false;
+  if (!error) return false;
+
+  // Check explicit WorkerError classification
+  if (error instanceof WorkerError) {
+    return error.isRetryable;
+  }
+
+  // Check object with isRetryable property
+  if (typeof error === 'object' && 'isRetryable' in error) {
+    return Boolean((error as { isRetryable: unknown }).isRetryable);
+  }
+
+  if (typeof error !== 'object') return false;
   const msg = (error as { message?: string }).message?.toLowerCase() ?? '';
-  // Non-retryable invariant violations
-  if (msg.includes('validation') || msg.includes('invariant') || msg.includes('unauthorized')) {
+
+  // Non-retryable invariant/validation violations
+  if (
+    msg.includes('validation') ||
+    msg.includes('invariant') ||
+    msg.includes('unauthorized') ||
+    msg.includes('forbidden')
+  ) {
     return false;
   }
-  // Transient database/network errors are retryable
+
+  // Transient database/network errors are retryable by default
   return true;
 }
+

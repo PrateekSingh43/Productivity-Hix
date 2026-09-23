@@ -12,6 +12,9 @@
 
 export * from './queues';
 export * from './processors';
+export * from './base';
+export * from './runtime';
+export * from './testing/test-worker';
 export * from './shared/context';
 export * from './shared/logging';
 export * from './shared/retry';
@@ -20,9 +23,9 @@ export * from './shared/metrics';
 
 export const WORKER_SUBSYSTEM_METADATA = {
   name: '@repo/worker',
-  version: '0.0.0-phase0.preparation',
-  status: 'PHASE_0_SKELETON_PREPARED',
-  runtimeExecutionEnabled: false,
+  version: '0.1.0-group1.verified',
+  status: 'GROUP_1_BASE_WORKER_VERIFIED',
+  runtimeExecutionEnabled: true,
 } as const;
 
 export function printWorkerPhase0Status(): void {
