@@ -134,7 +134,26 @@ async function readData(userId: string, window: AnalyticalWindow): Promise<Data>
 export interface PatternAnalysisRequest {
   accepted: boolean;
   correlationId: string;
+  jobCorrelationId: string;
+  requestId: string;
+  state: "RUNNING";
   window: AnalyticalWindow;
+}
+
+export type PatternRunStatus = "NO_RUN" | "RUNNING" | "COMPLETED" | "FAILED";
+
+export interface PatternReadiness {
+  activity: "recorded" | "none";
+  evidence: "sufficient" | "insufficient" | "unknown";
+  analysis: "completed" | "running" | "failed" | "never";
+  patterns: "found" | "none" | "unknown";
+}
+
+export interface PersistedPatternsResponse extends PatternsResponse {
+  runStatus: PatternRunStatus;
+  runId: string | null;
+  computedAt: string | null;
+  readiness: PatternReadiness;
 }
 
 export async function requestPatternAnalysis(
@@ -164,30 +183,84 @@ export async function requestPatternAnalysis(
       schemaVersion: "1.0.0",
     },
   });
-  return { accepted: true, correlationId: jobCorrelationId, window };
+  return { accepted: true, correlationId: jobCorrelationId, jobCorrelationId, requestId: jobCorrelationId, state: "RUNNING", window };
 }
 
-export async function getPersistedPatterns(userId: string, window: AnalyticalWindow): Promise<PatternsResponse> {
+function emptyDiagnostics(): PatternsResponse["diagnostics"] {
+  return { perDetector: [] };
+}
+
+/**
+ * Durable analytical state machine (§5–§6).
+ *
+ * RUNNING beats everything (a retry may be in flight). Otherwise the latest
+ * terminal run wins; SUPERSEDED-only history means NO_RUN (safe to re-run).
+ * COMPLETED reuses the pipeline's own presentation state (ok / no-findings /
+ * insufficient-evidence / ...) so completed outcomes keep their exact meaning.
+ */
+export async function getPersistedPatterns(userId: string, window: AnalyticalWindow): Promise<PersistedPatternsResponse> {
   const db = getDb();
-  const run = await db.patternAnalysisRun.findFirst({
-    where: {
-      userId,
-      windowStart: new Date(window.start),
-      windowEnd: new Date(window.end),
-      status: "COMPLETED",
-    },
-    orderBy: { computedAt: "desc" },
-  });
-  if (!run) {
-    return { state: "pending", window, patterns: [], diagnostics: { perDetector: [] } };
+  const whereWindow = {
+    userId,
+    windowStart: new Date(window.start),
+    windowEnd: new Date(window.end),
+  };
+  const [running, completed, failed] = await Promise.all([
+    db.patternAnalysisRun.findFirst({
+      where: { ...whereWindow, status: "RUNNING" },
+      orderBy: { updatedAt: "desc" },
+      select: { id: true, updatedAt: true },
+    }),
+    db.patternAnalysisRun.findFirst({
+      where: { ...whereWindow, status: "COMPLETED" },
+      orderBy: { computedAt: "desc" },
+    }),
+    db.patternAnalysisRun.findFirst({
+      where: { ...whereWindow, status: "FAILED" },
+      orderBy: { computedAt: "desc" },
+    }),
+  ]);
+  const preferences = await db.userPreference.findUnique({ where: { userId } });
+  const history = await readRecordingHistory(userId, preferences?.timezone ?? "UTC");
+  const activity: PatternReadiness["activity"] = history.recordedDays > 0 ? "recorded" : "none";
+
+  if (running) {
+    return {
+      state: "RUNNING", runStatus: "RUNNING", runId: running.id, computedAt: null,
+      window, patterns: [], diagnostics: emptyDiagnostics(),
+      readiness: { activity, evidence: "unknown", analysis: "running", patterns: "unknown" },
+    };
   }
-  const findings = await db.patternFinding.findMany({
-    where: { runId: run.id },
-    orderBy: { patternId: "asc" },
-  });
-  const patterns = findings.map((f) => f.resultJson as unknown as BehavioralPatternOutput);
-  const diagnostics = (run.diagnosticsJson ?? { perDetector: [] }) as unknown as PatternsResponse["diagnostics"];
-  return { state: (run.state ?? "ok") as PatternsState, window, patterns, diagnostics };
+  if (completed) {
+    const findings = await db.patternFinding.findMany({
+      where: { runId: completed.id },
+      orderBy: { patternId: "asc" },
+    });
+    const patterns = findings.map((f) => f.resultJson as unknown as BehavioralPatternOutput);
+    const diagnostics = (completed.diagnosticsJson ?? emptyDiagnostics()) as unknown as PatternsResponse["diagnostics"];
+    const evidence: PatternReadiness["evidence"] = diagnostics.perDetector.some(
+      (d) => (d.eligibleOccasions ?? 0) > 0,
+    ) ? "sufficient" : "insufficient";
+    return {
+      state: (completed.state ?? "ok") as PatternsState, runStatus: "COMPLETED",
+      runId: completed.id, computedAt: completed.computedAt?.toISOString() ?? null,
+      window, patterns, diagnostics,
+      readiness: { activity, evidence, analysis: "completed", patterns: patterns.length > 0 ? "found" : "none" },
+    };
+  }
+  if (failed) {
+    return {
+      state: "FAILED", runStatus: "FAILED", runId: failed.id,
+      computedAt: failed.computedAt?.toISOString() ?? null,
+      window, patterns: [], diagnostics: emptyDiagnostics(),
+      readiness: { activity, evidence: "unknown", analysis: "failed", patterns: "unknown" },
+    };
+  }
+  return {
+    state: "NO_RUN", runStatus: "NO_RUN", runId: null, computedAt: null,
+    window, patterns: [], diagnostics: emptyDiagnostics(),
+    readiness: { activity, evidence: "unknown", analysis: "never", patterns: "unknown" },
+  };
 }
 
 export async function runPatternPipeline(userId: string, window: AnalyticalWindow): Promise<PatternsResponse> {

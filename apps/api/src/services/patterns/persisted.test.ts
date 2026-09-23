@@ -42,19 +42,107 @@ function patternResult(patternId: string) {
 
 afterEach(resetTestDb);
 
+function emptyRunDb() {
+  return {
+    patternAnalysisRun: { findFirst: async () => null },
+    patternFinding: { findMany: async () => [] },
+    userPreference: { findUnique: async () => null },
+    normalizedActivity: { findMany: async () => [] },
+  };
+}
+
 describe("persisted pattern reads", () => {
-  it("returns pending when no analysis run exists for the window", async () => {
+  it("returns NO_RUN when no analysis run exists for the window", async () => {
+    setTestDb(emptyRunDb());
+    const res = await request(createApp())
+      .get("/api/patterns?from=2026-09-01&to=2026-09-15")
+      .set(auth);
+    expect(res.status).toBe(200);
+    expect(res.body.state).toBe("NO_RUN");
+    expect(res.body.runStatus).toBe("NO_RUN");
+    expect(res.body.runId).toBeNull();
+    expect(res.body.patterns).toEqual([]);
+    expect(res.body.readiness.analysis).toBe("never");
+    expect(res.body.readiness.activity).toBe("none");
+    expect(res.body.window).toEqual({ start: "2026-09-01T00:00:00.000Z", end: "2026-09-15T00:00:00.000Z" });
+  });
+
+  it("returns RUNNING while a run executes, never a fabricated finding", async () => {
     setTestDb({
-      patternAnalysisRun: { findFirst: async () => null },
-      patternFinding: { findMany: async () => [] },
+      ...emptyRunDb(),
+      patternAnalysisRun: {
+        findFirst: async ({ where }: { where: Record<string, unknown> }) =>
+          where.status === "RUNNING" ? { id: "run-running", updatedAt: new Date().toISOString() } : null,
+      },
     });
     const res = await request(createApp())
       .get("/api/patterns?from=2026-09-01&to=2026-09-15")
       .set(auth);
     expect(res.status).toBe(200);
-    expect(res.body.state).toBe("pending");
+    expect(res.body.state).toBe("RUNNING");
+    expect(res.body.runStatus).toBe("RUNNING");
     expect(res.body.patterns).toEqual([]);
-    expect(res.body.window).toEqual({ start: "2026-09-01T00:00:00.000Z", end: "2026-09-15T00:00:00.000Z" });
+    expect(res.body.readiness.analysis).toBe("running");
+  });
+
+  it("returns FAILED with run id when the latest run failed", async () => {
+    setTestDb({
+      ...emptyRunDb(),
+      patternAnalysisRun: {
+        findFirst: async ({ where }: { where: Record<string, unknown> }) =>
+          where.status === "FAILED"
+            ? { id: "run-failed", computedAt: new Date("2026-09-15T00:00:00.000Z") }
+            : null,
+      },
+    });
+    const res = await request(createApp())
+      .get("/api/patterns?from=2026-09-01&to=2026-09-15")
+      .set(auth);
+    expect(res.status).toBe(200);
+    expect(res.body.state).toBe("FAILED");
+    expect(res.body.runStatus).toBe("FAILED");
+    expect(res.body.runId).toBe("run-failed");
+    expect(res.body.patterns).toEqual([]);
+    expect(res.body.readiness.analysis).toBe("failed");
+  });
+
+  it("returns NO_RUN when only superseded history exists", async () => {
+    setTestDb(emptyRunDb());
+    const res = await request(createApp())
+      .get("/api/patterns?from=2026-09-01&to=2026-09-15")
+      .set(auth);
+    expect(res.body.runStatus).toBe("NO_RUN");
+  });
+
+  it("reports COMPLETED with zero findings as stored pipeline state, not as running", async () => {
+    const run = {
+      id: "run-empty",
+      state: "insufficient-evidence",
+      computedAt: new Date("2026-09-15T00:00:00.000Z"),
+      diagnosticsJson: {
+        perDetector: [{ identity: "extended_continuous_activity", status: "INSUFFICIENT_EVIDENCE", eligibleOccasions: 1, eligibleDays: 1, meanCoverageRatio: 0.9, availability: "AVAILABLE" }],
+      },
+    };
+    setTestDb({
+      ...emptyRunDb(),
+      patternAnalysisRun: {
+        findFirst: async ({ where }: { where: Record<string, unknown> }) =>
+          where.status === "COMPLETED" ? run : null,
+      },
+    });
+    const res = await request(createApp())
+      .get("/api/patterns?from=2026-09-01&to=2026-09-15")
+      .set(auth);
+    expect(res.status).toBe(200);
+    expect(res.body.runStatus).toBe("COMPLETED");
+    expect(res.body.state).toBe("insufficient-evidence");
+    expect(res.body.patterns).toEqual([]);
+    expect(res.body.readiness).toEqual({
+      activity: "none",
+      evidence: "sufficient",
+      analysis: "completed",
+      patterns: "none",
+    });
   });
 
   it("returns persisted patterns and diagnostics from the completed run", async () => {
@@ -69,9 +157,10 @@ describe("persisted pattern reads", () => {
     };
     const stored = patternResult("pattern-abc");
     setTestDb({
+      ...emptyRunDb(),
       patternAnalysisRun: {
         findFirst: async ({ where }: { where: Record<string, unknown> }) =>
-          where.userId === run.userId ? run : null,
+          where.status === "COMPLETED" && where.userId === run.userId ? { ...run, computedAt: new Date("2026-09-15T00:00:00.000Z") } : null,
       },
       patternFinding: {
         findMany: async ({ where }: { where: Record<string, unknown> }) =>
@@ -83,6 +172,9 @@ describe("persisted pattern reads", () => {
       .set(auth);
     expect(res.status).toBe(200);
     expect(res.body.state).toBe("ok");
+    expect(res.body.runStatus).toBe("COMPLETED");
+    expect(res.body.computedAt).toBe("2026-09-15T00:00:00.000Z");
+    expect(res.body.readiness.patterns).toBe("found");
     expect(res.body.patterns).toHaveLength(1);
     expect(res.body.patterns[0].metadata.patternId).toBe("pattern-abc");
     expect(res.body.patterns[0].claim).toContain("longer than before");
@@ -94,9 +186,10 @@ describe("persisted pattern reads", () => {
     const runA = { id: "run-a", userId, state: "ok", diagnosticsJson: { perDetector: [] } };
     const storedA = patternResult("pattern-user-a");
     const db = {
+      ...emptyRunDb(),
       patternAnalysisRun: {
         findFirst: async ({ where }: { where: Record<string, unknown> }) =>
-          where.userId === runA.userId ? runA : null,
+          where.status === "COMPLETED" && where.userId === runA.userId ? runA : null,
       },
       patternFinding: {
         findMany: async ({ where }: { where: Record<string, unknown> }) =>

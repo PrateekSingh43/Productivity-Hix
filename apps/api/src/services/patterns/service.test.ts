@@ -285,9 +285,9 @@ describe("Patterns and Insights orchestration contracts", () => {
     fixture({ count: 0, history: false });
     const app = createApp();
     const header = { "x-user-id": "00000000-0000-0000-0000-000000000001" };
-    // /api/patterns reads persisted worker output: no run yet -> pending.
+    // /api/patterns reads persisted worker output: no run yet -> NO_RUN.
     // /api/insights still computes synchronously -> no-observations.
-    const expected: Record<string, string> = { "/api/patterns": "pending", "/api/insights": "no-observations" };
+    const expected: Record<string, string> = { "/api/patterns": "NO_RUN", "/api/insights": "no-observations" };
     for (const path of ["/api/patterns", "/api/insights"]) {
       expect((await request(app).get(path)).status).toBe(401);
       const response = await request(app).get(`${path}?from=2026-09-01&to=2026-09-15`).set(header);
