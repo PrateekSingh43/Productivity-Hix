@@ -5,8 +5,19 @@ export type AnalyticsState =
   | "no-observations"
   | "insufficient-evidence"
   | "no-findings"
-  | "pending"
+  | "NO_RUN"
+  | "RUNNING"
+  | "FAILED"
   | "ok";
+
+export type PatternRunStatus = "NO_RUN" | "RUNNING" | "COMPLETED" | "FAILED";
+
+export interface PatternReadiness {
+  activity: "recorded" | "none";
+  evidence: "sufficient" | "insufficient" | "unknown";
+  analysis: "completed" | "running" | "failed" | "never";
+  patterns: "found" | "none" | "unknown";
+}
 
 export interface AnalyticsPeriod {
   from: string;
@@ -119,6 +130,10 @@ export interface AnalyticsResponse {
 export interface PatternsResponse extends AnalyticsResponse {
   window: AnalyticsPeriod;
   patterns: BehavioralPatternOutput[];
+  runStatus?: PatternRunStatus;
+  runId?: string | null;
+  computedAt?: string | null;
+  readiness?: PatternReadiness;
 }
 
 export interface InsightsResponse extends AnalyticsResponse {

@@ -10,8 +10,8 @@ export const analyticsQueries = {
     queryOptions({
       queryKey: [...analyticsQueries.all(), "patterns", period.from, period.to] as const,
       queryFn: () => getPatterns(period),
-      staleTime: (query) => (query.state.data?.state === "pending" ? 0 : 60_000),
-      refetchInterval: (query) => (query.state.data?.state === "pending" ? 2500 : false),
+      staleTime: (query) => (query.state.data?.state === "RUNNING" ? 0 : 60_000),
+      refetchInterval: (query) => (query.state.data?.state === "RUNNING" ? 2500 : false),
     }),
   insights: (period: AnalyticsPeriod) =>
     queryOptions({
