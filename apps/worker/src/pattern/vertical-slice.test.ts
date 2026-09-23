@@ -79,7 +79,8 @@ function createFakeDb() {
   const runs: any[] = [];
   const findings: any[] = [];
   let ids = 0;
-  return {
+  const db: any = {
+    $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(db),
     runs,
     findings,
     patternAnalysisRun: {
@@ -96,7 +97,16 @@ function createFakeDb() {
         runs.push(row);
         return row;
       },
-      updateMany: async () => ({ count: 0 }),
+      updateMany: async ({ where, data }: any) => {
+        let count = 0;
+        for (const row of runs) {
+          if (Object.entries(where).every(([k, v]) => (row as any)[k] === v)) {
+            Object.assign(row, data);
+            count++;
+          }
+        }
+        return { count };
+      },
     },
     patternFinding: {
       findMany: async ({ where }: any) =>
@@ -117,6 +127,7 @@ function createFakeDb() {
       update: async () => ({}),
     },
   };
+  return db;
 }
 
 describe("Pattern vertical slice", () => {
@@ -163,7 +174,14 @@ describe("Pattern vertical slice", () => {
     // 3. Worker runs the envelope through real BaseWorker semantics.
     const provider: PatternDataProvider = {
       loadInput: async () => emptyInput(),
-      readWatermarks: async () => ({ maxSourceAt: WINDOW.end }),
+      readWatermarks: async () => ({
+        maxSourceAt: WINDOW.end,
+        activityCount: 0,
+        activityDurationSum: 0,
+        sessionCount: 0,
+        checkInCount: 0,
+        taskCount: 0,
+      }),
     };
     const worker = new PatternWorker(db as never, provider);
     const result = await worker.run(envelope, {

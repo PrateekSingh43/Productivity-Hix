@@ -53,28 +53,26 @@ function serializeEvent(row: {
   };
 }
 
+/**
+ * Source-faithful session mapping.
+ *
+ * Unlike the API session serializer, this MUST NOT heuristically rewrite
+ * `startedAt` (recovery from createdAt/durationSeconds). Pattern Analytics is
+ * a consumer of source truth: an inconsistent source record is passed through
+ * as stored, and detectors qualify or exclude it on their own coverage rules.
+ */
 function serializeSession(row: {
   id: string; userId: string; taskId: string | null;
   startedAt: Date; endedAt: Date | null;
   durationSeconds: number | null; targetDurationMinutes?: number | null;
   isPaused?: boolean | null; pausedAt?: Date | null; lastResumedAt?: Date | null;
-  source: string; notes?: string | null; createdAt?: Date | null;
+  source: string; notes?: string | null;
 }): WorkSession {
-  let effectiveStart = row.startedAt;
-  if (row.createdAt && row.startedAt.getTime() > row.createdAt.getTime() + 5000) {
-    effectiveStart = row.createdAt;
-  }
-  if (row.endedAt && row.durationSeconds) {
-    const wallClockSec = Math.round((row.endedAt.getTime() - effectiveStart.getTime()) / 1000);
-    if (wallClockSec < row.durationSeconds) {
-      effectiveStart = new Date(Math.min(effectiveStart.getTime(), row.endedAt.getTime() - row.durationSeconds * 1000));
-    }
-  }
   return {
     id: row.id,
     userId: row.userId,
     taskId: row.taskId,
-    startedAt: effectiveStart.toISOString(),
+    startedAt: row.startedAt.toISOString(),
     endedAt: row.endedAt?.toISOString() ?? null,
     durationSeconds: row.durationSeconds ?? 0,
     targetDurationMinutes: row.targetDurationMinutes ?? null,
@@ -226,7 +224,7 @@ export class PrismaPatternDataProvider implements PatternDataProvider {
     const { userId } = data;
     const from = new Date(subtractCalendarDays(data.windowStart, 30, "UTC"));
     const to = new Date(data.windowEnd);
-    const [activity, sessions, checkIns, tasks] = await Promise.all([
+    const [activity, sessions, checkIns, tasks, activityAgg, sessionCount, checkInCount, taskCount] = await Promise.all([
       this.db.normalizedActivity.findMany({
         where: { userId, timestamp: { gte: from, lt: to } },
         select: { createdAt: true }, orderBy: { createdAt: "desc" }, take: 1,
@@ -243,6 +241,14 @@ export class PrismaPatternDataProvider implements PatternDataProvider {
         where: { userId },
         select: { updatedAt: true }, orderBy: { updatedAt: "desc" }, take: 1,
       }),
+      this.db.normalizedActivity.aggregate({
+        where: { userId, timestamp: { gte: from, lt: to } },
+        _count: { _all: true },
+        _sum: { duration: true },
+      }),
+      this.db.workSession.count({ where: { userId, startedAt: { lt: to } } }),
+      this.db.checkIn.count({ where: { userId, createdAt: { gte: from, lt: to } } }),
+      this.db.task.count({ where: { userId } }),
     ]);
     const stamps = [
       activity[0]?.createdAt?.toISOString(),
@@ -250,6 +256,13 @@ export class PrismaPatternDataProvider implements PatternDataProvider {
       checkIns[0]?.createdAt?.toISOString(),
       tasks[0]?.updatedAt?.toISOString(),
     ].filter((s): s is string => Boolean(s)).sort();
-    return { maxSourceAt: stamps[stamps.length - 1] ?? "1970-01-01T00:00:00.000Z" };
+    return {
+      maxSourceAt: stamps[stamps.length - 1] ?? "1970-01-01T00:00:00.000Z",
+      activityCount: activityAgg._count._all,
+      activityDurationSum: activityAgg._sum.duration ?? 0,
+      sessionCount,
+      checkInCount,
+      taskCount,
+    };
   }
 }

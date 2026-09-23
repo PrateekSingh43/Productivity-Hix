@@ -154,8 +154,8 @@ export class PatternWorker extends BaseWorker<PatternAnalysisJobData, PatternWor
     this.preFingerprints.delete(identityKey);
     if (current !== stashed) {
       await this.db.patternAnalysisRun.updateMany({
-        where: { userId: data.userId, identityKey },
-        data: { status: "SUPERSEDED", updatedAt: new Date() },
+        where: { userId: data.userId, identityKey, jobCorrelationId: data.jobCorrelationId, status: "RUNNING" },
+        data: { status: "SUPERSEDED", state: "superseded", updatedAt: new Date() },
       });
       return true;
     }
@@ -167,6 +167,7 @@ export class PatternWorker extends BaseWorker<PatternAnalysisJobData, PatternWor
     const inputFingerprint = this.preFingerprints.get(identityKey) ?? await this.computeFingerprint(data);
     context.throwIfCancelled();
 
+    // Claim the run (visible RUNNING). All result publication below is atomic.
     const run = await this.db.patternAnalysisRun.upsert({
       where: { userId_identityKey: { userId: data.userId, identityKey } },
       create: {
@@ -190,6 +191,7 @@ export class PatternWorker extends BaseWorker<PatternAnalysisJobData, PatternWor
       },
     });
 
+    // Compute entirely in memory: no partial findings ever become visible.
     const selected = new Set(this.selectedDetectors(data));
     const input: PatternPipelineInput = await this.provider.loadInput(data);
     context.throwIfCancelled();
@@ -198,52 +200,80 @@ export class PatternWorker extends BaseWorker<PatternAnalysisJobData, PatternWor
 
     const patterns = result.patterns.filter((p) => selected.has(p.detectorIdentity));
     const state = patterns.length > 0 ? "ok" : result.state === "ok" ? "no-findings" : result.state;
+    const findings = patterns.map((pattern) => ({
+      patternKey: `pattern:${pattern.metadata.patternId}:${PATTERN_ENGINE_VERSION}:${PATTERN_CONFIG_VERSION}`,
+      detectorIdentity: pattern.detectorIdentity,
+      patternId: pattern.metadata.patternId,
+      status: pattern.executionStatus,
+      resultJson: JSON.parse(JSON.stringify(pattern)) as Prisma.InputJsonValue,
+    }));
+    const diagnosticsJson = JSON.parse(JSON.stringify(result.diagnostics)) as Prisma.InputJsonValue;
 
-    for (const pattern of patterns) {
-      const patternKey = `pattern:${pattern.metadata.patternId}:${PATTERN_ENGINE_VERSION}:${PATTERN_CONFIG_VERSION}`;
-      const resultJson = JSON.parse(JSON.stringify(pattern)) as Prisma.InputJsonValue;
-      await this.db.patternFinding.upsert({
-        where: { userId_patternKey: { userId: data.userId, patternKey } },
-        create: {
-          userId: data.userId,
-          runId: run.id,
-          patternKey,
-          detectorIdentity: pattern.detectorIdentity,
-          patternId: pattern.metadata.patternId,
-          status: pattern.executionStatus,
-          resultJson,
-        },
-        update: {
-          runId: run.id,
-          status: pattern.executionStatus,
-          resultJson,
-        },
+    // Freshness gate: never commit results computed from stale inputs.
+    // BaseWorker's post-check runs after execute; this gate prevents a stale
+    // COMPLETED row from ever becoming durable truth in between.
+    const freshFingerprint = await this.computeFingerprint(data);
+    if (freshFingerprint !== inputFingerprint) {
+      await this.db.patternAnalysisRun.updateMany({
+        where: { userId: data.userId, identityKey, jobCorrelationId: data.jobCorrelationId, status: "RUNNING" },
+        data: { status: "SUPERSEDED", state: "superseded" },
       });
-    }
-    const liveKeys = new Set(patterns.map((p) =>
-      `pattern:${p.metadata.patternId}:${PATTERN_ENGINE_VERSION}:${PATTERN_CONFIG_VERSION}`));
-    const previous = await this.db.patternFinding.findMany({ where: { runId: run.id }, select: { id: true, patternKey: true } });
-    for (const row of previous) {
-      if (!liveKeys.has(row.patternKey)) {
-        await this.db.patternFinding.delete({ where: { id: row.id } });
-      }
+      return { runId: run.id, state: "superseded", patternsFound: 0 };
     }
 
-    await this.db.patternAnalysisRun.update({
-      where: { id: run.id },
-      data: {
-        status: "COMPLETED",
-        state,
-        diagnosticsJson: JSON.parse(JSON.stringify(result.diagnostics)) as Prisma.InputJsonValue,
-        computedAt: new Date(),
-      },
+    // Atomic publication: findings + diagnostics + terminal state commit together.
+    // A concurrent owner (newer retry) is never overwritten: guard on correlation id.
+    await this.db.$transaction(async (tx) => {
+      const liveKeys = new Set(findings.map((f) => f.patternKey));
+      const previous = await tx.patternFinding.findMany({
+        where: { runId: run.id },
+        select: { id: true, patternKey: true },
+      });
+      for (const pattern of findings) {
+        await tx.patternFinding.upsert({
+          where: { userId_patternKey: { userId: data.userId, patternKey: pattern.patternKey } },
+          create: { userId: data.userId, runId: run.id, ...pattern },
+          update: { runId: run.id, status: pattern.status, resultJson: pattern.resultJson },
+        });
+      }
+      for (const row of previous) {
+        if (!liveKeys.has(row.patternKey)) {
+          await tx.patternFinding.delete({ where: { id: row.id } });
+        }
+      }
+      const claimed = await tx.patternAnalysisRun.updateMany({
+        where: { id: run.id, jobCorrelationId: data.jobCorrelationId, status: "RUNNING" },
+        data: { status: "COMPLETED", state, diagnosticsJson, computedAt: new Date() },
+      });
+      if (claimed.count !== 1) {
+        throw new WorkerPermanentError(
+          `Pattern run ${run.id} no longer owned by job ${data.jobCorrelationId}; refusing partial publish.`,
+        );
+      }
     });
 
     return { runId: run.id, state, patternsFound: patterns.length };
   }
 
-  async onFailure(data: PatternAnalysisJobData | undefined): Promise<void> {
+  /**
+   * Durable terminal failure. Runs owned by THIS job (correlation id +
+   * still RUNNING) move to FAILED with sanitized error info; runs owned by a
+   * newer retry are never clobbered. Retries re-claim via execute()'s upsert.
+   */
+  async onFailure(data: PatternAnalysisJobData | undefined, error?: Error): Promise<void> {
     if (!data) return;
-    this.preFingerprints.delete(this.getJobIdentity(data));
+    const identityKey = this.getJobIdentity(data);
+    this.preFingerprints.delete(identityKey);
+    const message = error instanceof Error ? error.message : String(error ?? "unknown failure");
+    const code = error && typeof error === "object" && "code" in error ? String((error as { code: unknown }).code) : "UNKNOWN";
+    await this.db.patternAnalysisRun.updateMany({
+      where: { userId: data.userId, identityKey, jobCorrelationId: data.jobCorrelationId, status: "RUNNING" },
+      data: {
+        status: "FAILED",
+        state: "failed",
+        error: `${code}: ${message}`.slice(0, 500),
+        computedAt: new Date(),
+      },
+    });
   }
 }

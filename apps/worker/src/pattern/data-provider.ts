@@ -10,8 +10,18 @@ import type { PatternAnalysisJobData } from "@repo/types";
 import type { PatternPipelineInput } from "@repo/analytics";
 
 export interface SourceWatermarks {
-  /** Max source-data timestamp observed (ISO). Any change => inputs changed. */
+  /**
+   * Max source-data timestamp observed (ISO).
+   * Counts/sums are included because a source record can change in place
+   * (e.g. telemetry duration growth) without changing its creation timestamp.
+   * Any change => inputs changed.
+   */
   maxSourceAt: string;
+  activityCount: number;
+  activityDurationSum: number;
+  sessionCount: number;
+  checkInCount: number;
+  taskCount: number;
 }
 
 export interface PatternDataProvider {

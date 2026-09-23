@@ -71,6 +71,7 @@ interface FakeRunRow {
   configVersion: string;
   jobCorrelationId: string | null;
   computedAt: string | null;
+  error?: string | null;
 }
 
 function createFakeDb() {
@@ -78,8 +79,15 @@ function createFakeDb() {
   const findings: Array<Record<string, unknown>> = [];
   let ids = 0;
   const match = (row: FakeRunRow, where: Record<string, unknown>) =>
-    Object.entries(where).every(([k, v]) => (row as unknown as Record<string, unknown>)[k] === v);
-  return {
+    Object.entries(where).every(([k, v]) => {
+      const actual = (row as unknown as Record<string, unknown>)[k];
+      if (v && typeof v === "object" && "gt" in (v as Record<string, unknown>)) {
+        return (actual as string) > String((v as Record<string, unknown>).gt);
+      }
+      return actual === v;
+    });
+  const db = {
+    $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(db),
     runs,
     findings,
     patternAnalysisRun: {
@@ -140,11 +148,21 @@ function createFakeDb() {
       },
     },
   };
+  return db;
 }
 
 export type FakeDb = ReturnType<typeof createFakeDb>;
 
-function stubProvider(input: PatternPipelineInput, watermarksSequence: SourceWatermarks[] = [{ maxSourceAt: "2026-09-15T00:00:00.000Z" }]) {
+const BASE_WATERMARKS: SourceWatermarks = {
+  maxSourceAt: "2026-09-15T00:00:00.000Z",
+  activityCount: 0,
+  activityDurationSum: 0,
+  sessionCount: 0,
+  checkInCount: 0,
+  taskCount: 0,
+};
+
+function stubProvider(input: PatternPipelineInput, watermarksSequence: SourceWatermarks[] = [BASE_WATERMARKS]) {
   let watermarkCalls = 0;
   let loadCalls = 0;
   const provider: PatternDataProvider = {
@@ -244,13 +262,68 @@ describe("PatternWorker", () => {
 
   it("discards stale output when inputs change mid-run (supersession)", async () => {
     const { provider } = stubProvider(emptyInput(), [
-      { maxSourceAt: "2026-09-15T00:00:00.000Z" },
-      { maxSourceAt: "2026-09-16T00:00:00.000Z" },
+      BASE_WATERMARKS,
+      { ...BASE_WATERMARKS, maxSourceAt: "2026-09-16T00:00:00.000Z" },
     ]);
     const worker = new PatternWorker(db as never, provider);
     const result = await worker.run(job(), { metrics, logger, idempotencyProvider: locks });
     expect(result.status).toBe("SUPERSEDED");
     expect(db.runs.every((r) => r.status !== "COMPLETED")).toBe(true);
+  });
+
+  it("persists FAILED durably when execution throws, never leaving RUNNING", async () => {
+    const failing: PatternDataProvider = {
+      loadInput: async () => { throw new Error("synthetic detector failure"); },
+      readWatermarks: async () => BASE_WATERMARKS,
+    };
+    const worker = new PatternWorker(db as never, failing);
+    await expect(
+      worker.run(job(), { metrics, logger, idempotencyProvider: locks })
+    ).rejects.toThrow("synthetic detector failure");
+    expect(db.runs).toHaveLength(1);
+    expect(db.runs[0]!.status).toBe("FAILED");
+    expect(db.runs[0]!.error).toContain("synthetic detector failure");
+    expect(db.runs[0]!.computedAt).toBeTruthy();
+    expect(db.findings).toHaveLength(0);
+  });
+
+  it("a retry after failure can succeed and replaces the FAILED run", async () => {
+    let calls = 0;
+    const flaky: PatternDataProvider = {
+      loadInput: async () => {
+        calls++;
+        if (calls === 1) throw new Error("transient failure");
+        return emptyInput();
+      },
+      readWatermarks: async () => BASE_WATERMARKS,
+    };
+    const worker = new PatternWorker(db as never, flaky);
+    await expect(
+      worker.run(job(), { metrics, logger, idempotencyProvider: locks })
+    ).rejects.toThrow("transient failure");
+    expect(db.runs[0]!.status).toBe("FAILED");
+    const retry = await worker.run(job(), { metrics, logger, idempotencyProvider: locks });
+    expect(retry.status).toBe("SUCCEEDED");
+    expect(db.runs).toHaveLength(1);
+    expect(db.runs[0]!.status).toBe("COMPLETED");
+    expect(db.runs[0]!.error).toBeNull();
+  });
+
+  it("onFailure only marks runs owned by the failing job's correlation id", async () => {
+    const { provider } = stubProvider(emptyInput());
+    const worker = new PatternWorker(db as never, provider);
+    const data = worker.validate(job({ jobCorrelationId: "corr-stale-owner" }));
+    const identityKey = worker.getJobIdentity(data);
+    db.runs.push({
+      id: "run-newer", userId: USER, windowStart: WINDOW.start, windowEnd: WINDOW.end,
+      identityKey, inputFingerprint: "fp-newer", status: "RUNNING", state: "pending",
+      diagnosticsJson: null, detectorVersion: "1.0.0", configVersion: "api-prototype-1",
+      jobCorrelationId: "corr-newer-owner", computedAt: null,
+    } as never);
+    await worker.onFailure(data, new Error("stale owner failure"));
+    const row = db.runs.find((r) => r.id === "run-newer")!;
+    expect(row.status).toBe("RUNNING");
+    expect(row.error).toBeUndefined();
   });
 
   it("never imports the AI package in the pattern computation path", () => {
