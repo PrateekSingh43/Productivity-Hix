@@ -14,6 +14,7 @@ import {
   Network,
   Laptop,
   Settings,
+  Sparkles,
   PanelLeftClose,
   PanelLeftOpen,
 } from "lucide-react";
@@ -37,6 +38,7 @@ const navGroups: NavGroup[] = [
     items: [
       { href: "/", label: "Home", icon: Compass },
       { href: "/today", label: "Today", icon: Calendar },
+      { href: "/ai", label: "AI", icon: Sparkles },
     ],
   },
   {
@@ -90,24 +92,53 @@ export function Sidebar({ isMobile = false }: { isMobile?: boolean }) {
     >
       {/* Brand Header: Standardized h-14 to align with top bar divider */}
       <div className={`h-14 flex items-center border-b border-border-subtle shrink-0 ${effectiveCollapsed ? 'justify-center' : 'justify-between px-3.5'}`}>
-        <Link
-          href="/"
-          className={`flex items-center gap-2.5 group overflow-hidden ${effectiveCollapsed ? 'justify-center w-full' : ''}`}
-          title="ProductiveHix"
-        >
-          <div className="h-6 w-6 rounded-[var(--radius-sm)] overflow-hidden flex items-center justify-center shrink-0 transition-transform group-hover:scale-105">
-            <img
-              src="/icon.png"
-              alt="ProductiveHix"
-              className="w-5 h-5 rounded-[var(--radius-sm)] object-contain"
-            />
+        {effectiveCollapsed && !isMobile ? (
+          /* Collapsed identity + hover expand affordance. The expand button
+             overlays the same icon box on hover/focus only: no layout shift,
+             keyboard-focusable real button, home navigation preserved. */
+          <div className="group relative h-6 w-6">
+            <Link
+              href="/"
+              className="flex h-full w-full items-center justify-center rounded-[var(--radius-sm)] overflow-hidden transition-transform group-hover:scale-105 group-focus-within:scale-105"
+              title="ProductiveHix"
+              aria-label="ProductiveHix home"
+            >
+              <img
+                src="/icon.png"
+                alt=""
+                className="w-5 h-5 rounded-[var(--radius-sm)] object-contain transition-opacity group-hover:opacity-0 group-focus-within:opacity-0"
+              />
+            </Link>
+            <button
+              type="button"
+              onClick={toggleSidebar}
+              className="absolute inset-0 flex items-center justify-center rounded-[var(--radius-sm)] text-text-tertiary opacity-0 pointer-events-none transition-opacity hover:text-text-primary hover:bg-bg-secondary group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-default cursor-pointer"
+              title="Expand sidebar"
+              aria-label="Expand sidebar"
+            >
+              <PanelLeftOpen size={16} />
+            </button>
           </div>
-          {!effectiveCollapsed && (
-            <span className="text-sm font-semibold tracking-tight text-text-primary truncate">
-              ProductiveHix
-            </span>
-          )}
-        </Link>
+        ) : (
+          <Link
+            href="/"
+            className="flex items-center gap-2.5 group overflow-hidden"
+            title="ProductiveHix"
+          >
+            <div className="h-6 w-6 rounded-[var(--radius-sm)] overflow-hidden flex items-center justify-center shrink-0 transition-transform group-hover:scale-105">
+              <img
+                src="/icon.png"
+                alt="ProductiveHix"
+                className="w-5 h-5 rounded-[var(--radius-sm)] object-contain"
+              />
+            </div>
+            {!effectiveCollapsed && (
+              <span className="text-sm font-semibold tracking-tight text-text-primary truncate">
+                ProductiveHix
+              </span>
+            )}
+          </Link>
+        )}
         {!isMobile && !effectiveCollapsed && (
           <button
             type="button"
