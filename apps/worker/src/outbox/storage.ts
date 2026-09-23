@@ -10,8 +10,12 @@ export interface CreateOutboxEventParams<T = unknown> {
   aggregateType: string;
   aggregateId: string;
   payload: T;
-  maxRetries?: number;
-  scheduledFor?: Date;
+  correlationId: string;
+  causationId?: string | null;
+  schemaVersion?: string;
+  occurredAt?: Date;
+  availableAt?: Date;
+  maxAttempts?: number;
 }
 
 export type PrismaTransactionClient = Prisma.TransactionClient;
@@ -24,15 +28,24 @@ export async function createOutboxEventTx<T = unknown>(
   tx: PrismaTransactionClient,
   params: CreateOutboxEventParams<T>
 ): Promise<OutboxEvent> {
+  const now = new Date();
   return await tx.outboxEvent.create({
     data: {
       eventType: params.eventType,
       aggregateType: params.aggregateType,
       aggregateId: params.aggregateId,
       payload: params.payload as Prisma.InputJsonValue,
-      maxRetries: params.maxRetries ?? 5,
-      scheduledFor: params.scheduledFor ?? new Date(),
+      correlationId: params.correlationId,
+      causationId: params.causationId ?? null,
+      schemaVersion: params.schemaVersion ?? '1.0.0',
+      occurredAt: params.occurredAt ?? now,
       status: 'PENDING',
+      publicationAttemptCount: 0,
+      maxAttempts: params.maxAttempts ?? 5,
+      availableAt: params.availableAt ?? now,
+      lastError: null,
+      claimedBy: null,
+      claimExpiresAt: null,
     },
   });
 }

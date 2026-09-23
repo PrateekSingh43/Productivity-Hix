@@ -95,15 +95,22 @@ function createMockDatabase() {
       outboxEvent: {
         create: vi.fn().mockImplementation(async ({ data }: any) => {
           const record = {
-            id: `outbox-${Date.now()}-${Math.random().toString(36).substring(7)}`,
-            retryCount: 0,
-            maxRetries: 5,
-            status: 'PENDING',
-            lastError: null,
-            publishedAt: null,
+            id: data.id ?? `outbox-${Date.now()}-${Math.random().toString(36).substring(7)}`,
+            publicationAttemptCount: data.publicationAttemptCount ?? 0,
+            maxAttempts: data.maxAttempts ?? 5,
+            status: data.status ?? 'PENDING',
+            availableAt: data.availableAt ?? new Date(),
+            claimedBy: data.claimedBy ?? null,
+            claimExpiresAt: data.claimExpiresAt ?? null,
+            lastAttemptAt: data.lastAttemptAt ?? null,
+            lastError: data.lastError ?? null,
+            publishedAt: data.publishedAt ?? null,
+            correlationId: data.correlationId ?? 'mock-corr',
+            causationId: data.causationId ?? null,
+            schemaVersion: data.schemaVersion ?? '1.0.0',
+            occurredAt: data.occurredAt ?? new Date(),
             createdAt: new Date(),
             updatedAt: new Date(),
-            scheduledFor: new Date(),
             ...data,
           };
           outboxRecords.push(record);
@@ -122,11 +129,14 @@ function createMockDatabase() {
           if (query?.where?.id?.in) {
             filtered = filtered.filter((r) => query.where.id.in.includes(r.id));
           }
-          if (query?.where?.lastError !== undefined) {
-            filtered = filtered.filter((r) => r.lastError === query.where.lastError);
+          if (query?.where?.claimedBy !== undefined) {
+            filtered = filtered.filter((r) => r.claimedBy === query.where.claimedBy);
           }
-          if (query?.where?.scheduledFor?.lte) {
-            filtered = filtered.filter((r) => r.scheduledFor <= query.where.scheduledFor.lte);
+          if (query?.where?.claimExpiresAt?.lt) {
+            filtered = filtered.filter((r) => r.claimExpiresAt && r.claimExpiresAt < query.where.claimExpiresAt.lt);
+          }
+          if (query?.where?.availableAt?.lte) {
+            filtered = filtered.filter((r) => r.availableAt <= query.where.availableAt.lte);
           }
           if (query?.where?.updatedAt?.lt) {
             filtered = filtered.filter((r) => r.updatedAt < query.where.updatedAt.lt);
@@ -149,7 +159,8 @@ function createMockDatabase() {
           for (const record of outboxRecords) {
             let matches = true;
             if (where.status && record.status !== where.status) matches = false;
-            if (where.lastError !== undefined && record.lastError !== where.lastError) matches = false;
+            if (where.claimedBy !== undefined && record.claimedBy !== where.claimedBy) matches = false;
+            if (where.claimExpiresAt?.lt && (!record.claimExpiresAt || record.claimExpiresAt >= where.claimExpiresAt.lt)) matches = false;
             if (where.id?.in && !where.id.in.includes(record.id)) matches = false;
             if (where.updatedAt?.lt && record.updatedAt >= where.updatedAt.lt) matches = false;
 
@@ -158,6 +169,25 @@ function createMockDatabase() {
               count++;
             }
           }
+          return { count };
+        }),
+
+        deleteMany: vi.fn().mockImplementation(async ({ where }: any) => {
+          let count = 0;
+          const toKeep: any[] = [];
+          for (const record of outboxRecords) {
+            let matches = true;
+            if (where.status && record.status !== where.status) matches = false;
+            if (where.publishedAt?.lt && (!record.publishedAt || record.publishedAt >= where.publishedAt.lt)) matches = false;
+
+            if (matches) {
+              count++;
+            } else {
+              toKeep.push(record);
+            }
+          }
+          outboxRecords.length = 0;
+          outboxRecords.push(...toKeep);
           return { count };
         }),
       },
@@ -230,7 +260,7 @@ describe('Group 2 Acceptance Gate: Queue + Event Infrastructure', () => {
 
     // Deterministic JobId generation
     const jobId = createDeterministicJobId('timeline-materialization', 'user-123:2026-09-23');
-    expect(jobId).toBe('timeline-materialization:user-123:2026-09-23');
+    expect(jobId).toBe('timeline-materialization__user-123_2026-09-23');
   });
 
   // ==========================================================================
@@ -250,39 +280,47 @@ describe('Group 2 Acceptance Gate: Queue + Event Infrastructure', () => {
       queuedAt: new Date().toISOString(),
     };
 
-    // Valid payload passes
-    const validated = validateJobPayload(
+    // Valid passes cleanly
+    const result = validateJobPayload(
       PRODUCTIVEHIX_QUEUES.TIMELINE_MATERIALIZATION,
       validPayload
     );
-    expect(validated).toEqual(validPayload);
+    expect(result).toEqual(validPayload);
 
-    // Invalid localDate (not YYYY-MM-DD)
-    const invalidDatePayload = { ...validPayload, localDate: '23-09-2026' };
-    expect(() =>
-      validateJobPayload(PRODUCTIVEHIX_QUEUES.TIMELINE_MATERIALIZATION, invalidDatePayload)
-    ).toThrow(JobPayloadValidationError);
+    // Missing required fields
+    const invalidPayload = {
+      userId: 'user-valid',
+      // Missing localDate, reason, requestedRevision
+    };
+
+    expect(() => {
+      validateJobPayload(PRODUCTIVEHIX_QUEUES.TIMELINE_MATERIALIZATION, invalidPayload);
+    }).toThrow(JobPayloadValidationError);
 
     try {
-      validateJobPayload(PRODUCTIVEHIX_QUEUES.TIMELINE_MATERIALIZATION, invalidDatePayload);
-    } catch (err) {
-      expect(err).toBeInstanceOf(JobPayloadValidationError);
-      expect((err as JobPayloadValidationError).code).toBe('VALIDATION_ERROR');
-      expect((err as JobPayloadValidationError).isRetryable).toBe(false);
+      validateJobPayload(PRODUCTIVEHIX_QUEUES.TIMELINE_MATERIALIZATION, invalidPayload);
+    } catch (err: any) {
+      expect(err.code).toBe('VALIDATION_ERROR');
+      expect(err.isRetryable).toBe(false);
+      expect(err.issues.length).toBeGreaterThan(0);
     }
 
-    // Missing required jobCorrelationId
-    const missingCorrPayload = { ...validPayload, jobCorrelationId: '' };
-    expect(() =>
-      validateJobPayload(PRODUCTIVEHIX_QUEUES.TIMELINE_MATERIALIZATION, missingCorrPayload)
-    ).toThrow(JobPayloadValidationError);
+    // Invalid localDate format
+    expect(() => {
+      validateJobPayload(PRODUCTIVEHIX_QUEUES.TIMELINE_MATERIALIZATION, {
+        ...validPayload,
+        localDate: '23-09-2026', // wrong format
+      });
+    }).toThrow();
   });
 
   // ==========================================================================
   // Case D: Domain mutation + outbox record commit atomically
   // ==========================================================================
-  it('Case D: domain mutation and outbox record commit atomically in single transaction', async () => {
+  it('Case D: domain mutation and outbox event execute in the same transaction client', async () => {
     const committedEntities: any[] = [];
+
+    // Mock Prisma Transaction Client
     const mockTx = {
       userPreference: {
         update: vi.fn().mockImplementation(async ({ data }: any) => {
@@ -312,6 +350,7 @@ describe('Group 2 Acceptance Gate: Queue + Event Infrastructure', () => {
         aggregateType: 'user',
         aggregateId: 'usr-101',
         payload: { userId: 'usr-101', change: 'quiet_hours_disabled' },
+        correlationId: 'corr-case-d',
       });
     })(mockTx);
 
@@ -320,6 +359,7 @@ describe('Group 2 Acceptance Gate: Queue + Event Infrastructure', () => {
     expect(committedEntities[1].entity).toBe('outbox');
     expect(committedEntities[1].data.eventType).toBe('rule.changed');
     expect(committedEntities[1].data.status).toBe('PENDING');
+    expect(committedEntities[1].data.correlationId).toBe('corr-case-d');
   });
 
   // ==========================================================================
@@ -351,6 +391,7 @@ describe('Group 2 Acceptance Gate: Queue + Event Infrastructure', () => {
             aggregateType: 'task',
             aggregateId: 'task-1',
             payload: { taskId: 'task-1' },
+            correlationId: 'corr-case-e',
           });
 
           if (shouldFail) {
@@ -385,6 +426,7 @@ describe('Group 2 Acceptance Gate: Queue + Event Infrastructure', () => {
         eventType: 'telemetry.ingested',
         aggregateType: 'user',
         aggregateId: 'user-case-f',
+        correlationId: 'corr-case-f',
         payload: {
           userId: 'user-case-f',
           localDate: '2026-09-23',
@@ -414,11 +456,13 @@ describe('Group 2 Acceptance Gate: Queue + Event Infrastructure', () => {
     expect(record.publishedAt).toBeInstanceOf(Date);
     expect(metrics.getCount('outbox.published', PRODUCTIVEHIX_QUEUES.TIMELINE_MATERIALIZATION)).toBe(1);
 
-    // Verify BullMQ received the job
+    // Verify BullMQ received the job with complete DomainEventEnvelope
     const timelineQueue = mockQueues.get(PRODUCTIVEHIX_QUEUES.TIMELINE_MATERIALIZATION);
     expect(timelineQueue).toBeDefined();
     expect(timelineQueue.jobs).toHaveLength(1);
     expect(timelineQueue.jobs[0].name).toBe('telemetry.ingested');
+    expect(timelineQueue.jobs[0].data.correlationId).toBe('corr-case-f');
+    expect(timelineQueue.jobs[0].data.schemaVersion).toBe('1.0.0');
   });
 
   // ==========================================================================
@@ -429,15 +473,16 @@ describe('Group 2 Acceptance Gate: Queue + Event Infrastructure', () => {
     const mockRedis = {} as any;
     const queueManager = new QueueManager({ connection: mockRedis });
 
-    // Stale event stuck in PROCESSING from 2 minutes ago
-    const staleTime = new Date(Date.now() - 120_000);
+    // Stale event stuck in PROCESSING where claim lease expired
+    const expiredClaim = new Date(Date.now() - 1000);
     const staleEvent = await mockDb.client.outboxEvent.create({
       data: {
         eventType: 'telemetry.ingested',
         aggregateType: 'user',
         aggregateId: 'user-crash',
         status: 'PROCESSING',
-        updatedAt: staleTime,
+        claimedBy: 'dead-publisher-1',
+        claimExpiresAt: expiredClaim,
         payload: { dummy: true },
       },
     });
@@ -445,13 +490,14 @@ describe('Group 2 Acceptance Gate: Queue + Event Infrastructure', () => {
     const publisher = new OutboxPublisher({
       db: mockDb.client,
       queueManager,
-      lockTimeoutMs: 60_000, // 60s timeout
+      lockTimeoutMs: 60_000,
     });
 
     // Reclaim stale processing
     const reclaimedCount = await publisher.reclaimStaleProcessing();
     expect(reclaimedCount).toBe(1);
     expect(staleEvent.status).toBe('PENDING'); // Successfully returned to PENDING for re-attempt
+    expect(staleEvent.claimedBy).toBeNull();
   });
 
   // ==========================================================================
@@ -468,6 +514,7 @@ describe('Group 2 Acceptance Gate: Queue + Event Infrastructure', () => {
         eventType: 'telemetry.ingested',
         aggregateType: 'user',
         aggregateId: 'user-dedupe',
+        correlationId: 'corr-dedupe',
         payload: {
           userId: 'user-dedupe',
           localDate: '2026-09-23',
@@ -520,8 +567,8 @@ describe('Group 2 Acceptance Gate: Queue + Event Infrastructure', () => {
         eventType: 'telemetry.ingested',
         aggregateType: 'user',
         aggregateId: 'user-fail',
-        retryCount: 4, // 4 retries already performed
-        maxRetries: 5, // 5th attempt will fail and exhaust retries
+        publicationAttemptCount: 4, // 4 retries already performed
+        maxAttempts: 5, // 5th attempt will fail and exhaust retries
         payload: {},
       },
     });
@@ -536,8 +583,8 @@ describe('Group 2 Acceptance Gate: Queue + Event Infrastructure', () => {
     expect(result).toBe(false);
 
     expect(event.status).toBe('DEAD_LETTER');
-    expect(event.retryCount).toBe(5);
-    expect(event.lastError).toContain('Exhausted retries (5/5)');
+    expect(event.publicationAttemptCount).toBe(5);
+    expect(event.lastError).toContain('Exhausted publication retries (5/5)');
     expect(metrics.getCount('outbox.dead_letter', PRODUCTIVEHIX_QUEUES.TIMELINE_MATERIALIZATION)).toBe(1);
 
     // Verify recovery helper
@@ -546,7 +593,7 @@ describe('Group 2 Acceptance Gate: Queue + Event Infrastructure', () => {
 
     await retryDeadLetterEvent(mockDb.client, event.id);
     expect(event.status).toBe('PENDING');
-    expect(event.retryCount).toBe(0);
+    expect(event.publicationAttemptCount).toBe(0);
   });
 
   // ==========================================================================

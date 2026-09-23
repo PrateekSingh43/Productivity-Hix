@@ -49,9 +49,12 @@ export function createQueue(queueName: string, options: QueueFactoryOptions): Qu
 
 /**
  * Produces deterministic jobId for queue-level deduplication.
+ * Sanitizes colons because BullMQ forbids ':' in custom job IDs.
  */
 export function createDeterministicJobId(queueName: string, uniqueKey: string): string {
-  return `${queueName}:${uniqueKey}`;
+  const sanitizedQueue = queueName.replace(/:/g, '_');
+  const sanitizedKey = uniqueKey.replace(/:/g, '_');
+  return `${sanitizedQueue}__${sanitizedKey}`;
 }
 
 export interface QueueDepth {

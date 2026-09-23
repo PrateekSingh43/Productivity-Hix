@@ -46,14 +46,17 @@ export async function retryDeadLetterEvent(
   db: Database,
   eventId: string
 ): Promise<OutboxEvent> {
+  const now = new Date();
   return await db.outboxEvent.update({
     where: { id: eventId },
     data: {
       status: 'PENDING',
-      retryCount: 0,
-      scheduledFor: new Date(),
+      publicationAttemptCount: 0,
+      availableAt: now,
+      claimedBy: null,
+      claimExpiresAt: null,
       lastError: null,
-      updatedAt: new Date(),
+      updatedAt: now,
     },
   });
 }

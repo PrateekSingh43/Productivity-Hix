@@ -79,45 +79,122 @@ export const handleTelemetryBatch: RequestHandler = async (request, response, ne
       }
     }
 
-    // Step 1: PostgreSQL is authoritative. Persist updates and inserts to PostgreSQL first.
-    if (updateEvents.length > 0) {
-      for (const u of updateEvents) {
-        if (!u.id || u.id.trim() === "") continue;
-        await prisma.normalizedActivity.update({
-          where: { id: u.id },
+    // Step 1: PostgreSQL is authoritative. Persist updates, inserts, day revision, and outbox in ONE transaction.
+    const correlationId =
+      (request.headers["x-correlation-id"] as string) ||
+      `corr-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+
+    await prisma.$transaction(async (tx) => {
+      if (updateEvents.length > 0) {
+        for (const u of updateEvents) {
+          if (!u.id || u.id.trim() === "") continue;
+          await tx.normalizedActivity.update({
+            where: { id: u.id },
+            data: {
+              duration: u.duration,
+              data: u.data as any,
+            },
+          });
+        }
+      }
+
+      if (newEvents.length > 0) {
+        await tx.normalizedActivity.createMany({
+          data: newEvents.map((e) => {
+            const rawData = (e.data ?? {}) as Record<string, unknown>;
+            const normalizedData: Record<string, unknown> = {
+              ...rawData,
+              provenance: e.provenance ?? {
+                collector: e.source === "browser" ? "browser-extension" : "activitywatch",
+                bucketId: batch.installationId,
+              },
+            };
+            return {
+              userId,
+              externalId: e.eventId,
+              bucketId: e.provenance?.bucketId ?? batch.installationId,
+              source: e.source,
+              watcher: e.eventType,
+              timestamp: new Date(e.timestamp),
+              duration: e.durationMs / 1000,
+              data: normalizedData as any,
+            };
+          }),
+          skipDuplicates: true,
+        });
+      }
+
+      // Group all affected events by localDate (YYYY-MM-DD) to compute scope and update revisions
+      const dateMap = new Map<string, { start: Date; end: Date }>();
+      const allTouched = [
+        ...updateEvents.map((u) => ({
+          timestamp: new Date(),
+          durationMs: u.durationMs,
+        })),
+        ...newEvents.map((e) => ({
+          timestamp: new Date(e.timestamp),
+          durationMs: e.durationMs || 0,
+        })),
+      ];
+
+      for (const item of allTouched) {
+        const localDate = item.timestamp.toISOString().slice(0, 10);
+        const itemEnd = new Date(item.timestamp.getTime() + item.durationMs);
+        const existingScope = dateMap.get(localDate);
+        if (!existingScope) {
+          dateMap.set(localDate, { start: item.timestamp, end: itemEnd });
+        } else {
+          if (item.timestamp < existingScope.start) existingScope.start = item.timestamp;
+          if (itemEnd > existingScope.end) existingScope.end = itemEnd;
+        }
+      }
+
+      // For each affected date: update TimelineDayState revision and emit canonical minimal OutboxEvent
+      for (const [localDate, scope] of dateMap.entries()) {
+        const dayState = await tx.timelineDayState.upsert({
+          where: { userId_localDate: { userId, localDate } },
+          create: {
+            userId,
+            localDate,
+            currentObservationRevision: 1,
+            currentRuleRevision: 0,
+            status: "STALE",
+          },
+          update: {
+            currentObservationRevision: { increment: 1 },
+            status: "STALE",
+            updatedAt: new Date(),
+          },
+        });
+
+        await tx.outboxEvent.create({
           data: {
-            duration: u.duration,
-            data: u.data as any,
+            eventType: "telemetry.ingested",
+            aggregateType: "user",
+            aggregateId: userId,
+            payload: {
+              userId,
+              localDate,
+              sourceRevision: dayState.currentObservationRevision,
+              scope: {
+                start: scope.start.toISOString(),
+                end: scope.end.toISOString(),
+              },
+              reason: "telemetry_ingested",
+              ruleRevision: dayState.currentRuleRevision,
+            },
+            correlationId,
+            causationId: null,
+            schemaVersion: "1.0.0",
+            occurredAt: new Date(),
+            status: "PENDING",
+            publicationAttemptCount: 0,
+            maxAttempts: 5,
+            availableAt: new Date(),
           },
         });
       }
-    }
-
-    if (newEvents.length > 0) {
-      await prisma.normalizedActivity.createMany({
-        data: newEvents.map((e) => {
-          const rawData = (e.data ?? {}) as Record<string, unknown>;
-          const normalizedData: Record<string, unknown> = {
-            ...rawData,
-            provenance: e.provenance ?? {
-              collector: e.source === "browser" ? "browser-extension" : "activitywatch",
-              bucketId: batch.installationId,
-            },
-          };
-          return {
-            userId,
-            externalId: e.eventId,
-            bucketId: e.provenance?.bucketId ?? batch.installationId,
-            source: e.source,
-            watcher: e.eventType,
-            timestamp: new Date(e.timestamp),
-            duration: e.durationMs / 1000,
-            data: normalizedData as any,
-          };
-        }),
-        skipDuplicates: true,
-      });
-    }
+    });
 
     if (batch.source === "browser") {
       for (const ev of batch.events) {

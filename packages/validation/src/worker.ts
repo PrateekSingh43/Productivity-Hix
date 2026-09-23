@@ -5,6 +5,7 @@
 
 import { z } from 'zod';
 import { PRODUCTIVEHIX_QUEUES } from '@repo/types';
+import { domainEventEnvelopeSchema, timelineTriggerPayloadSchema } from './events';
 
 export class JobPayloadValidationError extends Error {
   public readonly code = 'VALIDATION_ERROR';
@@ -46,6 +47,11 @@ export const timelineMaterializationJobDataSchema = z.object({
   queuedAt: z.string().min(1, 'queuedAt is required'),
 });
 
+export const timelineJobPayloadSchema = z.union([
+  timelineMaterializationJobDataSchema,
+  timelineTriggerPayloadSchema,
+]);
+
 export const patternAnalysisJobDataSchema = z.object({
   userId: z.string().min(1, 'userId is required'),
   windowStart: z.string().min(1, 'windowStart is required'),
@@ -69,19 +75,45 @@ export const insightGenerationJobDataSchema = z.object({
 });
 
 export const queuePayloadSchemas = {
-  [PRODUCTIVEHIX_QUEUES.TIMELINE_MATERIALIZATION]: timelineMaterializationJobDataSchema,
+  [PRODUCTIVEHIX_QUEUES.TIMELINE_MATERIALIZATION]: timelineJobPayloadSchema,
   [PRODUCTIVEHIX_QUEUES.PATTERN_ANALYSIS]: patternAnalysisJobDataSchema,
   [PRODUCTIVEHIX_QUEUES.INSIGHT_GENERATION]: insightGenerationJobDataSchema,
 } as const;
 
 /**
- * Validates untrusted job payload according to queue name.
+ * Validates untrusted job payload or DomainEventEnvelope according to queue name.
  * Throws non-retryable JobPayloadValidationError on schema violations.
  */
 export function validateJobPayload<T = unknown>(queueName: string, raw: unknown): T {
+  // If raw is wrapped in DomainEventEnvelope
+  if (raw && typeof raw === 'object' && 'eventType' in raw && 'schemaVersion' in raw) {
+    const envelopeResult = domainEventEnvelopeSchema.safeParse(raw);
+    if (!envelopeResult.success) {
+      const issueSummary = envelopeResult.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join(', ');
+      throw new JobPayloadValidationError(
+        `Job envelope validation failed for queue ${queueName}: ${issueSummary}`,
+        envelopeResult.error.issues,
+        envelopeResult.error
+      );
+    }
+
+    const schema = (queuePayloadSchemas as Record<string, z.ZodTypeAny | undefined>)[queueName];
+    if (schema) {
+      const payloadResult = schema.safeParse((raw as Record<string, unknown>).payload);
+      if (!payloadResult.success) {
+        const issueSummary = payloadResult.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join(', ');
+        throw new JobPayloadValidationError(
+          `Job payload validation failed for queue ${queueName}: ${issueSummary}`,
+          payloadResult.error.issues,
+          payloadResult.error
+        );
+      }
+    }
+    return raw as T;
+  }
+
   const schema = (queuePayloadSchemas as Record<string, z.ZodTypeAny | undefined>)[queueName];
   if (!schema) {
-    // If not a registered schema (e.g. test queue), verify it is an object
     if (!raw || typeof raw !== 'object') {
       throw new JobPayloadValidationError(`Payload for queue ${queueName} must be a valid non-null object`);
     }

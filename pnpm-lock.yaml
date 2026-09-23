@@ -341,6 +341,9 @@ importers:
 
   apps/worker:
     dependencies:
+      '@repo/analytics':
+        specifier: workspace:*
+        version: link:../../packages/analytics
       '@repo/db':
         specifier: workspace:*
         version: link:../../packages/db
