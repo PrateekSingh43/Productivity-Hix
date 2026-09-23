@@ -30,7 +30,7 @@ import {
 } from "@repo/analytics";
 import { getDb, type Prisma } from "@repo/db";
 import { formatJobIdentity } from "../base/identity";
-import type { PatternDataProvider } from "./data-provider";
+import { canonicalSourceWatermarks, type PatternDataProvider } from "./data-provider";
 import { PrismaPatternDataProvider } from "./prisma-provider";
 
 type Database = ReturnType<typeof getDb>;
@@ -117,7 +117,7 @@ export class PatternWorker extends BaseWorker<PatternAnalysisJobData, PatternWor
       data.userId, data.windowStart, data.windowEnd,
       this.selectedDetectors(data),
       PATTERN_ENGINE_VERSION, PATTERN_CONFIG_VERSION,
-      watermarks.maxSourceAt,
+      canonicalSourceWatermarks(watermarks),
     ]);
   }
 

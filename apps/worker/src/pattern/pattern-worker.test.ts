@@ -185,6 +185,46 @@ describe("PatternWorker", () => {
     locks = new InMemoryLockProvider();
   });
 
+  it("fingerprint: same source watermarks produce the same fingerprint", async () => {
+    const { provider } = stubProvider(emptyInput());
+    const worker = new PatternWorker(db as never, provider);
+    const data = worker.validate(job());
+    expect(await worker.computeFingerprint(data)).toBe(await worker.computeFingerprint(data));
+  });
+
+  it("fingerprint: every watermark mutation invalidates the fingerprint", async () => {
+    const mutations: Array<{ field: keyof SourceWatermarks; value: string | number }> = [
+      { field: "maxSourceAt", value: "2026-09-16T00:00:00.000Z" },
+      { field: "activityCount", value: 1 },
+      // In-place telemetry duration growth without any createdAt change.
+      { field: "activityDurationSum", value: 3600 },
+      { field: "sessionCount", value: 1 },
+      { field: "checkInCount", value: 1 },
+      { field: "taskCount", value: 1 },
+    ];
+    for (const { field, value } of mutations) {
+      const { provider } = stubProvider(emptyInput(), [
+        BASE_WATERMARKS,
+        { ...BASE_WATERMARKS, [field]: value },
+      ]);
+      const worker = new PatternWorker(db as never, provider);
+      const data = worker.validate(job());
+      const before = await worker.computeFingerprint(data);
+      const after = await worker.computeFingerprint(data);
+      expect(after, `watermark field ${field} must invalidate the fingerprint`).not.toBe(before);
+    }
+  });
+
+  it("fingerprint: canonical serialization is key-order independent", async () => {
+    const { canonicalSourceWatermarks } = await import("./data-provider.js");
+    const a = canonicalSourceWatermarks({ ...BASE_WATERMARKS });
+    const reordered = JSON.parse(JSON.stringify({
+      taskCount: 0, checkInCount: 0, sessionCount: 0,
+      activityDurationSum: 0, activityCount: 0, maxSourceAt: "2026-09-15T00:00:00.000Z",
+    }));
+    expect(canonicalSourceWatermarks(reordered)).toBe(a);
+  });
+
   it("registers on the pattern-analysis queue", () => {
     const { provider } = stubProvider(emptyInput());
     const worker = new PatternWorker(db as never, provider);

@@ -28,3 +28,21 @@ export interface PatternDataProvider {
   loadInput(data: PatternAnalysisJobData): Promise<PatternPipelineInput>;
   readWatermarks(data: PatternAnalysisJobData): Promise<SourceWatermarks>;
 }
+
+/**
+ * Canonical watermark serialization for fingerprinting.
+ * Fixed array order — never relies on object property order. Every field that
+ * is intended to invalidate an analysis MUST appear here; adding a watermark
+ * field without extending this tuple silently reopens the in-place-mutation
+ * blind spot (§5.1).
+ */
+export function canonicalSourceWatermarks(w: SourceWatermarks): string {
+  return JSON.stringify([
+    w.maxSourceAt,
+    w.activityCount,
+    w.activityDurationSum,
+    w.sessionCount,
+    w.checkInCount,
+    w.taskCount,
+  ]);
+}
