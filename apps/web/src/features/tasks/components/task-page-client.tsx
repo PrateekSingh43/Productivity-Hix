@@ -77,9 +77,10 @@ export function TaskPageClient() {
     });
   }, [tasks, todayDate, todayGoalIds]);
 
-  // 2. Tasks belonging specifically to Today
+  // 2. Tasks belonging specifically to Today (cancelled tasks are never actionable)
   const todayTasks = useMemo(() => {
     return tasks.filter((t) => {
+      if (t.status === "cancelled") return false;
       if (t.hasActiveSession) return true;
       if (t.goalId && todayGoalIds.has(t.goalId)) return true;
       if (t.productiveDate === todayDate) return true;

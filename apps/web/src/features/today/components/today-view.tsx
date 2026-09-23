@@ -74,6 +74,7 @@ export function TodayView() {
   const [isAddingTask, setIsAddingTask] = useState(false);
   const [newTaskTitle, setNewNewTaskTitle] = useState("");
   const [newTaskDuration, setNewTaskDuration] = useState(30);
+  const [newTaskDurationInput, setNewTaskDurationInput] = useState("30");
   const [newTaskGoalId, setNewTaskGoalId] = useState<string>("");
   const [newTaskDueDate, setNewTaskDueDate] = useState<string>("");
 
@@ -339,15 +340,25 @@ export function TodayView() {
     e.preventDefault();
     if (!newTaskTitle.trim()) return;
 
+    const parsedDuration = parseInt(newTaskDurationInput, 10);
+    const finalDuration = Math.max(
+      1,
+      !isNaN(parsedDuration) && parsedDuration > 0
+        ? parsedDuration
+        : newTaskDuration || 30
+    );
+
     const created = await createTask({
       title: newTaskTitle.trim(),
-      plannedDurationMinutes: newTaskDuration,
+      plannedDurationMinutes: finalDuration,
       goalId: newTaskGoalId ? newTaskGoalId : null,
       productiveDate: targetDate,
       dueAt: newTaskDueDate ? new Date(`${newTaskDueDate}T23:59:59`).toISOString() : undefined,
     });
 
     setNewNewTaskTitle("");
+    setNewTaskDuration(30);
+    setNewTaskDurationInput("30");
     setIsAddingTask(false);
     queryClient.invalidateQueries({ queryKey: ["tasks"] });
     queryClient.invalidateQueries({ queryKey: ["plans"] });
@@ -402,6 +413,7 @@ export function TodayView() {
           hasPlan={plan?.hasPlan ?? false}
           goals={goals}
           independentTasks={independentTasks}
+          todayTaskCount={tasks.filter((t) => t.status !== "done").length}
           isLoading={planQuery.isLoading}
           onSavePlan={async (updatedGoals) => {
             await savePlanMutation.mutateAsync({
@@ -607,16 +619,28 @@ export function TodayView() {
                     title="Due date"
                   />
                 </div>
-                <div className="flex items-center gap-1 bg-bg-secondary border border-border-subtle rounded-md px-2 py-1.5">
+                <div className="flex items-center gap-1 bg-bg-secondary border border-border-subtle rounded-md px-2 py-1.5 focus-within:border-border-hover">
                   <Clock size={12} className="text-text-muted shrink-0" />
                   <input
-                    type="number"
-                    min="5"
-                    max="480"
-                    step="5"
-                    value={newTaskDuration}
-                    onChange={(e) => setNewTaskDuration(parseInt(e.target.value, 10) || 30)}
-                    className="w-10 text-xs bg-transparent text-text-primary border-0 outline-none font-mono"
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    value={newTaskDurationInput}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/[^0-9]/g, "");
+                      setNewTaskDurationInput(val);
+                      if (val) {
+                        const parsed = parseInt(val, 10);
+                        if (parsed > 0) setNewTaskDuration(parsed);
+                      }
+                    }}
+                    onBlur={() => {
+                      if (!newTaskDurationInput || parseInt(newTaskDurationInput, 10) <= 0) {
+                        setNewTaskDurationInput(String(newTaskDuration || 30));
+                      }
+                    }}
+                    className="w-10 text-xs bg-transparent text-text-primary border-0 outline-none font-mono text-center"
+                    placeholder="30"
                     title="Estimated duration in minutes"
                   />
                   <span className="text-[11px] text-text-muted">m</span>

@@ -24,6 +24,11 @@ export interface DailyPlanViewProps {
   hasPlan: boolean;
   goals: DailyGoal[];
   independentTasks?: Task[];
+  /**
+   * Incomplete tasks planned for today. Lets the unplanned state distinguish
+   * "no daily goals" (STATE D) from "no goals and no work" (STATE E).
+   */
+  todayTaskCount?: number;
   isLoading?: boolean;
   onSavePlan: (goals: Array<{ id?: string; title: string; order: number; outcome?: GoalOutcome | null; newTasks?: string[] }>) => Promise<void> | void;
   onAssessOutcome?: (goalId: string, outcome: GoalOutcome) => Promise<void> | void;
@@ -36,6 +41,7 @@ export function DailyPlanView({
   hasPlan,
   goals,
   independentTasks = [],
+  todayTaskCount = 0,
   isLoading = false,
   onSavePlan,
   onAssessOutcome,
@@ -287,7 +293,8 @@ export function DailyPlanView({
     );
   }
 
-  // 3. UNPLANNED STATE
+  // 3. UNPLANNED STATE — distinguishes "no daily goals, but work exists"
+  // (STATE D) from "no goals and no work" (STATE E).
   if (!hasPlan && goals.length === 0) {
     return (
       <div className={`rounded-xl border border-border-subtle bg-bg-card p-6 sm:p-7 space-y-4 ${className}`}>
@@ -302,10 +309,18 @@ export function DailyPlanView({
 
         <div className="space-y-1.5 max-w-lg">
           <h2 className="text-lg font-semibold text-text-primary tracking-tight">
-            Today is not yet planned
+            {todayTaskCount > 0 ? "No daily goals set" : "Today is not yet planned"}
           </h2>
           <p className="text-xs sm:text-sm text-text-muted leading-relaxed">
-            Set 1–3 material objectives to anchor your focus blocks and measure intention against reality.
+            {todayTaskCount > 0 ? (
+              <>
+                {todayTaskCount} {todayTaskCount === 1 ? "task is" : "tasks are"} planned
+                for today. Set 1–3 material objectives to anchor your focus blocks and
+                measure intention against reality.
+              </>
+            ) : (
+              "Set 1–3 material objectives to anchor your focus blocks and measure intention against reality."
+            )}
           </p>
         </div>
 

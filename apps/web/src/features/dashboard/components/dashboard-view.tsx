@@ -14,7 +14,14 @@ import {
 } from "lucide-react";
 import { PageContainer, PageHeader } from "@shared/components/layout";
 import { useQuery } from "@tanstack/react-query";
-import { taskQueries } from "@features/tasks";
+import { resolveProductiveDay } from "@repo/types";
+import {
+  isActionableTask,
+  isOverdueTask,
+  isTodayTask,
+  resolveTargetDate,
+  taskQueries,
+} from "@features/tasks";
 import { planQueries } from "@features/today";
 import { sessionQueries } from "@features/sessions";
 import { useLiveTelemetry } from "@features/timeline";
@@ -34,6 +41,18 @@ export function DashboardView() {
   const plan = planQuery.data;
   const goals = plan?.goals ?? [];
   const primaryGoal = goals[0];
+
+  // Same scope rules as Today/Tasks: a task belongs to today via active
+  // session, today's goals, productive date, or due date.
+  const localTodayDate = resolveProductiveDay(new Date());
+  const targetDate = resolveTargetDate(plan?.date, localTodayDate);
+  const todayGoalIds = new Set((plan?.goals ?? []).map((g) => g.id));
+  const todayTasks = tasks.filter(
+    (t) => isActionableTask(t) && isTodayTask(t, targetDate, todayGoalIds)
+  );
+  const overdueTasks = tasks.filter((t) => isOverdueTask(t, targetDate, todayGoalIds));
+  const goalLinkedTasks = tasks.filter((t) => t.goalId != null);
+  const goalLinkedDone = goalLinkedTasks.filter((t) => t.status === "done");
   const sessions = sessionsQuery.data ?? [];
   const activeSession = sessions.find((s) => !s.endedAt);
   const activeTask = activeSession?.taskId
@@ -107,15 +126,56 @@ export function DashboardView() {
                   <span>
                     Tasks supporting:{" "}
                     <strong className="text-text-primary font-medium">
-                      {completedTasks.length} of {tasks.length} done
+                      {goalLinkedDone.length} of {goalLinkedTasks.length} done
                     </strong>
                   </span>
+                  {overdueTasks.length > 0 && (
+                    <>
+                      <span className="text-border-subtle">•</span>
+                      <Link
+                        href="/tasks"
+                        className="text-amber-600 dark:text-amber-400 hover:text-amber-700 font-medium inline-flex items-center gap-1 transition-colors cursor-pointer"
+                      >
+                        <span>
+                          {overdueTasks.length} overdue from previous days
+                        </span>
+                        <ArrowRight size={12} />
+                      </Link>
+                    </>
+                  )}
                   <span className="text-border-subtle">•</span>
                   <Link
                     href="/today"
                     className="text-text-primary hover:text-text-secondary font-medium inline-flex items-center gap-1 transition-colors cursor-pointer"
                   >
                     <span>Manage in Today</span>
+                    <ArrowRight size={12} />
+                  </Link>
+                </div>
+              </div>
+            ) : todayTasks.length > 0 ? (
+              <div className="space-y-2">
+                <h2 className="text-xl font-semibold tracking-tight text-text-primary">
+                  No daily goals set
+                </h2>
+                <p className="text-xs sm:text-sm text-text-secondary leading-relaxed max-w-lg">
+                  {todayTasks.length} {todayTasks.length === 1 ? "task" : "tasks"} planned
+                  for today. Setting 1–3 concrete objectives anchors deliberate focus and
+                  gives reflection a clear starting point.
+                </p>
+                <div className="pt-1 flex flex-wrap items-center gap-2">
+                  <Link
+                    href="/today"
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-[var(--radius-sm)] bg-bg-secondary border border-border-subtle text-text-primary hover:border-border-hover transition-colors cursor-pointer"
+                  >
+                    <Sparkles size={13} className="text-text-muted" />
+                    <span>Plan Today&apos;s Goals</span>
+                  </Link>
+                  <Link
+                    href="/tasks"
+                    className="inline-flex items-center gap-1 text-xs font-medium text-text-primary hover:text-text-secondary transition-colors cursor-pointer"
+                  >
+                    <span>View today&apos;s tasks</span>
                     <ArrowRight size={12} />
                   </Link>
                 </div>
@@ -134,7 +194,7 @@ export function DashboardView() {
                     className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-[var(--radius-sm)] bg-bg-secondary border border-border-subtle text-text-primary hover:border-border-hover transition-colors cursor-pointer"
                   >
                     <Sparkles size={13} className="text-text-muted" />
-                    <span>Plan Today's Goals</span>
+                    <span>Plan Today&apos;s Goals</span>
                   </Link>
                 </div>
               </div>
