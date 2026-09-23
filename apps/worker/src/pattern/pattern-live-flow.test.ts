@@ -18,6 +18,8 @@ import { PatternWorker } from "./pattern-worker";
 import { PrismaPatternDataProvider } from "./prisma-provider";
 
 configDotenv({ path: new URL("../../.env", import.meta.url) });
+// Keep this suite a small neighbor on shared pooler-based databases.
+process.env.PGPOOL_MAX ??= "2";
 
 const hasInfra = Boolean(process.env.REDIS_URL) && Boolean(process.env.DIRECT_URL ?? process.env.DATABASE_URL);
 const WINDOW = { start: "2026-08-20T00:00:00.000Z", end: "2026-09-03T00:00:00.000Z" };
@@ -106,17 +108,20 @@ describe.skipIf(!hasInfra)("pattern live queue flow", () => {
       schemaVersion: "1.0.0",
       occurredAt: new Date().toISOString(),
     };
+    // attempts: 12 — the pooler is shared with other local suites, so transient
+    // EMAXCONNSESSION (retryable) must not fail the transport proof.
     await queueManager.addJob(PRODUCTIVEHIX_QUEUES.PATTERN_ANALYSIS, "pattern.analysis.requested", envelope, {
       jobId: `test-live-${userId}`,
+      attempts: 12,
     });
 
     let run: { status: string; state: string } | null = null;
-    for (let i = 0; i < 60 && (!run || run.status === "RUNNING"); i++) {
-      await new Promise((r) => setTimeout(r, 500));
+    for (let i = 0; i < 100 && (!run || run.status === "RUNNING"); i++) {
+      await new Promise((r) => setTimeout(r, 900));
       run = await db.patternAnalysisRun.findFirst({ where: { userId } });
     }
     expect(run?.status).toBe("COMPLETED");
     expect(run?.state).not.toBe("pending");
     expect(await db.patternFinding.count({ where: { userId } })).toBe(0);
-  }, 90_000);
+  }, 150_000);
 });

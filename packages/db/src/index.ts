@@ -1,4 +1,5 @@
 import { PrismaPg } from "@prisma/adapter-pg";
+import { Pool } from "pg";
 import { PrismaClient } from "./generated/prisma/client.js";
 
 let client: PrismaClient | undefined;
@@ -7,7 +8,14 @@ export function getDb() {
   if (client) return client;
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) throw new Error("DATABASE_URL is not configured");
-  client = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
+  // Optional cap on pg pool size (e.g. PGPOOL_MAX=2 in tests sharing a small
+  // Supabase pooler). Unset = adapter default; production behavior unchanged.
+  const poolMax = Number(process.env.PGPOOL_MAX ?? 0);
+  const adapter =
+    Number.isSafeInteger(poolMax) && poolMax > 0
+      ? new PrismaPg(new Pool({ connectionString, max: poolMax }))
+      : new PrismaPg({ connectionString });
+  client = new PrismaClient({ adapter });
   return client;
 }
 
