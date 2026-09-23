@@ -9,7 +9,7 @@ import { configDotenv } from "dotenv";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { randomUUID } from "node:crypto";
 import Redis from "ioredis";
-import { getDb } from "@repo/db";
+import { disconnectDb, getDb } from "@repo/db";
 import { PRODUCTIVEHIX_QUEUES } from "@repo/types";
 import { QueueManager } from "../runtime/queue";
 import { WorkerRuntime } from "../runtime/worker-runtime";
@@ -63,6 +63,7 @@ describe.skipIf(!hasInfra)("pattern live queue flow", () => {
       }
     } finally {
       redis?.disconnect();
+      await disconnectDb();
     }
   });
 

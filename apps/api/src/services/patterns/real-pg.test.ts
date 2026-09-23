@@ -10,7 +10,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { randomUUID } from "node:crypto";
 import request from "supertest";
 import { createApp } from "../../app";
-import { getDb } from "../../lib/prisma";
+import { disconnectDb, getDb } from "../../lib/prisma";
 
 configDotenv({ path: new URL("../../../.env", import.meta.url) });
 
@@ -33,8 +33,12 @@ describe.skipIf(!hasDb)("pattern API real-postgres boundary", () => {
   }, 30_000);
 
   afterAll(async () => {
-    if (!dbReachable) return;
-    await getDb().user.deleteMany({ where: { id: { in: createdUsers } } });
+    try {
+      if (!dbReachable) return;
+      await getDb().user.deleteMany({ where: { id: { in: createdUsers } } });
+    } finally {
+      await disconnectDb();
+    }
   });
 
   it("analyze writes a user-attributed outbox row; reads isolate users", async () => {
