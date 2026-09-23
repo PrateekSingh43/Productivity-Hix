@@ -1,5 +1,7 @@
 export * from "./catalog";
 export * from "./promotion";
+export * from "./evidence-assembler";
+export * from "./pipeline";
 export * from "./copy";
 export * from "./lineage";
 export * from "./base/context";
