@@ -42,6 +42,9 @@ model User {
   userActivityRules        UserActivityRule[]
   userActivityOverrides    UserActivityOverride[]
   proposedDeviceHeartbeats ProposedDeviceHeartbeat[]
+  timelineDayStates        TimelineDayState[]
+  patternAnalysisRuns      PatternAnalysisRun[]
+  patternFindings          PatternFinding[]
 
   preferences              UserPreference?
 
@@ -776,27 +779,129 @@ enum OutboxStatus {
   PENDING
   PROCESSING
   PUBLISHED
-  FAILED
   DEAD_LETTER
 }
 
 model OutboxEvent {
-  id            String       @id @default(cuid())
-  eventType     String       @map("event_type")
-  aggregateType String       @map("aggregate_type")
-  aggregateId   String       @map("aggregate_id")
-  payload       Json
-  status        OutboxStatus @default(PENDING)
-  retryCount    Int          @default(0) @map("retry_count")
-  maxRetries    Int          @default(5) @map("max_retries")
-  lastError     String?      @map("last_error")
-  scheduledFor  DateTime     @default(now()) @map("scheduled_for")
-  publishedAt   DateTime?    @map("published_at")
-  createdAt     DateTime     @default(now()) @map("created_at")
-  updatedAt     DateTime     @updatedAt @map("updated_at")
+  id                      String        @id @default(cuid())
+  eventType               String        @map("event_type")
+  aggregateType           String        @map("aggregate_type")
+  aggregateId             String        @map("aggregate_id")
+  payload                 Json
+  correlationId           String        @map("correlation_id")
+  causationId             String?       @map("causation_id")
+  schemaVersion           String        @default("1.0.0") @map("schema_version")
+  occurredAt              DateTime      @default(now()) @map("occurred_at")
 
-  @@index([status, scheduledFor])
+  status                  OutboxStatus  @default(PENDING)
+  publicationAttemptCount Int           @default(0) @map("publication_attempt_count")
+  maxAttempts             Int           @default(5) @map("max_attempts")
+  availableAt             DateTime      @default(now()) @map("available_at")
+  claimedBy               String?       @map("claimed_by")
+  claimExpiresAt          DateTime?     @map("claim_expires_at")
+  lastAttemptAt           DateTime?     @map("last_attempt_at")
+  lastError               String?       @map("last_error")
+  publishedAt             DateTime?     @map("published_at")
+  createdAt               DateTime      @default(now()) @map("created_at")
+  updatedAt               DateTime      @updatedAt @map("updated_at")
+
+  @@index([status, availableAt])
+  @@index([claimedBy, claimExpiresAt])
   @@index([aggregateType, aggregateId])
   @@index([eventType])
   @@map("outbox_events")
+}
+
+// ----------------------------------------------------------------------------
+// 13. TIMELINE DAY STATE (Day Revisions & Materialization Lifecycle)
+// ----------------------------------------------------------------------------
+enum MaterializationStatus {
+  NO_DATA
+  STALE
+  MATERIALIZING
+  READY
+  FAILED
+}
+
+model TimelineDayState {
+  id                              String                 @id @default(cuid())
+  userId                          String                 @map("user_id")
+  localDate                       String                 @map("local_date") // "YYYY-MM-DD"
+  currentObservationRevision      Int                    @default(0) @map("current_observation_revision")
+  materializedObservationRevision Int                    @default(0) @map("materialized_observation_revision")
+  currentRuleRevision             Int                    @default(0) @map("current_rule_revision")
+  materializedRuleRevision        Int                    @default(0) @map("materialized_rule_revision")
+  semanticVersion                 String                 @default("3b.0.1") @map("semantic_version")
+  activeSnapshotId                String?                @map("active_snapshot_id")
+  status                          MaterializationStatus  @default(NO_DATA)
+  retryCount                      Int                    @default(0) @map("retry_count")
+  lastError                       String?                @map("last_error")
+  lastMaterializedAt              DateTime?              @map("last_materialized_at")
+  lastAttemptedAt                 DateTime?              @map("last_attempted_at")
+  createdAt                       DateTime               @default(now()) @map("created_at")
+  updatedAt                       DateTime               @updatedAt @map("updated_at")
+
+  user                            User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, localDate])
+  @@index([userId, status])
+  @@map("timeline_day_states")
+}
+
+// ----------------------------------------------------------------------------
+// 14. PATTERN ANALYSIS RUN (Durable Pattern computation record)
+// ----------------------------------------------------------------------------
+enum PatternRunStatus {
+  RUNNING
+  COMPLETED
+  FAILED
+  SUPERSEDED
+}
+
+model PatternAnalysisRun {
+  id               String           @id @default(cuid())
+  userId           String           @map("user_id")
+  windowStart      DateTime         @map("window_start")
+  windowEnd        DateTime         @map("window_end")
+  identityKey      String           @map("identity_key")
+  inputFingerprint String           @map("input_fingerprint")
+  status           PatternRunStatus @default(RUNNING)
+  state            String           @default("pending")
+  diagnosticsJson  Json?            @map("diagnostics_json")
+  detectorVersion  String           @map("detector_version")
+  configVersion    String           @map("config_version")
+  jobCorrelationId String?          @map("job_correlation_id")
+  error            String?
+  computedAt       DateTime?        @map("computed_at")
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
+
+  user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  findings         PatternFinding[]
+
+  @@unique([userId, identityKey])
+  @@index([userId, windowStart, windowEnd])
+  @@map("pattern_analysis_runs")
+}
+
+// ----------------------------------------------------------------------------
+// 15. PATTERN FINDING (Durable qualified Pattern result)
+// ----------------------------------------------------------------------------
+model PatternFinding {
+  id               String   @id @default(cuid())
+  userId           String   @map("user_id")
+  runId            String   @map("run_id")
+  patternKey       String   @map("pattern_key")
+  detectorIdentity String   @map("detector_identity")
+  patternId        String   @map("pattern_id")
+  status           String
+  resultJson       Json     @map("result_json")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  user             User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  run              PatternAnalysisRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, patternKey])
+  @@index([runId])
+  @@map("pattern_findings")
 }
