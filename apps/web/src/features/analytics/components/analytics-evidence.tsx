@@ -14,7 +14,7 @@ export function onboardingMessage(history: RecordingHistory | undefined): { titl
   if (days >= MINIMUM_DAYS_FOR_FINDINGS) {
     return {
       title: "Building your first findings",
-      detail: "Comparable work from around seven recorded days is needed before a finding can be checked. Keep collecting activity and reflect as usual.",
+      detail: "Activity is being recorded, but findings require comparable work sessions across multiple days to check a pattern. Keep logging work sessions, linking tasks, and reflecting as usual.",
     };
   }
   return {

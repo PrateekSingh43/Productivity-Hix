@@ -26,6 +26,8 @@ export function AnalyticsState({
   onRunAnalysis,
   isRunningAnalysis,
 }: AnalyticsStateProps) {
+  const isWorking = isFetching || Boolean(isRunningAnalysis);
+
   if (isLoading) {
     return (
       <div role="status" aria-label="Loading findings" className="space-y-4">
@@ -131,6 +133,19 @@ export function AnalyticsState({
             <li key={line}>{line}</li>
           ))}
         </ul>
+      )}
+      {onRunAnalysis && (
+        <div className="pt-2">
+          <button
+            type="button"
+            onClick={onRunAnalysis}
+            disabled={isWorking}
+            className="inline-flex min-h-11 items-center gap-2 rounded-md border border-border-subtle px-3 text-sm text-text-primary hover:bg-bg-secondary disabled:opacity-50"
+          >
+            <RefreshCw size={14} className={isWorking ? "animate-spin" : ""} aria-hidden="true" />
+            {isWorking ? "Analyzing…" : "Re-run analysis"}
+          </button>
+        </div>
       )}
     </div>
   );
