@@ -2,10 +2,12 @@ import type {
   AnalyticalWindow, BehavioralPatternOutput, CheckIn, EvidenceTimeline, WorkSession,
 } from "@repo/types";
 import { resolveProductiveDay } from "@repo/types";
+import { randomUUID } from "node:crypto";
 import {
   composeInsights,
   countDistinctCalendarDays,
   evaluatePatterns,
+  isDetectorIdentity,
   subtractCalendarDays,
   type DetectorDiagnostics,
   type OutcomeInput,
@@ -127,6 +129,65 @@ async function readData(userId: string, window: AnalyticalWindow): Promise<Data>
     connected: desktopCount + browserCount + activityCount > 0,
     recordingHistory: { ...recordingHistory, connected: desktopCount + browserCount > 0 },
   };
+}
+
+export interface PatternAnalysisRequest {
+  accepted: boolean;
+  correlationId: string;
+  window: AnalyticalWindow;
+}
+
+export async function requestPatternAnalysis(
+  userId: string,
+  window: AnalyticalWindow,
+  targetDetectors?: string[],
+): Promise<PatternAnalysisRequest> {
+  const unknown = (targetDetectors ?? []).filter((d) => !isDetectorIdentity(d));
+  if (unknown.length > 0) throw new BadRequest(`Unknown detectors: ${unknown.join(", ")}`);
+  const jobCorrelationId = randomUUID();
+  const queuedAt = new Date().toISOString();
+  await getDb().outboxEvent.create({
+    data: {
+      eventType: "pattern.analysis.requested",
+      aggregateType: "pattern",
+      aggregateId: userId,
+      payload: {
+        userId,
+        windowStart: window.start,
+        windowEnd: window.end,
+        ...(targetDetectors ? { targetDetectors: [...new Set(targetDetectors)].sort() } : {}),
+        reason: "MANUAL_TRIGGER",
+        jobCorrelationId,
+        queuedAt,
+      },
+      correlationId: jobCorrelationId,
+      schemaVersion: "1.0.0",
+    },
+  });
+  return { accepted: true, correlationId: jobCorrelationId, window };
+}
+
+export async function getPersistedPatterns(userId: string, window: AnalyticalWindow): Promise<PatternsResponse> {
+  const db = getDb();
+  const run = await db.patternAnalysisRun.findFirst({
+    where: {
+      userId,
+      windowStart: new Date(window.start),
+      windowEnd: new Date(window.end),
+      status: "COMPLETED",
+    },
+    orderBy: { computedAt: "desc" },
+  });
+  if (!run) {
+    return { state: "pending", window, patterns: [], diagnostics: { perDetector: [] } };
+  }
+  const findings = await db.patternFinding.findMany({
+    where: { runId: run.id },
+    orderBy: { patternId: "asc" },
+  });
+  const patterns = findings.map((f) => f.resultJson as unknown as BehavioralPatternOutput);
+  const diagnostics = (run.diagnosticsJson ?? { perDetector: [] }) as unknown as PatternsResponse["diagnostics"];
+  return { state: (run.state ?? "ok") as PatternsState, window, patterns, diagnostics };
 }
 
 export async function runPatternPipeline(userId: string, window: AnalyticalWindow): Promise<PatternsResponse> {

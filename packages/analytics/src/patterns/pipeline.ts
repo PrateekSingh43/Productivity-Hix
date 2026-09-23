@@ -47,7 +47,7 @@ import { stableId, compare, overlaps, timelineFromBlocks } from "./evidence-asse
 export const PATTERN_ENGINE_VERSION = "1.0.0";
 export const PATTERN_CONFIG_VERSION = "api-prototype-1";
 
-export type PatternsState = "not-connected" | "no-observations" | "insufficient-evidence" | "no-findings" | "ok";
+export type PatternsState = "not-connected" | "no-observations" | "insufficient-evidence" | "no-findings" | "ok" | "pending";
 
 export interface DetectorDiagnostics {
   identity: DetectorIdentity;

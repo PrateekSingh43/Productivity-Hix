@@ -63,6 +63,8 @@ function fixture(options: {
     dailyGoal: { findMany: async () => [{ id: "goal-1", outcome: "ACHIEVED", plan: { date: "2026-09-01" } }] },
     desktopDevice: { count: async () => options.connected === false ? 0 : 1 },
     browserInstallation: { count: async () => 0 },
+    patternAnalysisRun: { findFirst: async () => null },
+    patternFinding: { findMany: async () => [] },
   };
   setTestDb(db);
   return { events, sessions, reports, calls, db };
@@ -271,11 +273,14 @@ describe("Patterns and Insights orchestration contracts", () => {
     fixture({ count: 0, history: false });
     const app = createApp();
     const header = { "x-user-id": "00000000-0000-0000-0000-000000000001" };
+    // /api/patterns reads persisted worker output: no run yet -> pending.
+    // /api/insights still computes synchronously -> no-observations.
+    const expected: Record<string, string> = { "/api/patterns": "pending", "/api/insights": "no-observations" };
     for (const path of ["/api/patterns", "/api/insights"]) {
       expect((await request(app).get(path)).status).toBe(401);
       const response = await request(app).get(`${path}?from=2026-09-01&to=2026-09-15`).set(header);
       expect(response.status).toBe(200);
-      expect(response.body.state).toBe("no-observations");
+      expect(response.body.state).toBe(expected[path]);
       expect((await request(app).get(`${path}?from=bad`).set(header)).status).toBe(400);
     }
   });
