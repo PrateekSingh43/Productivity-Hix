@@ -14,7 +14,9 @@
     "start": "node dist/bootstrap.js"
   },
   "dependencies": {
+    "@repo/db": "workspace:*",
     "@repo/types": "workspace:*",
+    "@repo/validation": "workspace:*",
     "bullmq": "^6.3.8",
     "dotenv": "^18.0.2",
     "ioredis": "^6.0.0",

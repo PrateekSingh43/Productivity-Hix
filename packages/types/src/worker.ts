@@ -17,6 +17,7 @@
 
 export const PRODUCTIVEHIX_QUEUES = {
   TIMELINE_MATERIALIZATION: 'timeline-materialization',
+  ANALYTICAL_PROJECTION: 'analytical-projection',
   PATTERN_ANALYSIS: 'pattern-analysis',
   INSIGHT_GENERATION: 'insight-generation',
 } as const;

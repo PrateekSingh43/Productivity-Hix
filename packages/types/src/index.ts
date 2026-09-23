@@ -15,3 +15,4 @@ export * from "./patterns";
 export * from "./observation";
 export * from "./materialization";
 export * from "./worker";
+export * from "./events";

@@ -49,11 +49,23 @@ export type InfrastructureMetricEvent =
   | 'job.retryable_failure'
   | 'job.timeout'
   | 'job.superseded'
-  | 'job.duration';
+  | 'job.duration'
+  | 'outbox.published'
+  | 'outbox.publish_failed'
+  | 'outbox.dead_letter'
+  | 'outbox.reclaimed'
+  | 'queue.enqueued'
+  | 'queue.enqueue_latency'
+  | 'outbox.latency';
+
+export type InfrastructureTimingEvent =
+  | 'job.duration'
+  | 'queue.enqueue_latency'
+  | 'outbox.latency';
 
 export interface WorkerMetricsCollector {
   increment(metric: InfrastructureMetricEvent, tags?: Record<string, string | number>): void;
-  timing(metric: 'job.duration', durationMs: number, tags?: Record<string, string | number>): void;
+  timing(metric: InfrastructureTimingEvent, durationMs: number, tags?: Record<string, string | number>): void;
 }
 
 export class MemoryWorkerMetricsCollector implements WorkerMetricsCollector {
@@ -65,7 +77,7 @@ export class MemoryWorkerMetricsCollector implements WorkerMetricsCollector {
     this.counts.set(key, (this.counts.get(key) ?? 0) + 1);
   }
 
-  timing(metric: 'job.duration', durationMs: number, tags?: Record<string, string | number>): void {
+  timing(metric: InfrastructureTimingEvent, durationMs: number, tags?: Record<string, string | number>): void {
     this.timings.push({ metric, durationMs, tags });
   }
 

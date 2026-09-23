@@ -1,34 +1,72 @@
 /**
  * Worker Application Executable Bootstrap
  * 
- * Manages runtime initialization, worker registration, and graceful OS signal shutdown.
+ * Manages deterministic runtime initialization, worker registration,
+ * outbox publisher startup, and graceful OS signal shutdown.
  */
 
 import 'dotenv/config';
-import { createRedisConnection } from './runtime/redis';
+import { getDb, disconnectDb } from '@repo/db';
+import {
+  createRedisConnection,
+  checkRedisHealth,
+  closeRedisConnection,
+} from './runtime/redis';
+import { QueueManager } from './runtime/queue';
 import { WorkerRuntime } from './runtime/worker-runtime';
+import { OutboxPublisher } from './outbox/publisher';
 import { MemoryWorkerMetricsCollector } from './shared/metrics';
 
-export async function bootstrap(): Promise<WorkerRuntime> {
+export interface BootstrapResult {
+  runtime: WorkerRuntime;
+  queueManager: QueueManager;
+  publisher: OutboxPublisher;
+  metrics: MemoryWorkerMetricsCollector;
+  shutdown: (signal?: string) => Promise<void>;
+}
+
+export async function bootstrap(): Promise<BootstrapResult> {
   console.log('[WorkerBootstrap] Initializing ProductiveHix Dedicated Worker Runtime...');
 
+  // 1. Redis Connection & Health Probe
   const redis = createRedisConnection();
-  const metrics = new MemoryWorkerMetricsCollector();
+  const health = await checkRedisHealth(redis);
+  console.log(`[WorkerBootstrap] Redis status: ${health.status} (${health.latencyMs}ms latency)`);
 
+  if (health.status === 'unhealthy') {
+    throw new Error(`Cannot start worker subsystem: Redis connection unhealthy. ${health.error ?? ''}`);
+  }
+
+  // 2. Metrics & Queue Infrastructure
+  const metrics = new MemoryWorkerMetricsCollector();
+  const queueManager = new QueueManager({ connection: redis });
+
+  // 3. Worker Runtime Layer
   const runtime = new WorkerRuntime({
     connection: redis,
     metrics,
   });
 
-  // Future specialized workers (Timeline, Pattern, Insight) will be registered here.
-  // In Group 1, this bootstrap proves lifecycle initialization and shutdown wiring.
+  // 4. Outbox Publisher Layer
+  const db = getDb();
+  const publisher = new OutboxPublisher({
+    db,
+    queueManager,
+    metrics,
+    pollIntervalMs: Number(process.env.OUTBOX_POLL_INTERVAL_MS ?? 500),
+    batchSize: Number(process.env.OUTBOX_BATCH_SIZE ?? 25),
+  });
 
+  // 5. Start Execution in Deterministic Order
   await runtime.start();
   console.log('[WorkerBootstrap] Worker runtime started and listening for jobs.');
 
+  publisher.start();
+  console.log('[WorkerBootstrap] Outbox publisher started and polling for events.');
+
   let isTerminating = false;
 
-  const handleTermination = async (signal: string) => {
+  const handleTermination = async (signal: string = 'SIGTERM') => {
     if (isTerminating) return;
     isTerminating = true;
 
@@ -39,11 +77,25 @@ export async function bootstrap(): Promise<WorkerRuntime> {
     }, 15_000);
 
     try {
+      // 1. Stop intake from outbox
+      await publisher.stop();
+      console.log('[WorkerBootstrap] Outbox publisher stopped.');
+
+      // 2. Drain and stop BullMQ workers
       await runtime.stop();
-      await redis.quit();
+      console.log('[WorkerBootstrap] Worker runtime stopped.');
+
+      // 3. Close BullMQ queues
+      await queueManager.closeAll();
+      console.log('[WorkerBootstrap] Queues closed.');
+
+      // 4. Disconnect databases
+      await closeRedisConnection(redis);
+      await disconnectDb();
+      console.log('[WorkerBootstrap] Database and Redis connections closed.');
+
       clearTimeout(shutdownTimeout);
       console.log('[WorkerBootstrap] Graceful shutdown completed. Exiting.');
-      process.exit(0);
     } catch (err) {
       clearTimeout(shutdownTimeout);
       console.error('[WorkerBootstrap] Error during shutdown:', err);
@@ -54,7 +106,13 @@ export async function bootstrap(): Promise<WorkerRuntime> {
   process.on('SIGTERM', () => handleTermination('SIGTERM'));
   process.on('SIGINT', () => handleTermination('SIGINT'));
 
-  return runtime;
+  return {
+    runtime,
+    queueManager,
+    publisher,
+    metrics,
+    shutdown: handleTermination,
+  };
 }
 
 // Auto-run if executed directly as entrypoint

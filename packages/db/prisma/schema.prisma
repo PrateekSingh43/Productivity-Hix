@@ -768,3 +768,35 @@ model ProposedDeviceHeartbeat {
   @@index([deviceId, timestamp])
   @@map("proposed_device_heartbeats")
 }
+
+// ----------------------------------------------------------------------------
+// 12. OUTBOX EVENT (Reliable Transactional Event Publication)
+// ----------------------------------------------------------------------------
+enum OutboxStatus {
+  PENDING
+  PROCESSING
+  PUBLISHED
+  FAILED
+  DEAD_LETTER
+}
+
+model OutboxEvent {
+  id            String       @id @default(cuid())
+  eventType     String       @map("event_type")
+  aggregateType String       @map("aggregate_type")
+  aggregateId   String       @map("aggregate_id")
+  payload       Json
+  status        OutboxStatus @default(PENDING)
+  retryCount    Int          @default(0) @map("retry_count")
+  maxRetries    Int          @default(5) @map("max_retries")
+  lastError     String?      @map("last_error")
+  scheduledFor  DateTime     @default(now()) @map("scheduled_for")
+  publishedAt   DateTime?    @map("published_at")
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @updatedAt @map("updated_at")
+
+  @@index([status, scheduledFor])
+  @@index([aggregateType, aggregateId])
+  @@index([eventType])
+  @@map("outbox_events")
+}

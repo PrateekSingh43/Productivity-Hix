@@ -14,7 +14,7 @@ export * from './queues';
 export * from './processors';
 export * from './base';
 export * from './runtime';
-export * from './testing/test-worker';
+export * from './outbox';
 export * from './shared/context';
 export * from './shared/logging';
 export * from './shared/retry';
@@ -23,8 +23,8 @@ export * from './shared/metrics';
 
 export const WORKER_SUBSYSTEM_METADATA = {
   name: '@repo/worker',
-  version: '0.1.0-group1.verified',
-  status: 'GROUP_1_BASE_WORKER_VERIFIED',
+  version: '0.2.0-group2.verified',
+  status: 'GROUP_2_QUEUE_EVENT_INFRASTRUCTURE_VERIFIED',
   runtimeExecutionEnabled: true,
 } as const;
 
