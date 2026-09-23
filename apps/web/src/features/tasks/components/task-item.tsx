@@ -231,7 +231,7 @@ export function TaskItem({ task, onSelect, isPrioritySection, onRescheduleToday 
                 title="End active focus session"
               >
                 <Square size={11} />
-                <span>Pause</span>
+                <span>End</span>
               </button>
             ) : (
               <button

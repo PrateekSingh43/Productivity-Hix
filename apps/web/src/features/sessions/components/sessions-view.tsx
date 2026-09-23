@@ -1,12 +1,13 @@
 "use client";
 
 import React, { useState, useEffect, useMemo } from "react";
+import Link from "next/link";
 import { PageContainer, PageHeader, Section, SectionHeader } from "@shared/components/layout";
 import { EmptyState } from "@shared/components/primitives";
 import { CurrentFocusCard } from "./current-focus-card";
-import { CheckCircle2, Play } from "lucide-react";
+import { CheckCircle2, Play, ArrowRight } from "lucide-react";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
-import { taskQueries, updateTask } from "@features/tasks";
+import { taskQueries, updateTask, FocusReflectionModal } from "@features/tasks";
 import { sessionQueries, useSessionsList } from "../api/queries";
 import { createSession, finishSession, pauseSession, resumeSession } from "../api/client";
 import { useLiveTelemetry } from "@features/timeline";
@@ -25,7 +26,13 @@ export function SessionsView() {
   const [sessionActive, setSessionActive] = useState(false);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const [, setSessionError] = useState<string | null>(null);
+  const [reflectionSession, setReflectionSession] = useState<{
+    id: string;
+    taskId?: string | null;
+    taskTitle?: string | null;
+    durationSeconds?: number | null;
+  } | null>(null);
+  const [sessionError, setSessionError] = useState<string | null>(null);
   const [sessionPending, setSessionPending] = useState(false);
 
   // Sync active session from backend
@@ -121,10 +128,19 @@ export function SessionsView() {
     setSessionError(null);
     setSessionPending(true);
     try {
+      const finishedId = activeSessionId;
+      const finishedDuration = elapsedSeconds;
+      const finishedTask = selectedTask;
       await finishSession(activeSessionId, "Completed intentional focus block");
       setSessionActive(false);
       setActiveSessionId(null);
       setElapsedSeconds(0);
+      setReflectionSession({
+        id: finishedId,
+        taskId: finishedTask?.id ?? null,
+        taskTitle: finishedTask?.title ?? null,
+        durationSeconds: finishedDuration,
+      });
       queryClient.invalidateQueries({ queryKey: taskQueries.lists() });
       queryClient.invalidateQueries({ queryKey: sessionQueries.all() });
       queryClient.invalidateQueries({ queryKey: planQueries.all() });
@@ -155,11 +171,46 @@ export function SessionsView() {
   const taskLinkedSessions = completedSessions.filter((s) => Boolean(s.taskId)).length;
   const isLimited = sessions.length >= 50;
 
+  // Day-grouped history (client-side grouping of the already-fetched list;
+  // no backend/query change). Newest day first, sessions newest first.
+  const historyDayGroups = useMemo(() => {
+    const groupsMap = new Map<string, typeof sessions>();
+    for (const sess of sessions) {
+      const dayKey = format(new Date(sess.startedAt), "yyyy-MM-dd");
+      const list = groupsMap.get(dayKey) ?? [];
+      list.push(sess);
+      groupsMap.set(dayKey, list);
+    }
+    const todayKey = format(new Date(), "yyyy-MM-dd");
+    const yesterdayKey = format(new Date(Date.now() - 86400000), "yyyy-MM-dd");
+    return Array.from(groupsMap.entries())
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([dayKey, list]) => {
+        let label: string;
+        try {
+          if (dayKey === todayKey) {
+            label = `Today · ${format(new Date(`${dayKey}T12:00:00`), "EEEE, MMM d")}`;
+          } else if (dayKey === yesterdayKey) {
+            label = `Yesterday · ${format(new Date(`${dayKey}T12:00:00`), "EEEE, MMM d")}`;
+          } else {
+            label = format(new Date(`${dayKey}T12:00:00`), "EEEE, MMMM d, yyyy");
+          }
+        } catch {
+          label = dayKey;
+        }
+        return {
+          dayKey,
+          label,
+          sessions: [...list].sort((a, b) => b.startedAt.localeCompare(a.startedAt)),
+        };
+      });
+  }, [sessions]);
+
   return (
     <PageContainer>
       <PageHeader
         title="Sessions"
-        subtitle="Deliberate focus execution blocks and telemetry observation"
+        subtitle="Deliberate focus blocks and execution history"
         breadcrumbs={[
           { label: "Home", href: "/" },
           { label: "Sessions" },
@@ -173,6 +224,11 @@ export function SessionsView() {
 
       {/* 1. VISUAL ANCHOR: CURRENT FOCUS CARD */}
       <Section>
+        {sessionError && (
+          <div role="alert" className="mb-3 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-xs text-red-600 dark:text-red-400">
+            {sessionError}
+          </div>
+        )}
         <CurrentFocusCard
           isActive={sessionActive}
           isPaused={Boolean(activeSessionId) && !sessionActive}
@@ -236,12 +292,12 @@ export function SessionsView() {
         </div>
       </Section>
 
-      {/* 3. SESSION HISTORY */}
+      {/* 3. SESSION HISTORY (grouped by day, newest first) */}
       <Section>
         <div className="flex items-center justify-between mb-3">
           <SectionHeader
             title="Session History"
-            description="Chronological log of deliberate focus blocks and observed activity"
+            description="Chronological log of deliberate focus blocks"
           />
           <span className="text-xs font-mono text-text-muted">
             {sessions.length} {sessions.length === 1 ? "session" : "sessions"}
@@ -254,69 +310,111 @@ export function SessionsView() {
             description="Start a focus block above or from the browser extension to begin capturing deliberate work periods."
           />
         ) : (
-          <div className="rounded-xl border border-border-subtle bg-bg-card divide-y divide-border-subtle overflow-hidden">
-            {sessions.map((sess) => {
-              const task = tasks.find((t) => t.id === sess.taskId);
-              const isLive = !sess.endedAt;
-              const durationMins = Math.round((sess.durationSeconds || 0) / 60);
-
-              return (
-                <div
-                  key={sess.id}
-                  className="px-4 sm:px-5 py-3.5 flex items-center justify-between gap-3 hover:bg-bg-secondary/40 transition-colors"
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div
-                      className={`h-7 w-7 rounded-full flex items-center justify-center shrink-0 ${
-                        isLive
-                          ? "bg-bg-secondary text-text-primary border border-border-strong"
-                          : "bg-bg-secondary text-text-muted border border-border-subtle"
-                      }`}
+          <div className="space-y-5">
+            {historyDayGroups.map((group) => (
+              <div
+                key={group.dayKey}
+                className="rounded-xl border border-border-subtle bg-bg-card overflow-hidden"
+              >
+                <div className="flex items-center justify-between gap-3 px-4 sm:px-5 py-2.5 bg-bg-secondary/40 border-b border-border-subtle">
+                  <span className="text-xs font-semibold text-text-primary">
+                    {group.label}
+                  </span>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <span className="text-xs font-mono text-text-muted">
+                      {group.sessions.length} {group.sessions.length === 1 ? "session" : "sessions"}
+                    </span>
+                    <Link
+                      href={`/timeline?date=${group.dayKey}`}
+                      className="inline-flex items-center gap-1 text-xs text-text-muted hover:text-text-primary transition-colors"
                     >
-                      {isLive ? <Play size={11} className="fill-current animate-pulse" /> : <CheckCircle2 size={13} />}
-                    </div>
-
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium text-text-primary truncate">
-                          {task?.title ?? sess.notes ?? "Intentional Focus Session"}
-                        </span>
-                        {isLive && (
-                          <span className="text-[10px] font-mono uppercase tracking-wider text-text-primary bg-bg-secondary border border-border-strong px-1.5 py-0.5 rounded">
-                            Live
-                          </span>
-                        )}
-                      </div>
-                      <span className="text-xs text-text-muted font-mono">
-                        {(() => {
-                          let startDate = new Date(sess.startedAt);
-                          if (sess.endedAt && sess.durationSeconds) {
-                            const endDate = new Date(sess.endedAt);
-                            const wallClockSec = Math.round((endDate.getTime() - startDate.getTime()) / 1000);
-                            if (wallClockSec < sess.durationSeconds) {
-                              startDate = new Date(endDate.getTime() - sess.durationSeconds * 1000);
-                            }
-                          }
-                          return format(startDate, "MMM d, h:mm a");
-                        })()}
-                        {sess.endedAt ? ` · ${durationMins}m` : " · Running now"}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2 shrink-0 font-mono text-xs text-text-muted">
-                    {isLive ? (
-                      <span className="text-text-primary font-semibold">Running</span>
-                    ) : (
-                      <span>{durationMins}m</span>
-                    )}
+                      <span>Inspect Timeline</span>
+                      <ArrowRight size={12} />
+                    </Link>
                   </div>
                 </div>
-              );
-            })}
+                <div className="divide-y divide-border-subtle">
+                  {group.sessions.map((sess) => {
+                    const task = tasks.find((t) => t.id === sess.taskId);
+                    const isLive = !sess.endedAt;
+                    const durationMins = Math.round((sess.durationSeconds || 0) / 60);
+
+                    return (
+                      <div
+                        key={sess.id}
+                        className="px-4 sm:px-5 py-3.5 flex items-center justify-between gap-3 hover:bg-bg-secondary/40 transition-colors"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div
+                            className={`h-7 w-7 rounded-full flex items-center justify-center shrink-0 ${
+                              isLive
+                                ? "bg-bg-secondary text-text-primary border border-border-strong"
+                                : "bg-bg-secondary text-text-muted border border-border-subtle"
+                            }`}
+                          >
+                            {isLive ? <Play size={11} className="fill-current animate-pulse" /> : <CheckCircle2 size={13} />}
+                          </div>
+
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-medium text-text-primary truncate">
+                                {task?.title ?? sess.notes ?? "Intentional Focus Session"}
+                              </span>
+                              {isLive && (
+                                <span className="text-[10px] font-mono uppercase tracking-wider text-text-primary bg-bg-secondary border border-border-strong px-1.5 py-0.5 rounded">
+                                  Live
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-xs text-text-muted font-mono">
+                              {(() => {
+                                let startDate = new Date(sess.startedAt);
+                                if (sess.endedAt && sess.durationSeconds) {
+                                  const endDate = new Date(sess.endedAt);
+                                  const wallClockSec = Math.round((endDate.getTime() - startDate.getTime()) / 1000);
+                                  if (wallClockSec < sess.durationSeconds) {
+                                    startDate = new Date(endDate.getTime() - sess.durationSeconds * 1000);
+                                  }
+                                }
+                                return format(startDate, "h:mm a");
+                              })()}
+                              {sess.endedAt ? "" : " · Running now"}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0 font-mono text-xs text-text-muted">
+                          {isLive ? (
+                            <>
+                              <span className="text-text-primary font-semibold font-sans">Running</span>
+                              {sess.targetDurationMinutes != null && (
+                                <span>Planned {sess.targetDurationMinutes}m</span>
+                              )}
+                            </>
+                          ) : (
+                            <>
+                              {sess.targetDurationMinutes != null && (
+                                <span>Planned {sess.targetDurationMinutes}m ·&nbsp;</span>
+                              )}
+                              <span className="text-text-primary">Actual {durationMins}m</span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </Section>
+
+      <FocusReflectionModal
+        isOpen={Boolean(reflectionSession)}
+        onClose={() => setReflectionSession(null)}
+        session={reflectionSession}
+      />
     </PageContainer>
   );
 }

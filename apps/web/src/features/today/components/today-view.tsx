@@ -22,7 +22,7 @@ import Link from "next/link";
 import { PageContainer, PageHeader, Section, SectionHeader } from "@shared/components/layout";
 import { DailyPlanView } from "./daily-plan-view";
 import { EmptyState, PriorityBadge } from "@shared/components/primitives";
-import { TaskDetailDrawer, ConfirmDiscardModal, useTasksList, createTask, updateTask } from "@features/tasks";
+import { TaskDetailDrawer, ConfirmDiscardModal, FocusReflectionModal, useTasksList, createTask, updateTask } from "@features/tasks";
 import {
   useActiveSession,
   createSession,
@@ -60,6 +60,12 @@ export function TodayView() {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [reflectionSession, setReflectionSession] = useState<{
+    id: string;
+    taskId?: string | null;
+    taskTitle?: string | null;
+    durationSeconds?: number | null;
+  } | null>(null);
 
   const activeSessionQuery = useActiveSession();
   const serverActiveSession = activeSessionQuery.data;
@@ -100,11 +106,12 @@ export function TodayView() {
     });
   }, [rawTasks, targetDate, goals]);
 
-  // Tasks belonging specifically to Today
+  // Tasks belonging specifically to Today (cancelled tasks are never actionable here)
   const tasks = React.useMemo(() => {
     const priorityWeight = { high: 3, medium: 2, low: 1, none: 0 };
     return rawTasks
       .filter((t) => {
+        if (t.status === "cancelled") return false;
         // Active session always surfaces in Today
         if (t.hasActiveSession) return true;
         // Belongs to one of today's goals
@@ -251,7 +258,10 @@ export function TodayView() {
       queryClient.invalidateQueries({ queryKey: ["tasks"] });
       queryClient.invalidateQueries({ queryKey: ["sessions"] });
     } catch {
-      setSessionActive(true);
+      // Stay inactive on failure: server sync will surface the session if one
+      // was actually created. Showing active UI with no session id breaks
+      // pause/complete controls.
+      setSessionActive(false);
     }
   };
 
@@ -273,11 +283,22 @@ export function TodayView() {
 
   // Handler to complete focus session
   const handleCompleteFocus = async () => {
+    const finishedId = activeSessionId;
+    const finishedDuration = elapsedSeconds;
+    const finishedTask = selectedTask;
     if (activeSessionId) {
       await finishSession(activeSessionId, "Completed intentional focus block");
     }
     if (selectedTask) {
       await updateTask(selectedTask.id, { status: "done" });
+    }
+    if (finishedId) {
+      setReflectionSession({
+        id: finishedId,
+        taskId: finishedTask?.id ?? null,
+        taskTitle: finishedTask?.title ?? null,
+        durationSeconds: finishedDuration,
+      });
     }
     setSessionActive(false);
     setActiveSessionId(null);
@@ -920,6 +941,12 @@ export function TodayView() {
         isOpen={showDiscardModal}
         onConfirm={handleConfirmDiscard}
         onCancel={() => setShowDiscardModal(false)}
+      />
+
+      <FocusReflectionModal
+        isOpen={Boolean(reflectionSession)}
+        onClose={() => setReflectionSession(null)}
+        session={reflectionSession}
       />
     </PageContainer>
   );
