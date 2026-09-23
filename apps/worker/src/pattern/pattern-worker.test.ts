@@ -93,8 +93,6 @@ function createFakeDb() {
     patternAnalysisRun: {
       findFirst: async ({ where }: { where: Record<string, unknown> }) =>
         runs.filter((r) => match(r, where)).sort((a, b) => (a.computedAt ?? "") < (b.computedAt ?? "") ? 1 : -1)[0] ?? null,
-      findUnique: async ({ where }: { where: { userId_identityKey?: { userId: string; identityKey: string } } }) =>
-        runs.find((r) => r.userId === where.userId_identityKey?.userId && r.identityKey === where.userId_identityKey?.identityKey) ?? null,
       create: async ({ data }: { data: Record<string, unknown> }) => {
         const row = { id: `run-${++ids}`, computedAt: null, ...data } as unknown as FakeRunRow;
         runs.push(row);
@@ -103,14 +101,6 @@ function createFakeDb() {
       update: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
         const row = runs.find((r) => r.id === where.id)!;
         Object.assign(row, data);
-        return row;
-      },
-      upsert: async ({ where, create, update }: { where: Record<string, unknown>; create: Record<string, unknown>; update: Record<string, unknown> }) => {
-        const key = (where as { userId_identityKey: { userId: string; identityKey: string } }).userId_identityKey;
-        const existing = runs.find((r) => r.userId === key.userId && r.identityKey === key.identityKey);
-        if (existing) { Object.assign(existing, update); return existing; }
-        const row = { id: `run-${++ids}`, computedAt: null, ...create } as unknown as FakeRunRow;
-        runs.push(row);
         return row;
       },
       updateMany: async ({ where, data }: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
@@ -126,25 +116,10 @@ function createFakeDb() {
         findings.filter((f) => Object.entries(where).every(([k, v]) => k === "select" || f[k] === v)),
       count: async ({ where }: { where: Record<string, unknown> }) =>
         findings.filter((f) => Object.entries(where).every(([k, v]) => f[k] === v)).length,
-      delete: async ({ where }: { where: { id: string } }) => {
-        const index = findings.findIndex((f) => f.id === where.id);
-        if (index >= 0) findings.splice(index, 1);
-        return {};
-      },
-      upsert: async ({ where, create, update }: { where: Record<string, unknown>; create: Record<string, unknown>; update: Record<string, unknown> }) => {
-        const key = (where as { userId_patternKey: { userId: string; patternKey: string } }).userId_patternKey;
-        const existing = findings.find((f) => f.userId === key.userId && f.patternKey === key.patternKey);
-        if (existing) { Object.assign(existing, update); return existing; }
-        const row = { id: `finding-${++ids}`, ...create };
+      create: async ({ data }: { data: Record<string, unknown> }) => {
+        const row = { id: `finding-${++ids}`, ...data };
         findings.push(row);
         return row;
-      },
-      deleteMany: async ({ where }: { where: { runId: string } }) => {
-        const before = findings.length;
-        for (let i = findings.length - 1; i >= 0; i--) {
-          if (findings[i]!.runId === where.runId) findings.splice(i, 1);
-        }
-        return { count: before - findings.length };
       },
     },
   };
@@ -301,7 +276,9 @@ describe("PatternWorker", () => {
   });
 
   it("discards stale output when inputs change mid-run (supersession)", async () => {
+    // Reads: idempotency check, pre-execution stash, freshness gate, post-check.
     const { provider } = stubProvider(emptyInput(), [
+      BASE_WATERMARKS,
       BASE_WATERMARKS,
       { ...BASE_WATERMARKS, maxSourceAt: "2026-09-16T00:00:00.000Z" },
     ]);
@@ -344,9 +321,11 @@ describe("PatternWorker", () => {
     expect(db.runs[0]!.status).toBe("FAILED");
     const retry = await worker.run(job(), { metrics, logger, idempotencyProvider: locks });
     expect(retry.status).toBe("SUCCEEDED");
-    expect(db.runs).toHaveLength(1);
-    expect(db.runs[0]!.status).toBe("COMPLETED");
-    expect(db.runs[0]!.error).toBeNull();
+    // Immutable history: the FAILED execution stays inspectable; the retry is a new row.
+    expect(db.runs).toHaveLength(2);
+    expect(db.runs[0]!.status).toBe("FAILED");
+    expect(db.runs[0]!.error).toContain("transient failure");
+    expect(db.runs[1]!.status).toBe("COMPLETED");
   });
 
   it("onFailure only marks runs owned by the failing job's correlation id", async () => {
@@ -364,6 +343,35 @@ describe("PatternWorker", () => {
     const row = db.runs.find((r) => r.id === "run-newer")!;
     expect(row.status).toBe("RUNNING");
     expect(row.error).toBeUndefined();
+  });
+
+  it("history is immutable: a new fingerprint creates a new run without touching the old one", async () => {
+    const oldFp = "fp-old";
+    db.runs.push({
+      id: "run-old", userId: USER, windowStart: WINDOW.start, windowEnd: WINDOW.end,
+      identityKey: "pattern:identity", inputFingerprint: oldFp, status: "COMPLETED", state: "ok",
+      diagnosticsJson: null, detectorVersion: "1.0.0", configVersion: "api-prototype-1",
+      jobCorrelationId: "corr-old", computedAt: new Date().toISOString(),
+    } as never);
+    db.findings.push({
+      id: "finding-old", userId: USER, runId: "run-old", patternKey: "pattern:k:1.0.0:api",
+      detectorIdentity: "extended_continuous_activity", patternId: "p-old",
+      status: "DETECTED", resultJson: {},
+    });
+    const { provider } = stubProvider(emptyInput(), [{ ...BASE_WATERMARKS, activityCount: 5 }]);
+    const worker = new PatternWorker(db as never, provider);
+    const result = await worker.run(job(), { metrics, logger, idempotencyProvider: locks });
+    expect(result.status).toBe("SUCCEEDED");
+    // New execution row; old row and its finding untouched.
+    expect(db.runs).toHaveLength(2);
+    const oldRun = db.runs.find((r) => r.id === "run-old")!;
+    expect(oldRun.status).toBe("COMPLETED");
+    expect(oldRun.inputFingerprint).toBe(oldFp);
+    const oldFinding = db.findings.find((f) => f.id === "finding-old")!;
+    expect(oldFinding.runId).toBe("run-old");
+    const newRun = db.runs.find((r) => r.id !== "run-old")!;
+    expect(newRun.inputFingerprint).not.toBe(oldFp);
+    expect(db.findings.filter((f) => f.runId === newRun.id)).toHaveLength(0);
   });
 
   it("never imports the AI package in the pattern computation path", () => {

@@ -84,19 +84,10 @@ function createFakeDb() {
     runs,
     findings,
     patternAnalysisRun: {
-      findUnique: async ({ where }: any) =>
-        runs.find((r) => r.userId === where.userId_identityKey?.userId && r.identityKey === where.userId_identityKey?.identityKey) ?? null,
-      findFirst: async () => null,
+      findFirst: async ({ where }: any) =>
+        runs.filter((r) => Object.entries(where).every(([k, v]) => (r as any)[k] === v)).slice(-1)[0] ?? null,
       create: async ({ data }: any) => { const row = { id: `run-${++ids}`, computedAt: null, ...data }; runs.push(row); return row; },
       update: async ({ where, data }: any) => { const row = runs.find((r) => r.id === where.id)!; Object.assign(row, data); return row; },
-      upsert: async ({ where, create, update }: any) => {
-        const key = where.userId_identityKey;
-        const existing = runs.find((r) => r.userId === key.userId && r.identityKey === key.identityKey);
-        if (existing) { Object.assign(existing, update); return existing; }
-        const row = { id: `run-${++ids}`, computedAt: null, ...create };
-        runs.push(row);
-        return row;
-      },
       updateMany: async ({ where, data }: any) => {
         let count = 0;
         for (const row of runs) {
@@ -109,19 +100,15 @@ function createFakeDb() {
       },
     },
     patternFinding: {
-      findMany: async ({ where }: any) =>
-        findings.filter((f) => Object.entries(where).every(([k, v]) => k === "select" || (f as any)[k] === v)),
-      count: async ({ where }: any) =>
-        findings.filter((f) => Object.entries(where).every(([k, v]) => (f as any)[k] === v)).length,
-      upsert: async ({ where, create, update }: any) => {
-        const key = where.userId_patternKey;
-        const existing = findings.find((f) => f.userId === key.userId && f.patternKey === key.patternKey);
-        if (existing) { Object.assign(existing, update); return existing; }
-        const row = { id: `finding-${++ids}`, ...create };
+      findMany: async ({ where }: { where: Record<string, unknown> }) =>
+        findings.filter((f) => Object.entries(where).every(([k, v]) => k === "select" || f[k] === v)),
+      count: async ({ where }: { where: Record<string, unknown> }) =>
+        findings.filter((f) => Object.entries(where).every(([k, v]) => f[k] === v)).length,
+      create: async ({ data }: { data: Record<string, unknown> }) => {
+        const row = { id: `finding-${++ids}`, ...data };
         findings.push(row);
         return row;
       },
-      delete: async () => ({}),
     },
     outboxEvent: {
       update: async () => ({}),

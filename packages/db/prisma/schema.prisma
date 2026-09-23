@@ -43,6 +43,7 @@ model User {
   userActivityOverrides    UserActivityOverride[]
   proposedDeviceHeartbeats ProposedDeviceHeartbeat[]
   timelineDayStates        TimelineDayState[]
+  timelineSnapshots        TimelineSnapshot[]
   patternAnalysisRuns      PatternAnalysisRun[]
   patternFindings          PatternFinding[]
 
@@ -842,10 +843,51 @@ model TimelineDayState {
   updatedAt                       DateTime               @updatedAt @map("updated_at")
 
   user                            User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  activeSnapshot                  TimelineSnapshot?      @relation("ActiveDaySnapshot", fields: [activeSnapshotId], references: [id], onDelete: SetNull)
+  snapshots                       TimelineSnapshot[]     @relation("DayStateSnapshots")
 
   @@unique([userId, localDate])
   @@index([userId, status])
   @@map("timeline_day_states")
+}
+
+// ----------------------------------------------------------------------------
+// 13B. TIMELINE SNAPSHOT (Durable Frozen Day Materialization)
+// ----------------------------------------------------------------------------
+model TimelineSnapshot {
+  id                            String                 @id @default(cuid())
+  userId                        String                 @map("user_id")
+  localDate                     String                 @map("local_date") // "YYYY-MM-DD"
+  dayStateId                    String?                @map("day_state_id")
+  snapshotGeneration            Int                    @default(1) @map("snapshot_generation")
+  status                        String                 @default("COMPLETE") // 'IN_PROGRESS' | 'COMPLETE' | 'FAILED' | 'SUPERSEDED'
+  observationRevision           Int                    @default(0) @map("observation_revision")
+  ruleRevision                  Int                    @default(0) @map("rule_revision")
+  semanticEngineVersion         String                 @default("3b.0.1") @map("semantic_engine_version")
+  summary                       Json
+  blocksJson                    Json                   @map("blocks_json")
+  gapsJson                      Json                   @default("[]") @map("gaps_json")
+  blockCount                    Int                    @default(0) @map("block_count")
+  gapCount                      Int                    @default(0) @map("gap_count")
+  startOfDay                    DateTime               @map("start_of_day")
+  endOfDay                      DateTime               @map("end_of_day")
+  wallClockDurationMs           Float                  @default(0) @map("wall_clock_duration_ms")
+  observedActiveDurationMs      Float                  @default(0) @map("observed_active_duration_ms")
+  quietActivityDurationMs       Float                  @default(0) @map("quiet_activity_duration_ms")
+  prolongedAbsenceDurationMs    Float                  @default(0) @map("prolonged_absence_duration_ms")
+  machineUnavailableDurationMs  Float                  @default(0) @map("machine_unavailable_duration_ms")
+  coverageGapDurationMs         Float                  @default(0) @map("coverage_gap_duration_ms")
+  materializedAt                DateTime               @default(now()) @map("materialized_at")
+  expiresAt                     DateTime?              @map("expires_at")
+  createdAt                     DateTime               @default(now()) @map("created_at")
+
+  user                          User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dayState                      TimelineDayState?      @relation("DayStateSnapshots", fields: [dayStateId], references: [id], onDelete: Cascade)
+  activeForDayState             TimelineDayState[]     @relation("ActiveDaySnapshot")
+
+  @@index([userId, localDate])
+  @@index([dayStateId])
+  @@map("timeline_snapshots")
 }
 
 // ----------------------------------------------------------------------------
@@ -879,7 +921,10 @@ model PatternAnalysisRun {
   user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   findings         PatternFinding[]
 
-  @@unique([userId, identityKey])
+  // Immutable history: many executions may share one logical analysis
+  // identity. Dedupe is by (identity + input fingerprint) at runtime, never
+  // by overwriting rows.
+  @@index([userId, identityKey])
   @@index([userId, windowStart, windowEnd])
   @@map("pattern_analysis_runs")
 }
@@ -901,7 +946,10 @@ model PatternFinding {
   user             User               @relation(fields: [userId], references: [id], onDelete: Cascade)
   run              PatternAnalysisRun @relation(fields: [runId], references: [id], onDelete: Cascade)
 
-  @@unique([userId, patternKey])
+  // A finding is immutable output of exactly one execution: uniqueness is
+  // scoped to its run, never reassigned across runs.
+  @@unique([runId, patternKey])
   @@index([runId])
+  @@index([userId])
   @@map("pattern_findings")
 }

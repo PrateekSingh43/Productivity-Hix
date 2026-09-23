@@ -121,14 +121,27 @@ export class PatternWorker extends BaseWorker<PatternAnalysisJobData, PatternWor
     ]);
   }
 
+  /**
+   * Latest COMPLETED execution for a logical identity, optionally pinned to an
+   * exact input fingerprint. History is never mutated; selection is read-only.
+   */
+  async findCompletedRun(identityKey: string, userId: string, inputFingerprint?: string) {
+    return this.db.patternAnalysisRun.findFirst({
+      where: {
+        userId,
+        identityKey,
+        status: "COMPLETED",
+        ...(inputFingerprint !== undefined ? { inputFingerprint } : {}),
+      },
+      orderBy: { computedAt: "desc" },
+    });
+  }
+
   async checkIdempotency(data: PatternAnalysisJobData): Promise<PatternWorkerResult | null> {
     const identityKey = this.getJobIdentity(data);
-    const existing = await this.db.patternAnalysisRun.findUnique({
-      where: { userId_identityKey: { userId: data.userId, identityKey } },
-    });
-    if (!existing || existing.status !== "COMPLETED") return null;
     const current = await this.computeFingerprint(data);
-    if (existing.inputFingerprint !== current) return null;
+    const existing = await this.findCompletedRun(identityKey, data.userId, current);
+    if (!existing) return null;
     const patternsFound = await this.db.patternFinding.count({ where: { runId: existing.id } });
     return { runId: existing.id, state: existing.state, patternsFound };
   }
@@ -167,10 +180,18 @@ export class PatternWorker extends BaseWorker<PatternAnalysisJobData, PatternWor
     const inputFingerprint = this.preFingerprints.get(identityKey) ?? await this.computeFingerprint(data);
     context.throwIfCancelled();
 
-    // Claim the run (visible RUNNING). All result publication below is atomic.
-    const run = await this.db.patternAnalysisRun.upsert({
-      where: { userId_identityKey: { userId: data.userId, identityKey } },
-      create: {
+    // Dedupe after lock acquisition: a serialized twin may have completed
+    // while this job waited. Never create a second row for identical inputs.
+    const already = await this.findCompletedRun(identityKey, data.userId, inputFingerprint);
+    if (already) {
+      const patternsFound = await this.db.patternFinding.count({ where: { runId: already.id } });
+      return { runId: already.id, state: already.state, patternsFound };
+    }
+
+    // Every execution gets its own immutable run row. History is append-only;
+    // a later execution never overwrites an earlier one.
+    const run = await this.db.patternAnalysisRun.create({
+      data: {
         userId: data.userId,
         windowStart: data.windowStart,
         windowEnd: data.windowEnd,
@@ -180,13 +201,6 @@ export class PatternWorker extends BaseWorker<PatternAnalysisJobData, PatternWor
         state: "pending",
         detectorVersion: PATTERN_ENGINE_VERSION,
         configVersion: PATTERN_CONFIG_VERSION,
-        jobCorrelationId: data.jobCorrelationId,
-      },
-      update: {
-        inputFingerprint,
-        status: "RUNNING",
-        state: "pending",
-        error: null,
         jobCorrelationId: data.jobCorrelationId,
       },
     });
@@ -221,25 +235,23 @@ export class PatternWorker extends BaseWorker<PatternAnalysisJobData, PatternWor
       return { runId: run.id, state: "superseded", patternsFound: 0 };
     }
 
-    // Atomic publication: findings + diagnostics + terminal state commit together.
-    // A concurrent owner (newer retry) is never overwritten: guard on correlation id.
+    // Atomic publication: this execution's findings + diagnostics + terminal
+    // state commit together. Findings are created (never upserted, never
+    // reassigned): each belongs permanently to this run row. A concurrent
+    // owner is never overwritten: guard on correlation id.
     await this.db.$transaction(async (tx) => {
-      const liveKeys = new Set(findings.map((f) => f.patternKey));
-      const previous = await tx.patternFinding.findMany({
-        where: { runId: run.id },
-        select: { id: true, patternKey: true },
-      });
       for (const pattern of findings) {
-        await tx.patternFinding.upsert({
-          where: { userId_patternKey: { userId: data.userId, patternKey: pattern.patternKey } },
-          create: { userId: data.userId, runId: run.id, ...pattern },
-          update: { runId: run.id, status: pattern.status, resultJson: pattern.resultJson },
+        await tx.patternFinding.create({
+          data: {
+            userId: data.userId,
+            runId: run.id,
+            patternKey: pattern.patternKey,
+            detectorIdentity: pattern.detectorIdentity,
+            patternId: pattern.patternId,
+            status: pattern.status,
+            resultJson: pattern.resultJson,
+          },
         });
-      }
-      for (const row of previous) {
-        if (!liveKeys.has(row.patternKey)) {
-          await tx.patternFinding.delete({ where: { id: row.id } });
-        }
       }
       const claimed = await tx.patternAnalysisRun.updateMany({
         where: { id: run.id, jobCorrelationId: data.jobCorrelationId, status: "RUNNING" },
@@ -258,7 +270,7 @@ export class PatternWorker extends BaseWorker<PatternAnalysisJobData, PatternWor
   /**
    * Durable terminal failure. Runs owned by THIS job (correlation id +
    * still RUNNING) move to FAILED with sanitized error info; runs owned by a
-   * newer retry are never clobbered. Retries re-claim via execute()'s upsert.
+   * newer retry are never clobbered. Retries create their own run row.
    */
   async onFailure(data: PatternAnalysisJobData | undefined, error?: Error): Promise<void> {
     if (!data) return;
