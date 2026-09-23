@@ -22,7 +22,7 @@ import Link from "next/link";
 import { PageContainer, PageHeader, Section, SectionHeader } from "@shared/components/layout";
 import { DailyPlanView } from "./daily-plan-view";
 import { EmptyState, PriorityBadge } from "@shared/components/primitives";
-import { TaskDetailDrawer, ConfirmDiscardModal, FocusReflectionModal, useTasksList, createTask, updateTask } from "@features/tasks";
+import { TaskDetailDrawer, ConfirmDiscardModal, FocusReflectionModal, PlannedFocusPicker, useTasksList, createTask, updateTask } from "@features/tasks";
 import {
   useActiveSession,
   createSession,
@@ -590,7 +590,7 @@ export function TodayView() {
             <div className="flex flex-col sm:flex-row gap-2.5">
               <input
                 type="text"
-                placeholder="What task needs to be done today?"
+                placeholder="Add a task..."
                 value={newTaskTitle}
                 onChange={(e) => setNewNewTaskTitle(e.target.value)}
                 className="flex-1 text-sm bg-bg-secondary border border-border-subtle rounded-md px-3 py-2 text-text-primary placeholder:text-text-muted focus-visible:outline-none focus-visible:border-border-hover"
@@ -600,9 +600,10 @@ export function TodayView() {
                 <select
                   value={newTaskGoalId}
                   onChange={(e) => setNewTaskGoalId(e.target.value)}
-                  className="text-xs bg-bg-secondary border border-border-subtle rounded-md px-2.5 py-2 text-text-primary outline-none focus:border-border-hover cursor-pointer"
+                  className="text-xs bg-bg-secondary border border-border-subtle rounded-md px-2.5 py-1.5 text-text-primary outline-none focus:border-border-hover cursor-pointer [&>option]:bg-bg-card [&>option]:text-text-primary"
+                  title="Daily goal (optional)"
                 >
-                  <option value="">Independent Task (No Goal)</option>
+                  <option value="">No Goal</option>
                   {goals.map((g) => (
                     <option key={g.id} value={g.id}>
                       Goal: {g.title}
@@ -619,32 +620,13 @@ export function TodayView() {
                     title="Due date"
                   />
                 </div>
-                <div className="flex items-center gap-1 bg-bg-secondary border border-border-subtle rounded-md px-2 py-1.5 focus-within:border-border-hover">
-                  <Clock size={12} className="text-text-muted shrink-0" />
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    value={newTaskDurationInput}
-                    onChange={(e) => {
-                      const val = e.target.value.replace(/[^0-9]/g, "");
-                      setNewTaskDurationInput(val);
-                      if (val) {
-                        const parsed = parseInt(val, 10);
-                        if (parsed > 0) setNewTaskDuration(parsed);
-                      }
-                    }}
-                    onBlur={() => {
-                      if (!newTaskDurationInput || parseInt(newTaskDurationInput, 10) <= 0) {
-                        setNewTaskDurationInput(String(newTaskDuration || 30));
-                      }
-                    }}
-                    className="w-10 text-xs bg-transparent text-text-primary border-0 outline-none font-mono text-center"
-                    placeholder="30"
-                    title="Estimated duration in minutes"
-                  />
-                  <span className="text-[11px] text-text-muted">m</span>
-                </div>
+                <PlannedFocusPicker
+                  value={newTaskDuration}
+                  onChange={(mins) => {
+                    setNewTaskDuration(mins);
+                    setNewTaskDurationInput(String(mins));
+                  }}
+                />
               </div>
             </div>
             <div className="flex justify-end gap-2 pt-1 border-t border-border-subtle">
@@ -659,7 +641,7 @@ export function TodayView() {
                 type="submit"
                 className="text-xs font-medium bg-text-primary text-bg-default px-3.5 py-1.5 rounded-md hover:opacity-90 cursor-pointer transition-opacity shadow-xs"
               >
-                Save Task
+                Add Task
               </button>
             </div>
           </form>

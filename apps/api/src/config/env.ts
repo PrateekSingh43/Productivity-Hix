@@ -1,5 +1,13 @@
-import "dotenv/config";
+import dotenv from "dotenv";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
+
+const configDirectory = path.dirname(fileURLToPath(import.meta.url));
+// The provider credentials intentionally live with the AI app. Loading this
+// explicit path keeps local API startup deterministic from both src/ and dist/.
+dotenv.config();
+dotenv.config({ path: path.resolve(configDirectory, "../../../ai/.env") });
 
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -27,4 +35,3 @@ const envSchema = z.object({
 
 export type Env = z.infer<typeof envSchema>;
 export const env = envSchema.parse(process.env);
-

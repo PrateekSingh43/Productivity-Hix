@@ -85,6 +85,7 @@ async function initialize() {
         quietHoursEnabled: prefs.quietHoursEnabled,
         quietHoursStart: prefs.quietHoursStart,
         quietHoursEnd: prefs.quietHoursEnd,
+        suppressCheckInsDuringFocus: prefs.suppressCheckInsDuringFocus,
       });
       void inactivityEngine.reloadConfig();
     }

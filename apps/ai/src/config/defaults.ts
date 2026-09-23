@@ -5,6 +5,6 @@ import type { AIProviderName } from "../provider/types";
  * `AIConfig.model` and must not hardcode a model identifier.
  */
 export const DEFAULT_MODELS: Record<AIProviderName, string> = {
-  gemini: "gemini-2.5-flash",
+  gemini: "gemini-3.6-flash",
   groq: "openai/gpt-oss-120b",
 };

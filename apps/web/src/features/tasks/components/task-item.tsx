@@ -165,7 +165,7 @@ export function TaskItem({ task, onSelect, isPrioritySection, onRescheduleToday 
             }`}
             title={
               isRollover
-                ? `Rollover: Originally due ${format(new Date(task.dueAt!), "PPP")}, scheduled for deliberate execution Today`
+                ? `Rolled over to today • Originally due ${format(new Date(task.dueAt!), "PPP")}`
                 : task.dueAt
                 ? `Due: ${format(new Date(task.dueAt), "PPP")}`
                 : `Scheduled: ${displayDate}`
@@ -176,7 +176,7 @@ export function TaskItem({ task, onSelect, isPrioritySection, onRescheduleToday 
             ) : (
               <Calendar size={11} className="shrink-0" />
             )}
-            <span>{isRollover ? "Rollover (Today)" : displayDate}</span>
+            <span>{isRollover ? "Rolled over" : displayDate}</span>
           </span>
         )}
 

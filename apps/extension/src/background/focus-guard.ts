@@ -1,7 +1,11 @@
 import type { WorkSession } from "@repo/types";
 import { apiClient } from "../api/client";
 import { getSettings } from "../storage/settings";
-import { showFocusTargetNotification } from "./notifications";
+import {
+  showFocusTargetNotification,
+  showFocusStartedNotification,
+  showFocusEndedNotification,
+} from "./notifications";
 
 const EXEMPT_HOSTS = [
   "accounts.google.com",
@@ -138,7 +142,7 @@ export class FocusGuardManager {
       void chrome.action.setBadgeBackgroundColor({ color: "#f59e0b" }); // amber
     } else {
       void chrome.action.setBadgeText({ text: "ON" });
-      void chrome.action.setBadgeBackgroundColor({ color: "#10b981" }); // emerald
+      void chrome.action.setBadgeBackgroundColor({ color: "#27272a" }); // neutral monochrome
     }
   }
 
@@ -176,16 +180,49 @@ export class FocusGuardManager {
         this.reconnectBackoffMs = 2000; // Reset backoff on successful connection
       };
 
-      ws.onmessage = (event) => {
+      ws.onmessage = async (event) => {
         try {
           const data = JSON.parse(event.data);
           if (data.type === "session:started" || data.type === "session:resumed") {
+            const isNewStart = !this.currentSession || this.currentSession.id !== data.session?.id;
             this.setSession(data.session);
+            if (isNewStart && data.session && !data.session.isPaused) {
+              const taskTitle = data.session.taskTitle || data.session.notes || "Deliberate Focus";
+              const targetMins = data.session.targetDurationMinutes ?? 25;
+              void showFocusStartedNotification({
+                taskTitle,
+                targetMinutes: targetMins,
+              });
+            }
           } else if (data.type === "session:paused") {
             this.setSession(data.session);
           } else if (data.type === "session:ended") {
+            const prevSession = this.currentSession;
             this.setSession(null);
             this.allowedTabIds.clear();
+            if (prevSession && !data.discarded) {
+              const taskTitle = prevSession.taskTitle || prevSession.notes || "Focus Block";
+              const elapsedSec = prevSession.durationSeconds ?? 0;
+              const durationMinutes = Math.max(1, Math.round(elapsedSec / 60));
+              void showFocusEndedNotification({
+                taskTitle,
+                durationMinutes,
+              });
+            }
+          } else if (data.type === "preferences:updated" && data.preferences) {
+            try {
+              const { reflectionEngine } = await import("./reflection-engine");
+              const { inactivityEngine } = await import("./inactivity-engine");
+              await reflectionEngine.updateConfig({
+                quietHoursEnabled: data.preferences.quietHoursEnabled,
+                quietHoursStart: data.preferences.quietHoursStart,
+                quietHoursEnd: data.preferences.quietHoursEnd,
+                suppressCheckInsDuringFocus: data.preferences.suppressCheckInsDuringFocus,
+              });
+              await inactivityEngine.reloadConfig();
+            } catch (err) {
+              console.warn("[FOCUS GUARD] Failed to forward updated preferences:", err);
+            }
           }
         } catch (e) {
           console.warn("[FOCUS GUARD] Failed to parse WebSocket message:", e);

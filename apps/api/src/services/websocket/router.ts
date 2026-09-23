@@ -1,5 +1,6 @@
 import type { WebSocket } from "ws";
-import { wsInboundSchema, makeAIError, type WSOutboundMessage } from "./protocol";
+import { handleAIMessage } from "./ai-handler";
+import { wsInboundSchema, type WSOutboundMessage } from "./protocol";
 
 /**
  * Route a validated inbound WebSocket message to the appropriate handler.
@@ -11,7 +12,7 @@ import { wsInboundSchema, makeAIError, type WSOutboundMessage } from "./protocol
  *
  * The router does NOT import any AI provider code — it delegates.
  */
-export function routeWSMessage(ws: WebSocket, userId: string, raw: string): void {
+export async function routeWSMessage(ws: WebSocket, userId: string, raw: string): Promise<void> {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -38,15 +39,10 @@ export function routeWSMessage(ws: WebSocket, userId: string, raw: string): void
       break;
 
     case "ai:message":
-      // Phase 0 stub: AI chat is not yet implemented.
-      // Do NOT log raw message content.
-      sendJSON(ws, makeAIError(
-        message.conversationId,
-        message.messageId,
-        "AI chat is not yet implemented",
-        message.requestId,
-        "not_implemented",
-      ));
+      // Do not log raw message content. The handler owns persistence and
+      // provider streaming so malformed or unauthorised conversations never
+      // reach the model.
+      await handleAIMessage(ws, userId, message);
       break;
   }
 }

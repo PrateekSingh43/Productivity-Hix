@@ -356,8 +356,8 @@ export function SettingsView({ status, onBack, onRefresh }: SettingsViewProps) {
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <Clock size={13} style={{ color: "var(--accent-primary)" }} />
-            <span className="section-kicker" style={{ color: "var(--accent-primary)" }}>
+            <Clock size={13} style={{ color: "var(--text-muted)" }} />
+            <span className="section-kicker">
               PRODUCTIVE CYCLE & ROLLOVER
             </span>
           </div>
@@ -365,7 +365,7 @@ export function SettingsView({ status, onBack, onRefresh }: SettingsViewProps) {
             <span
               style={{
                 fontSize: 9.5,
-                color: "var(--accent-primary)",
+                color: "var(--text-muted)",
                 fontWeight: 550,
                 display: "flex",
                 alignItems: "center",
@@ -626,8 +626,8 @@ export function SettingsView({ status, onBack, onRefresh }: SettingsViewProps) {
       {/* 4. CHECK-IN PREFERENCES & REST SCHEDULE */}
       <section className="settings-card">
         <div style={{ padding: "8px 0 4px", display: "flex", alignItems: "center", gap: 6 }}>
-          <Bell size={13} color="var(--accent-primary)" />
-          <span className="section-kicker" style={{ color: "var(--accent-primary)" }}>
+          <Bell size={13} style={{ color: "var(--text-muted)" }} />
+          <span className="section-kicker">
             HOURLY REFLECTION & REST
           </span>
         </div>
@@ -644,9 +644,9 @@ export function SettingsView({ status, onBack, onRefresh }: SettingsViewProps) {
               padding: "3px 8px",
               fontSize: 10,
               fontWeight: 600,
-              background: !checkInsPaused ? "var(--success-subtle)" : "var(--bg-subtle)",
-              borderColor: !checkInsPaused ? "var(--success)" : "var(--border-default)",
-              color: !checkInsPaused ? "var(--success)" : "var(--text-muted)",
+              background: !checkInsPaused ? "var(--bg-active)" : "var(--bg-subtle)",
+              borderColor: !checkInsPaused ? "var(--border-hover)" : "var(--border-default)",
+              color: !checkInsPaused ? "var(--text-primary)" : "var(--text-muted)",
             }}
             onClick={() => {
               const newVal = !checkInsPaused;
@@ -661,8 +661,8 @@ export function SettingsView({ status, onBack, onRefresh }: SettingsViewProps) {
 
         <div className="setting-row">
           <div className="setting-copy">
-            <strong>After-Focus Reflection</strong>
-            <span>Ask what happened when a focus block ends</span>
+            <strong>After-Focus Reflection Notification</strong>
+            <span>Send notification to prompt reflection when a focus session ends</span>
           </div>
           <button
             type="button"
@@ -671,9 +671,9 @@ export function SettingsView({ status, onBack, onRefresh }: SettingsViewProps) {
               padding: "3px 8px",
               fontSize: 10,
               fontWeight: 600,
-              background: afterFocusReflection ? "var(--success-subtle)" : "var(--bg-subtle)",
-              borderColor: afterFocusReflection ? "var(--success)" : "var(--border-default)",
-              color: afterFocusReflection ? "var(--success)" : "var(--text-muted)",
+              background: afterFocusReflection ? "var(--bg-active)" : "var(--bg-subtle)",
+              borderColor: afterFocusReflection ? "var(--border-hover)" : "var(--border-default)",
+              color: afterFocusReflection ? "var(--text-primary)" : "var(--text-muted)",
             }}
             onClick={() => {
               const newVal = !afterFocusReflection;
@@ -698,9 +698,9 @@ export function SettingsView({ status, onBack, onRefresh }: SettingsViewProps) {
               padding: "3px 8px",
               fontSize: 10,
               fontWeight: 600,
-              background: suppressDuringFocus ? "var(--success-subtle)" : "var(--bg-subtle)",
-              borderColor: suppressDuringFocus ? "var(--success)" : "var(--border-default)",
-              color: suppressDuringFocus ? "var(--success)" : "var(--text-muted)",
+              background: suppressDuringFocus ? "var(--bg-active)" : "var(--bg-subtle)",
+              borderColor: suppressDuringFocus ? "var(--border-hover)" : "var(--border-default)",
+              color: suppressDuringFocus ? "var(--text-primary)" : "var(--text-muted)",
             }}
             onClick={() => {
               const newVal = !suppressDuringFocus;
@@ -731,14 +731,14 @@ export function SettingsView({ status, onBack, onRefresh }: SettingsViewProps) {
             </div>
             <button
               type="button"
-              className="secondary-button"
+              className={`secondary-button ${quietHoursEnabled ? "is-active" : ""}`}
               style={{
                 padding: "3px 8px",
                 fontSize: 10,
                 fontWeight: 600,
-                background: quietHoursEnabled ? "var(--accent-subtle)" : "var(--bg-subtle)",
-                borderColor: quietHoursEnabled ? "var(--accent-primary)" : "var(--border-default)",
-                color: quietHoursEnabled ? "var(--accent-primary)" : "var(--text-muted)",
+                background: quietHoursEnabled ? "var(--bg-active)" : "var(--bg-subtle)",
+                borderColor: quietHoursEnabled ? "var(--border-hover)" : "var(--border-default)",
+                color: quietHoursEnabled ? "var(--text-primary)" : "var(--text-muted)",
               }}
               onClick={() => {
                 const newVal = !quietHoursEnabled;
@@ -850,8 +850,8 @@ export function SettingsView({ status, onBack, onRefresh }: SettingsViewProps) {
       {/* 6. PRIVACY SETTINGS */}
       <section className="settings-card">
         <div style={{ padding: "8px 0 4px", display: "flex", alignItems: "center", gap: 6 }}>
-          <ShieldCheck size={13} color="var(--success)" />
-          <span className="section-kicker" style={{ color: "var(--success)" }}>
+          <ShieldCheck size={13} style={{ color: "var(--text-muted)" }} />
+          <span className="section-kicker">
             PRIVACY & TRACKING
           </span>
         </div>

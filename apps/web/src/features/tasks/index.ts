@@ -13,3 +13,4 @@ export { ActiveSessionBanner } from "./components/active-session-banner";
 export { PriorityList } from "./components/priority-list";
 export { ConfirmDiscardModal } from "./components/confirm-discard-modal";
 export { FocusReflectionModal } from "./components/focus-reflection-modal";
+export { PlannedFocusPicker, formatPlannedDuration } from "./components/planned-focus-picker";

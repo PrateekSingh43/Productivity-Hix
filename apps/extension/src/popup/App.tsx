@@ -652,7 +652,7 @@ function TodayView({
             padding: "8px 12px",
             borderLeft: activeSession.isPaused
               ? "3px solid var(--amber)"
-              : "3px solid var(--success)",
+              : "3px solid var(--text-primary)",
             background: "var(--bg-surface-elevated)",
             display: "flex",
             alignItems: "center",
@@ -667,7 +667,7 @@ function TodayView({
                   width: 6,
                   height: 6,
                   borderRadius: "50%",
-                  background: activeSession.isPaused ? "var(--amber)" : "var(--success)",
+                  background: activeSession.isPaused ? "var(--amber)" : "var(--text-primary)",
                   display: "inline-block",
                 }}
               />
@@ -677,7 +677,7 @@ function TodayView({
                   fontWeight: 700,
                   letterSpacing: "0.05em",
                   textTransform: "uppercase",
-                  color: activeSession.isPaused ? "var(--amber)" : "var(--success)",
+                  color: activeSession.isPaused ? "var(--amber)" : "var(--text-primary)",
                 }}
               >
                 {activeSession.isPaused ? "Focus Paused" : "Focus Active"}
@@ -721,7 +721,7 @@ function TodayView({
             <Target size={13} style={{ color: "var(--text-muted)" }} />
             <span className="section-kicker">TODAY&apos;S PLAN</span>
           </div>
-          {goals.length > 0 && (
+          {goals.length > 0 ? (
             <span
               style={{
                 fontSize: 9.5,
@@ -735,7 +735,21 @@ function TodayView({
             >
               {goals.length} {goals.length === 1 ? "Goal" : "Goals"}
             </span>
-          )}
+          ) : allTasks.length > 0 ? (
+            <span
+              style={{
+                fontSize: 9.5,
+                color: "var(--text-secondary)",
+                background: "var(--bg-active)",
+                border: "1px solid var(--border-subtle)",
+                padding: "2px 6px",
+                borderRadius: 4,
+                fontWeight: 600,
+              }}
+            >
+              {allTasks.length} {allTasks.length === 1 ? "Task" : "Tasks"}
+            </span>
+          ) : null}
         </div>
 
         {todayPlan.isLoading ? (
@@ -792,8 +806,8 @@ function TodayView({
                       <span
                         style={{
                           fontSize: 9,
-                          color: "var(--success)",
-                          background: "var(--success-subtle)",
+                          color: "var(--text-secondary)",
+                          background: "var(--bg-active)",
                           padding: "1px 5px",
                           borderRadius: 3,
                           flexShrink: 0,
@@ -838,6 +852,39 @@ function TodayView({
               );
             })}
           </div>
+        ) : allTasks.length > 0 ? (
+          <div style={{ padding: "6px 0 10px" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 3 }}>
+              <p
+                style={{
+                  fontSize: 11.5,
+                  color: "var(--text-primary)",
+                  fontWeight: 600,
+                  margin: 0,
+                }}
+              >
+                Today&apos;s Workload
+              </p>
+              <span
+                style={{
+                  fontSize: 9.5,
+                  color: "var(--text-secondary)",
+                  background: "var(--bg-active)",
+                  border: "1px solid var(--border-subtle)",
+                  padding: "1px 5px",
+                  borderRadius: 4,
+                  fontWeight: 550,
+                }}
+              >
+                {allTasks.length} {allTasks.length === 1 ? "task" : "tasks"} ({incompleteTasks.length} remaining)
+              </span>
+            </div>
+            <p style={{ fontSize: 10.5, color: "var(--text-secondary)", margin: 0, lineHeight: 1.4 }}>
+              {incompleteTasks.length > 0
+                ? `${incompleteTasks.length} deliberate ${incompleteTasks.length === 1 ? "task" : "tasks"} scheduled for today. Ready to execute below.`
+                : "All planned tasks completed for today. Great work!"}
+            </p>
+          </div>
         ) : (
           <div style={{ padding: "6px 0 10px" }}>
             <p
@@ -864,7 +911,7 @@ function TodayView({
             style={{ flex: 1, padding: "5px 2px", fontSize: 10, marginTop: 0 }}
             onClick={() => setActiveWorkflow("planToday")}
           >
-            {goals.length > 0 ? "Edit Plan" : "Plan Today"}
+            {goals.length > 0 ? "Edit Plan" : allTasks.length > 0 ? "Set Daily Goals" : "Plan Today"}
           </button>
           <button
             type="button"
@@ -932,9 +979,10 @@ function TodayView({
                   border: "1px solid var(--border-subtle)",
                   borderRadius: 6,
                   cursor: "pointer",
+                  overflow: "hidden",
                 }}
               >
-                <div style={{ minWidth: 0 }}>
+                <div style={{ flex: 1, minWidth: 0, marginRight: 8 }}>
                   <div
                     style={{
                       fontSize: 11,
@@ -946,7 +994,15 @@ function TodayView({
                   >
                     {t.title}
                   </div>
-                  <div style={{ fontSize: 9.5, color: "var(--text-muted)" }}>
+                  <div
+                    style={{
+                      fontSize: 9.5,
+                      color: "var(--text-muted)",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
                     {t.plannedDurationMinutes ?? 30}m · {t.goalTitle || "Independent"}
                   </div>
                 </div>
@@ -1707,7 +1763,7 @@ function FocusView({
               {activeSession.isPaused ? (
                 <button
                   type="button"
-                  className="success-button"
+                  className="primary-button"
                   style={{ flex: 1, marginTop: 0 }}
                   onClick={() => resume.mutate()}
                   disabled={resume.isPending}
@@ -1985,7 +2041,7 @@ function ReviewView() {
                 </button>
                 <button
                   type="button"
-                  className="success-button"
+                  className="primary-button"
                   style={{ flex: 1, marginTop: 0 }}
                   onClick={() => handleAnswer(1)}
                   disabled={submitting}
@@ -2002,10 +2058,10 @@ function ReviewView() {
                 width: 36,
                 height: 36,
                 borderRadius: "50%",
-                background: "var(--success-subtle)",
+                background: "var(--bg-active)",
                 display: "grid",
                 placeItems: "center",
-                color: "var(--success)",
+                color: "var(--text-primary)",
                 margin: "0 auto 10px",
               }}
             >
@@ -2313,9 +2369,15 @@ export function App() {
     queryFn: apiClient.getTasks.bind(apiClient),
   });
 
-  const activeTask =
-    tasks.data?.find((t) => t.status === "in_progress") ??
-    tasks.data?.find((t) => t.status === "todo");
+  const sessions = useQuery({
+    queryKey: ["sessions"],
+    queryFn: apiClient.getSessions.bind(apiClient),
+  });
+
+  const liveSession = (sessions.data ?? []).find((s) => !s.endedAt);
+  const activeTask = liveSession?.taskId
+    ? tasks.data?.find((t) => t.id === liveSession.taskId) ?? null
+    : tasks.data?.find((t) => t.status === "in_progress") ?? null;
 
   useEffect(() => {
     const applyRouting = (targetTab?: string, targetMode?: string) => {

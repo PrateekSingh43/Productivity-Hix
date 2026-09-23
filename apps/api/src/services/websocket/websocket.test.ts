@@ -198,7 +198,7 @@ describe("WebSocket integration", () => {
 
   // ── AI handler boundary ────────────────────────────────────────
 
-  it("ai:message reaches AI handler and returns structured ai:error (not yet implemented)", async () => {
+  it("ai:message reaches the AI handler and returns a structured event", async () => {
     const ws = track(connectWS(port));
     await waitForMessage(ws); // consume connection:established
     await waitForOpen(ws);
@@ -210,11 +210,13 @@ describe("WebSocket integration", () => {
       content: "What did I work on today?",
     }));
 
+    const started = await waitForMessage(ws);
+    expect(started.type).toBe("ai:started");
     const msg = await waitForMessage(ws);
     expect(msg.type).toBe("ai:error");
     expect(msg.conversationId).toBe("conv-123");
     expect(msg.messageId).toBe("msg-456");
-    expect(msg.error).toBe("AI chat is not yet implemented");
+    expect(msg.error).toBeDefined();
   });
 
   // ── Connection cleanup ─────────────────────────────────────────

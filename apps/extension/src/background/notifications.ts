@@ -89,6 +89,20 @@ export async function showNativeCheckInNotification(options: {
 
 export const showCheckInNotification = showNativeCheckInNotification;
 
+export async function showFocusStartedNotification(options: {
+  taskTitle?: string;
+  targetMinutes?: number;
+}): Promise<string> {
+  const title = "ProductiveHix — Focus Mode Active";
+  const message = options.taskTitle
+    ? `Started focus on "${options.taskTitle}" (${options.targetMinutes ?? 25}m target). Distraction guard active.`
+    : `Focus session active (${options.targetMinutes ?? 25}m target). Distraction guard active.`;
+  return showNativeCheckInNotification({
+    customTitle: title,
+    customMessage: message,
+  });
+}
+
 export async function showFocusEndedNotification(options: {
   taskTitle?: string;
   durationMinutes?: number;

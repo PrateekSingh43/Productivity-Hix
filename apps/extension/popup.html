@@ -422,19 +422,25 @@
         border-color: var(--border-hover);
         color: var(--text-primary);
       }
+      .secondary-button.is-active {
+        background: var(--bg-active);
+        border-color: var(--border-hover);
+        color: var(--text-primary);
+        font-weight: 600;
+      }
       .secondary-button:disabled {
         opacity: 0.45;
         cursor: not-allowed;
       }
-      /* Status Action: Focus / Success button */
+      /* Status Action: Monochrome CTA fallback (No green/emerald) */
       .success-button {
-        color: var(--success);
-        background: var(--success-subtle);
-        border: 1px solid var(--success-border);
+        color: var(--btn-primary-text);
+        background: var(--btn-primary-bg);
+        border: 1px solid var(--btn-primary-border);
       }
       .success-button:hover:not(:disabled) {
-        background: rgba(82, 211, 151, 0.22);
-        border-color: rgba(82, 211, 151, 0.45);
+        background: var(--btn-primary-hover-bg);
+        transform: translateY(-0.5px);
       }
       .success-button:disabled {
         opacity: 0.45;

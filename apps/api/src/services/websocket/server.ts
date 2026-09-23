@@ -32,7 +32,7 @@ export class WebSocketManager {
 
       ws.on("message", (data) => {
         const raw = typeof data === "string" ? data : data.toString("utf8");
-        routeWSMessage(ws, userId, raw);
+        void routeWSMessage(ws, userId, raw);
       });
 
       ws.on("close", () => {

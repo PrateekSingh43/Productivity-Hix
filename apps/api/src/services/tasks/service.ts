@@ -142,6 +142,12 @@ export async function getTask(userId: string, id: string): Promise<TaskWithSessi
         orderBy: { startedAt: "desc" },
       },
       checkIns: {
+        where: {
+          OR: [
+            { workSessionId: { not: null } },
+            { eventType: { not: "PERIODIC" } },
+          ],
+        },
         select: {
           id: true,
           activityAssessment: true,
@@ -413,9 +419,6 @@ export async function updateTask(
   },
 ) {
   const dataToUpdate: Record<string, unknown> = { ...input };
-  if (input.dueAt !== undefined && input.productiveDate === undefined) {
-    dataToUpdate.productiveDate = input.dueAt ? resolveProductiveDay(input.dueAt) : null;
-  }
 
   const updated = await getDb().task.update({
     where: { id, userId },

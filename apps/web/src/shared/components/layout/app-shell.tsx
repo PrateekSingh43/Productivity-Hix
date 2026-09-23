@@ -26,6 +26,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   useRealtimeSessionSync();
   const pathname = usePathname();
   const title = titles[pathname] ?? "ProductiveHix";
+  const isAIWorkspace = pathname === "/ai";
   const { isMobileOpen, setIsMobileOpen } = useSidebar();
 
   return (
@@ -85,8 +86,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto">
-          <div className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 sm:py-8 xl:px-10">
+        <div className={`flex-1 ${isAIWorkspace ? "min-h-0 overflow-hidden" : "overflow-y-auto"}`}>
+          <div className={`mx-auto w-full max-w-[1440px] ${isAIWorkspace ? "h-full" : "px-4 py-6 sm:px-6 sm:py-8 xl:px-10"}`}>
             {children}
           </div>
         </div>

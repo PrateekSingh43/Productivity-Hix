@@ -16,8 +16,16 @@ let cachedRuntime: AIRuntime | null | undefined;
 export type AIEnvSource = Partial<Record<keyof Env, unknown>>;
 
 export function getAIConfigFromEnv(source: AIEnvSource = env): AIConfig | null {
+  const provider =
+    source.AI_PROVIDER !== undefined
+      ? String(source.AI_PROVIDER)
+      : source.GROQ_API_KEY
+        ? "groq"
+        : source.GEMINI_API_KEY
+          ? "gemini"
+          : undefined;
   return loadAIConfig({
-    AI_PROVIDER: source.AI_PROVIDER !== undefined ? String(source.AI_PROVIDER) : undefined,
+    AI_PROVIDER: provider,
     AI_MODEL: source.AI_MODEL !== undefined ? String(source.AI_MODEL) : undefined,
     GEMINI_API_KEY: source.GEMINI_API_KEY !== undefined ? String(source.GEMINI_API_KEY) : undefined,
     GROQ_API_KEY: source.GROQ_API_KEY !== undefined ? String(source.GROQ_API_KEY) : undefined,

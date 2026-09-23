@@ -36,6 +36,7 @@ import {
   useResumeSessionMutation,
 } from "@features/sessions";
 import { FocusReflectionModal } from "./focus-reflection-modal";
+import { PlannedFocusPicker } from "./planned-focus-picker";
 
 interface TaskDetailDrawerProps {
   task: Task | null;
@@ -55,8 +56,6 @@ const STATUSES: Array<{ label: string; value: TaskStatus }> = [
   { label: "Done", value: "done" },
   { label: "Cancelled", value: "cancelled" },
 ];
-
-const DURATION_OPTIONS = [15, 30, 45, 60, 90, 120, 180];
 
 function CheckmarkIcon({ size = 14, className = "" }: { size?: number; className?: string }) {
   return (
@@ -103,6 +102,7 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
   const [priority, setPriority] = useState<TaskPriority>("medium");
   const [status, setStatus] = useState<TaskStatus>("todo");
   const [plannedDuration, setPlannedDuration] = useState<number>(30);
+  const [durationInput, setDurationInput] = useState<string>("30");
   const [goalId, setGoalId] = useState<string>("");
   const [dueDate, setDueDate] = useState<string>("");
   const [lastLoadedId, setLastLoadedId] = useState<string | null>(null);
@@ -142,6 +142,7 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
       setPriority(initial.priority);
       setStatus(initial.status);
       setPlannedDuration(initial.plannedDuration);
+      setDurationInput(String(initial.plannedDuration));
       setGoalId(initial.goalId);
       setDueDate(initial.dueDate);
       setBaseline(initial);
@@ -174,6 +175,7 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
   };
 
   const varianceMinutes = actualMinutes - plannedDuration;
+  const remainingMinutes = Math.max(0, plannedDuration - actualMinutes);
 
   const sessions = taskDetail?.sessions || [];
   const activeSession = sessions.find((s) => !s.endedAt);
@@ -229,7 +231,13 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
     const saveTitle = title.trim();
     const saveDesc = description.trim() || null;
     const saveGoalId = goalId ? goalId : null;
-    const savePlannedDuration = plannedDuration;
+    const parsedDuration = parseInt(durationInput, 10);
+    const savePlannedDuration = Math.max(
+      1,
+      !isNaN(parsedDuration) && parsedDuration > 0
+        ? parsedDuration
+        : plannedDuration || 30
+    );
     const saveStatus = status;
     const savePriority = priority;
     const saveDueAt = dueDate ? new Date(`${dueDate}T23:59:59`).toISOString() : null;
@@ -245,6 +253,7 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
           plannedDurationMinutes: savePlannedDuration,
           goalId: saveGoalId,
           dueAt: saveDueAt,
+          productiveDate: currentTask.productiveDate ?? null,
         },
       },
       {
@@ -397,10 +406,10 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
                 <RotateCcw size={16} className="text-amber-600 dark:text-amber-400 shrink-0" />
                 <div className="min-w-0">
                   <div className="font-semibold text-amber-600 dark:text-amber-400">
-                    Rollover Task • Scheduled for Today
+                    Rolled over to today
                   </div>
                   <div className="text-[11px] text-text-muted mt-0.5 truncate">
-                    Originally due on {dueDateStr ? format(new Date(currentTask.dueAt!), "MMM d") : ""}, rolled into today&apos;s deliberate scope.
+                    Originally due {dueDateStr ? format(new Date(currentTask.dueAt!), "MMM d") : ""} • Now scheduled for today
                   </div>
                 </div>
               </div>
@@ -479,52 +488,62 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
               />
             </div>
 
-            {/* Planned Effort */}
+            {/* Planned Focus */}
             <div className="space-y-1">
               <label className="text-xs font-medium text-text-secondary flex items-center gap-1">
                 <Clock size={11} className="text-text-muted" />
-                Planned Effort
+                Planned focus
               </label>
-              <div className="flex items-center gap-2 bg-bg-card border border-border-subtle rounded-md px-2.5 py-1.5 focus-within:border-border-hover transition-colors">
-                <input
-                  type="number"
-                  min="1"
-                  max="6000"
-                  value={plannedDuration}
-                  onChange={(e) => setPlannedDuration(parseInt(e.target.value, 10) || 0)}
-                  className="w-14 bg-transparent text-xs text-text-primary font-mono outline-none"
-                  placeholder="30"
-                />
-                <span className="text-[11px] text-text-muted font-mono whitespace-nowrap">
-                  mins ({formatDuration(plannedDuration)})
-                </span>
-              </div>
+              <PlannedFocusPicker
+                value={plannedDuration}
+                onChange={(mins) => {
+                  setPlannedDuration(mins);
+                  setDurationInput(String(mins));
+                }}
+              />
             </div>
 
-            {/* Actual Duration (Derived dynamically from sessions) */}
-            <div className="space-y-1 col-span-2">
-              <label className="text-xs font-medium text-text-secondary">
-                Actual Time (Recorded from sessions)
-              </label>
-              <div className="px-2.5 py-1.5 rounded-md bg-bg-card border border-border-subtle text-xs font-mono font-medium text-text-primary flex items-center justify-between">
-                <span>{formatDuration(actualMinutes)}</span>
-                {varianceMinutes !== 0 && actualMinutes > 0 && (
-                  <span
-                    className={`text-[11px] font-normal ${
-                      varianceMinutes > 0 ? "text-amber-600 dark:text-amber-400" : "text-text-primary"
-                    }`}
-                  >
-                    {varianceMinutes > 0 ? `+${varianceMinutes}m variance` : `${varianceMinutes}m under plan`}
+            {/* Focus Time (Read-only, derived from sessions) */}
+            <div className="col-span-2 pt-2 border-t border-border-subtle/50 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-text-secondary">
+                  Focus time
+                </span>
+                <span className="text-xs font-mono font-medium text-text-primary">
+                  {actualMinutes > 0 ? `${formatDuration(actualMinutes)} logged` : "0m logged"}
+                </span>
+              </div>
+              <div className="px-3 py-2 rounded-lg bg-bg-card border border-border-subtle flex items-center justify-between text-xs font-mono">
+                <span className="text-text-primary font-medium">
+                  {formatDuration(actualMinutes)} / {formatDuration(plannedDuration)}
+                </span>
+                {actualMinutes > 0 ? (
+                  varianceMinutes > 0 ? (
+                    <span className="text-amber-500 font-sans text-[11px] font-medium">
+                      {formatDuration(varianceMinutes)} over target
+                    </span>
+                  ) : remainingMinutes > 0 ? (
+                    <span className="text-text-muted font-sans text-[11px]">
+                      {formatDuration(remainingMinutes)} remaining
+                    </span>
+                  ) : (
+                    <span className="text-text-muted font-sans text-[11px]">
+                      Target reached
+                    </span>
+                  )
+                ) : (
+                  <span className="text-text-muted font-sans text-[11px]">
+                    {formatDuration(plannedDuration)} remaining
                   </span>
                 )}
               </div>
             </div>
 
-            {/* Linked Goal Selector */}
-            <div className="space-y-1 col-span-2 pt-2 border-t border-border-subtle/60">
+            {/* Daily Goal */}
+            <div className="col-span-2 pt-2 border-t border-border-subtle/50 space-y-1">
               <label className="text-xs font-medium text-text-secondary flex items-center gap-1">
                 <Target size={11} className="text-text-muted" />
-                Linked Daily Goal
+                Daily goal
               </label>
               <select
                 value={goalId}
@@ -547,28 +566,28 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
             </div>
           </div>
 
-          {/* Notes / Description */}
+          {/* Notes & context */}
           <div className="space-y-1.5">
             <div className="flex items-center gap-1.5 text-xs font-semibold text-text-secondary">
               <FileText size={13} className="text-text-muted" />
-              <span>Notes & Acceptance Criteria</span>
+              <span>Notes & context</span>
             </div>
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="Add deliberate intention, scope, or notes for this task..."
+              placeholder="Add context, deliberate intention, or notes for this task..."
               rows={3}
               className="w-full rounded-lg border border-border-subtle bg-bg-secondary/40 p-3 text-xs text-text-primary placeholder:text-text-muted outline-none focus:border-border-hover transition-colors resize-none leading-relaxed"
             />
           </div>
 
-          {/* SESSIONS SECTION: Intentional execution blocks */}
+          {/* Focus Sessions */}
           <div className="space-y-3 pt-1">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Layers size={13} className="text-text-muted" />
                 <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
-                  Deliberate Focus Sessions
+                  Focus sessions
                 </h3>
                 <span className="text-xs font-mono text-text-muted bg-bg-secondary px-1.5 py-0.2 rounded border border-border-subtle">
                   {sessions.length}
@@ -661,7 +680,7 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
                   No focus sessions recorded for this task yet.
                 </p>
                 <p className="text-[11px] text-text-muted">
-                  Click &ldquo;Start Focus&rdquo; to begin a deliberate execution block.
+                  Click &ldquo;Start Focus&rdquo; to begin.
                 </p>
               </div>
             ) : (
@@ -735,13 +754,13 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
             )}
           </div>
 
-          {/* OBSERVED TELEMETRY EVIDENCE SECTION */}
+          {/* OBSERVED ACTIVITY SECTION */}
           <div className="space-y-3 pt-1">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Activity size={13} className="text-text-muted" />
                 <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
-                  Observed Desktop Telemetry
+                  Observed activity
                 </h3>
               </div>
 
@@ -749,8 +768,7 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
                 href="/timeline"
                 className="inline-flex items-center gap-1 text-xs text-text-muted hover:text-text-primary transition-colors"
               >
-                <span>Timeline evidence</span>
-                <ArrowRight size={11} />
+                <span>View Timeline →</span>
               </Link>
             </div>
 
@@ -811,13 +829,13 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
             </div>
           </div>
 
-          {/* LINKED REFLECTIONS & CHECK-INS (50m debriefs & intentional reflections) */}
+          {/* FOCUS REFLECTIONS */}
           <div className="space-y-3 pt-1">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <MessageSquare size={13} className="text-text-muted" />
                 <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
-                  Linked Reflections & Check-Ins
+                  Focus reflections
                 </h3>
                 <span className="text-xs font-mono text-text-muted bg-bg-secondary px-1.5 py-0.2 rounded border border-border-subtle">
                   {checkIns.length}
@@ -827,12 +845,15 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
 
             <div className="p-4 rounded-xl bg-bg-secondary/30 border border-border-subtle space-y-3">
               <p className="text-xs text-text-muted leading-relaxed">
-                50-minute debrief reflections and subjective assessments captured while working on this task.
+                Intentional focus session debriefs and reflections recorded while executing this task.
               </p>
 
               {checkIns.length === 0 ? (
-                <div className="py-2 text-center text-xs text-text-muted">
-                  No reflections or check-ins logged for this task yet.
+                <div className="py-2 text-center text-xs text-text-muted space-y-1">
+                  <p>No reflections yet.</p>
+                  <p className="text-[11px] text-text-muted">
+                    Complete a focus session to add a reflection.
+                  </p>
                 </div>
               ) : (
                 <div className="space-y-3 divide-y divide-border-subtle/40">

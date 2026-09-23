@@ -21,6 +21,7 @@ import { activityRulesRouter } from "./routes/activity-rules";
 import { exportRouter } from "./routes/export";
 import { userRouter } from "./routes/user";
 import { aiRouter } from "./routes/ai";
+import { aiConversationsRouter } from "./routes/ai-conversations";
 
 export function createApp(): Express {
   const app = express();
@@ -65,6 +66,7 @@ export function createApp(): Express {
   app.use("/api/activity-rules", activityRulesRouter);
   app.use("/api/export", exportRouter);
   app.use("/api/ai", aiRouter);
+  app.use("/api/ai/conversations", aiConversationsRouter);
   app.use(errorHandler);
   return app;
 }

@@ -1,31 +1,16 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Clock, Flag, AlignLeft, X, Target, Calendar } from "lucide-react";
+import { Plus, Flag, AlignLeft, X, Target, Calendar } from "lucide-react";
 import { format, addDays } from "date-fns";
 import { resolveProductiveDay, type TaskPriority } from "@repo/types";
 import { useCreateTaskMutation } from "../api/mutations";
 import { useTodayPlan } from "@features/today";
+import { PlannedFocusPicker } from "./planned-focus-picker";
 
 interface TaskQuickAddProps {
   onSuccess?: () => void;
 }
-
-const DURATION_PRESETS = [
-  { label: "15m", value: 15 },
-  { label: "30m", value: 30 },
-  { label: "45m", value: 45 },
-  { label: "1h", value: 60 },
-  { label: "1.5h", value: 90 },
-  { label: "2h", value: 120 },
-];
-
-const PRIORITIES: Array<{ label: string; value: TaskPriority }> = [
-  { label: "High", value: "high" },
-  { label: "Med", value: "medium" },
-  { label: "Low", value: "low" },
-  { label: "None", value: "none" },
-];
 
 export function TaskQuickAdd({ onSuccess }: TaskQuickAddProps) {
   const [isOpen, setIsOpen] = useState(false);
@@ -35,26 +20,38 @@ export function TaskQuickAdd({ onSuccess }: TaskQuickAddProps) {
   const [priority, setPriority] = useState<TaskPriority>("medium");
   const [plannedDurationMinutes, setPlannedDurationMinutes] = useState<number>(30);
   const [goalId, setGoalId] = useState<string>("");
+  const [scheduleMode, setScheduleMode] = useState<"today" | "tomorrow" | "custom">("today");
   const [dueDate, setDueDate] = useState<string>(() => format(new Date(), "yyyy-MM-dd"));
 
   const { data: plan } = useTodayPlan();
   const goals = plan?.goals ?? [];
   const createTaskMutation = useCreateTaskMutation();
 
+  const todayStr = format(new Date(), "yyyy-MM-dd");
+  const tomorrowStr = format(addDays(new Date(), 1), "yyyy-MM-dd");
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const cleanTitle = title.trim();
     if (!cleanTitle) return;
+
+    const finalDuration = Math.max(1, plannedDurationMinutes || 30);
+    const finalDueDate =
+      scheduleMode === "today"
+        ? todayStr
+        : scheduleMode === "tomorrow"
+        ? tomorrowStr
+        : dueDate;
 
     createTaskMutation.mutate(
       {
         title: cleanTitle,
         description: description.trim() || null,
         priority,
-        plannedDurationMinutes,
-        dueAt: dueDate ? new Date(`${dueDate}T23:59:59`).toISOString() : null,
+        plannedDurationMinutes: finalDuration,
+        dueAt: finalDueDate ? new Date(`${finalDueDate}T23:59:59`).toISOString() : null,
         goalId: goalId ? goalId : null,
-        productiveDate: dueDate || plan?.date || resolveProductiveDay(),
+        productiveDate: finalDueDate || plan?.date || resolveProductiveDay(),
       },
       {
         onSuccess: () => {
@@ -64,15 +61,14 @@ export function TaskQuickAdd({ onSuccess }: TaskQuickAddProps) {
           setPriority("medium");
           setPlannedDurationMinutes(30);
           setGoalId("");
+          setScheduleMode("today");
+          setDueDate(todayStr);
           setIsOpen(false);
           onSuccess?.();
         },
       },
     );
   };
-
-  const todayStr = format(new Date(), "yyyy-MM-dd");
-  const tomorrowStr = format(addDays(new Date(), 1), "yyyy-MM-dd");
 
   if (!isOpen) {
     return (
@@ -83,8 +79,7 @@ export function TaskQuickAdd({ onSuccess }: TaskQuickAddProps) {
         <span className="h-5 w-5 rounded-full bg-bg-secondary border border-border-subtle flex items-center justify-center text-text-primary">
           <Plus size={13} />
         </span>
-        <span>+ Add task or intention...</span>
-        <span className="text-[11px] text-text-muted font-mono">(quick add)</span>
+        <span>Add a task...</span>
       </button>
     );
   }
@@ -92,7 +87,7 @@ export function TaskQuickAdd({ onSuccess }: TaskQuickAddProps) {
   return (
     <form
       onSubmit={handleSubmit}
-      className="rounded-xl border border-border-hover bg-bg-card p-4 space-y-3.5 transition-all"
+      className="rounded-xl border border-border-hover bg-bg-card p-4 space-y-3.5 transition-all shadow-xs"
     >
       {/* Title input with close button */}
       <div className="flex items-center gap-2">
@@ -100,7 +95,7 @@ export function TaskQuickAdd({ onSuccess }: TaskQuickAddProps) {
           type="text"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          placeholder="What do you intend to accomplish?"
+          placeholder="Add a task..."
           className="flex-1 bg-transparent border-none text-sm font-medium text-text-primary placeholder:text-text-muted outline-none"
           autoFocus
         />
@@ -118,7 +113,7 @@ export function TaskQuickAdd({ onSuccess }: TaskQuickAddProps) {
         <textarea
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          placeholder="Add context, acceptance criteria, or intention notes..."
+          placeholder="Add context or notes..."
           rows={2}
           className="w-full rounded-md border border-border-subtle bg-bg-secondary p-2.5 text-xs text-text-primary placeholder:text-text-muted outline-none focus:border-border-hover transition-colors resize-none leading-relaxed"
         />
@@ -129,85 +124,73 @@ export function TaskQuickAdd({ onSuccess }: TaskQuickAddProps) {
           className="inline-flex items-center gap-1.5 text-xs text-text-muted hover:text-text-secondary transition-colors cursor-pointer"
         >
           <AlignLeft size={12} />
-          + Add notes / context
+          <span>+ Add notes / context</span>
         </button>
       )}
 
       {/* Controls Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-border-subtle">
-        {/* Planned Duration Selection */}
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="text-xs text-text-muted flex items-center gap-1 mr-1">
-            <Clock size={11} />
-            Duration:
-          </span>
-          {DURATION_PRESETS.map((preset) => {
-            const isSelected = plannedDurationMinutes === preset.value;
-            return (
-              <button
-                key={preset.value}
-                type="button"
-                onClick={() => setPlannedDurationMinutes(preset.value)}
-                className={`px-2 py-0.5 rounded-md text-xs font-mono transition-colors cursor-pointer ${
-                  isSelected
-                    ? "bg-text-primary text-bg-default font-medium shadow-xs"
-                    : "bg-bg-secondary text-text-muted border border-border-subtle hover:text-text-primary hover:border-border-hover"
-                }`}
-              >
-                {preset.label}
-              </button>
-            );
-          })}
-        </div>
+      <div className="flex flex-wrap items-center justify-between gap-2.5 pt-2.5 border-t border-border-subtle">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Schedule Compact Control */}
+          <div className="flex items-center gap-1.5 bg-bg-secondary border border-border-subtle rounded-md px-2 py-1 text-xs">
+            <Calendar size={11} className="text-text-muted shrink-0" />
+            <select
+              value={scheduleMode}
+              onChange={(e) => {
+                const mode = e.target.value as "today" | "tomorrow" | "custom";
+                setScheduleMode(mode);
+                if (mode === "today") setDueDate(todayStr);
+                else if (mode === "tomorrow") setDueDate(tomorrowStr);
+              }}
+              className="bg-transparent border-none text-xs text-text-primary outline-none cursor-pointer [&>option]:bg-bg-card [&>option]:text-text-primary"
+              title="Task schedule"
+            >
+              <option value="today">Today</option>
+              <option value="tomorrow">Tomorrow</option>
+              <option value="custom">Custom Date</option>
+            </select>
+            {scheduleMode === "custom" && (
+              <input
+                type="date"
+                value={dueDate}
+                onChange={(e) => setDueDate(e.target.value)}
+                className="text-xs bg-transparent border-none text-text-primary outline-none cursor-pointer pl-1"
+                title="Select due date"
+              />
+            )}
+          </div>
 
-        {/* Due Date Presets & Custom Picker */}
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="text-xs text-text-muted flex items-center gap-1 mr-1">
-            <Calendar size={11} />
-            Due:
-          </span>
-          <button
-            type="button"
-            onClick={() => setDueDate(todayStr)}
-            className={`px-2 py-0.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${
-              dueDate === todayStr
-                ? "bg-text-primary text-bg-default font-medium shadow-xs"
-                : "bg-bg-secondary text-text-muted border border-border-subtle hover:text-text-primary"
-            }`}
-          >
-            Today
-          </button>
-          <button
-            type="button"
-            onClick={() => setDueDate(tomorrowStr)}
-            className={`px-2 py-0.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${
-              dueDate === tomorrowStr
-                ? "bg-text-primary text-bg-default font-medium shadow-xs"
-                : "bg-bg-secondary text-text-muted border border-border-subtle hover:text-text-primary"
-            }`}
-          >
-            Tomorrow
-          </button>
-          <input
-            type="date"
-            value={dueDate}
-            onChange={(e) => setDueDate(e.target.value)}
-            className="text-xs bg-bg-secondary border border-border-subtle rounded-md px-2 py-0.5 text-text-primary outline-none cursor-pointer"
-            title="Custom due date"
+          {/* Planned Focus Compact Control */}
+          <PlannedFocusPicker
+            value={plannedDurationMinutes}
+            onChange={(mins) => setPlannedDurationMinutes(mins)}
           />
-        </div>
 
-        {/* Goal & Priority & Submit */}
-        <div className="flex items-center gap-2 flex-wrap">
-          {/* Goal Selector */}
+          {/* Priority Compact Control */}
+          <div className="flex items-center gap-1.5 bg-bg-secondary border border-border-subtle rounded-md px-2 py-1 text-xs">
+            <Flag size={11} className="text-text-muted shrink-0" />
+            <select
+              value={priority}
+              onChange={(e) => setPriority(e.target.value as TaskPriority)}
+              className="bg-transparent border-none text-xs text-text-primary outline-none cursor-pointer [&>option]:bg-bg-card [&>option]:text-text-primary"
+              title="Priority"
+            >
+              <option value="high">High</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
+              <option value="none">None</option>
+            </select>
+          </div>
+
+          {/* Goal Selector (Optional) */}
           {goals.length > 0 && (
-            <div className="flex items-center gap-1 bg-bg-secondary border border-border-subtle px-2 py-1 rounded-md">
-              <Target size={11} className="text-text-muted" />
+            <div className="flex items-center gap-1.5 bg-bg-secondary border border-border-subtle rounded-md px-2 py-1 text-xs">
+              <Target size={11} className="text-text-muted shrink-0" />
               <select
                 value={goalId}
                 onChange={(e) => setGoalId(e.target.value)}
-                className="bg-transparent border-none text-xs font-medium text-text-primary outline-none max-w-[150px] truncate cursor-pointer [&>option]:bg-bg-card [&>option]:text-text-primary"
-                title="Link this task to a Daily Goal"
+                className="bg-transparent border-none text-xs text-text-primary outline-none max-w-[140px] truncate cursor-pointer [&>option]:bg-bg-card [&>option]:text-text-primary"
+                title="Daily goal (optional)"
               >
                 <option value="">No Goal</option>
                 {goals.map((g) => (
@@ -218,42 +201,17 @@ export function TaskQuickAdd({ onSuccess }: TaskQuickAddProps) {
               </select>
             </div>
           )}
-
-          {/* Priority Pill Selector */}
-          <div className="flex items-center gap-1 bg-bg-secondary border border-border-subtle p-0.5 rounded-md">
-            <span className="px-1.5 text-[10px] text-text-muted uppercase tracking-wider font-semibold">
-              <Flag size={10} className="inline mr-1" />
-              Priority
-            </span>
-            {PRIORITIES.map((p) => {
-              const isSelected = priority === p.value;
-              return (
-                <button
-                  key={p.value}
-                  type="button"
-                  onClick={() => setPriority(p.value)}
-                  className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer ${
-                    isSelected
-                      ? "bg-text-primary text-bg-default font-medium shadow-xs"
-                      : "text-text-muted hover:text-text-primary"
-                  }`}
-                >
-                  {p.label}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Submit */}
-          <button
-            type="submit"
-            disabled={!title.trim() || createTaskMutation.isPending}
-            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-md bg-text-primary text-bg-default text-xs font-medium hover:opacity-90 transition-opacity disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed shadow-xs"
-          >
-            <Plus size={13} />
-            {createTaskMutation.isPending ? "Creating..." : "Add Task"}
-          </button>
         </div>
+
+        {/* Primary Action Button */}
+        <button
+          type="submit"
+          disabled={!title.trim() || createTaskMutation.isPending}
+          className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-md bg-text-primary text-bg-default text-xs font-medium hover:opacity-90 transition-opacity disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed shadow-xs shrink-0 ml-auto"
+        >
+          <Plus size={13} />
+          <span>{createTaskMutation.isPending ? "Creating..." : "Add Task"}</span>
+        </button>
       </div>
     </form>
   );

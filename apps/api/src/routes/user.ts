@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { userPreferencesUpdateSchema } from "@repo/validation";
 import { requireAuth, userIdFrom } from "../middleware/auth";
+import { wsManager } from "../services/websocket/server";
 import {
   getUserPreferences,
   updateUserPreferences,
@@ -24,6 +25,10 @@ const updateHandler = async (request: any, response: any, next: any) => {
     const userId = userIdFrom(request);
     const patch = userPreferencesUpdateSchema.parse(request.body);
     const updated = await updateUserPreferences(userId, patch);
+    wsManager.broadcastToUser(userId, {
+      type: "preferences:updated",
+      preferences: updated,
+    });
     response.json(updated);
   } catch (error) {
     next(error);
