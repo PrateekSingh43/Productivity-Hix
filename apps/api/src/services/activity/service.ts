@@ -40,7 +40,11 @@ function serialize(row: {
 
 export async function activityInRange(userId: string, from: Date, to: Date) {
   const rows = await getDb().normalizedActivity.findMany({
-    where: { userId, timestamp: { lt: to }, duration: { gt: 0 } },
+    where: {
+      userId,
+      timestamp: { gte: from, lt: to },
+      duration: { gt: 0 },
+    },
     orderBy: [{ timestamp: "asc" }, { id: "asc" }],
   });
   return rows.flatMap((row) => {
@@ -79,15 +83,11 @@ export async function syncActivity(userId: string) {
 }
 
 import { getDayBoundaries } from "./timeline";
-import { resolveProductiveDay } from "@repo/types";
+import { resolveProductiveDay, resolveLocalDayInterval } from "@repo/types";
 
 export function localDayRange(date?: Date | string, timezone = "UTC"): { from: Date; to: Date } {
-  const effectiveDateStr =
-    typeof date === "string"
-      ? resolveProductiveDay(date)
-      : resolveProductiveDay(date ?? new Date(), { timezone });
-  const { startOfDay, endOfDay } = getDayBoundaries(effectiveDateStr, timezone);
-  return { from: startOfDay, to: endOfDay };
+  const iv = resolveLocalDayInterval(date ?? new Date(), { timezone });
+  return { from: iv.start, to: iv.end };
 }
 
 export function utcDayRange(date = new Date()) {

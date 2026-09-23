@@ -16,3 +16,5 @@ export * from "./observation";
 export * from "./materialization";
 export * from "./worker";
 export * from "./events";
+export * from "./rule-scope";
+export * from "./machine-availability";

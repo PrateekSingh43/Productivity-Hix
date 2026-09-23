@@ -1,6 +1,7 @@
 import { Router, type RequestHandler } from "express";
 import { requireAuth, userIdFrom } from "../middleware/auth";
 import { telemetryBatchSchema } from "@repo/validation";
+import { getDatesIntersectingInterval } from "@repo/types";
 import { getDb } from "../lib/prisma";
 import { getDuckDB, invalidateDuckDBSynchronization } from "../services/data/duckdb";
 import { ingestTelemetryEvents, updateTelemetryEvent } from "@repo/data";
@@ -13,8 +14,6 @@ export const handleTelemetryBatch: RequestHandler = async (request, response, ne
   try {
     const userId = userIdFrom(request);
     const batch = telemetryBatchSchema.parse(request.body);
-
-    const eventIds = batch.events.map((e: { eventId: string }) => e.eventId);
 
     // 1. First consolidate/deduplicate incoming events in batch by eventId (keep event with highest duration)
     const dedupedBatchMap = new Map<string, (typeof batch.events)[number]>();
@@ -34,18 +33,27 @@ export const handleTelemetryBatch: RequestHandler = async (request, response, ne
 
     const externalIds = dedupedEvents.map((e) => e.eventId);
     const prisma = getDb();
+
+    // Query user's authoritative timezone (never silently fall back to UTC if configured)
+    const userPref = await prisma.userPreference?.findUnique?.({
+      where: { userId },
+      select: { timezone: true },
+    });
+    const timezone = userPref?.timezone || "UTC";
+
+    // Query existing events including original observation timestamp
     const existing = await prisma.normalizedActivity.findMany({
       where: {
         userId,
         externalId: { in: externalIds },
       },
-      select: { id: true, externalId: true, duration: true },
+      select: { id: true, externalId: true, duration: true, timestamp: true },
     });
 
-    const existingMap = new Map<string, { id: string; duration: number }>();
+    const existingMap = new Map<string, { id: string; duration: number; timestamp: Date }>();
     for (const e of existing) {
       if (e.id && e.id.trim().length > 0) {
-        existingMap.set(e.externalId, { id: e.id, duration: e.duration });
+        existingMap.set(e.externalId, { id: e.id, duration: e.duration, timestamp: e.timestamp });
       }
     }
 
@@ -55,9 +63,10 @@ export const handleTelemetryBatch: RequestHandler = async (request, response, ne
       eventId: string;
       duration: number;
       durationMs: number;
+      timestamp: Date;
       data: Record<string, unknown>;
     }> = [];
-    let duplicates = 0;
+    let batchDuplicates = 0;
 
     for (const ev of dedupedEvents) {
       const match = existingMap.get(ev.eventId);
@@ -69,10 +78,11 @@ export const handleTelemetryBatch: RequestHandler = async (request, response, ne
             eventId: ev.eventId,
             duration: incomingDurationSec,
             durationMs: ev.durationMs || Math.round(incomingDurationSec * 1000),
+            timestamp: match.timestamp, // Original observation timestamp
             data: (ev.data ?? {}) as Record<string, unknown>,
           });
         } else {
-          duplicates++;
+          batchDuplicates++;
         }
       } else {
         newEvents.push(ev as unknown as TelemetryEvent);
@@ -83,6 +93,8 @@ export const handleTelemetryBatch: RequestHandler = async (request, response, ne
     const correlationId =
       (request.headers?.["x-correlation-id"] as string) ||
       `corr-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+
+    let actuallyInsertedCount = 0;
 
     await prisma.$transaction(async (tx) => {
       if (updateEvents.length > 0) {
@@ -98,54 +110,92 @@ export const handleTelemetryBatch: RequestHandler = async (request, response, ne
         }
       }
 
+      let insertedRows: Array<{ id: string; externalId: string; timestamp: Date; duration: number }> = [];
       if (newEvents.length > 0) {
-        await tx.normalizedActivity.createMany({
-          data: newEvents.map((e) => {
-            const rawData = (e.data ?? {}) as Record<string, unknown>;
-            const normalizedData: Record<string, unknown> = {
-              ...rawData,
-              provenance: e.provenance ?? {
-                collector: e.source === "browser" ? "browser-extension" : "activitywatch",
-                bucketId: batch.installationId,
-              },
-            };
-            return {
-              userId,
-              externalId: e.eventId,
-              bucketId: e.provenance?.bucketId ?? batch.installationId,
-              source: e.source,
-              watcher: e.eventType,
-              timestamp: new Date(e.timestamp),
-              duration: e.durationMs / 1000,
-              data: normalizedData as any,
-            };
-          }),
-          skipDuplicates: true,
+        const insertData = newEvents.map((e) => {
+          const rawData = (e.data ?? {}) as Record<string, unknown>;
+          const normalizedData: Record<string, unknown> = {
+            ...rawData,
+            provenance: e.provenance ?? {
+              collector: e.source === "browser" ? "browser-extension" : "activitywatch",
+              bucketId: batch.installationId,
+            },
+          };
+          return {
+            userId,
+            externalId: e.eventId,
+            bucketId: e.provenance?.bucketId ?? batch.installationId,
+            source: e.source,
+            watcher: e.eventType,
+            timestamp: new Date(e.timestamp),
+            duration: (e.durationMs || 0) / 1000,
+            data: normalizedData as any,
+          };
         });
+
+        if (typeof (tx.normalizedActivity as any).createManyAndReturn === "function") {
+          insertedRows = await (tx.normalizedActivity as any).createManyAndReturn({
+            data: insertData,
+            skipDuplicates: true,
+            select: {
+              id: true,
+              externalId: true,
+              timestamp: true,
+              duration: true,
+            },
+          });
+        } else if (typeof (tx.normalizedActivity as any).createMany === "function") {
+          await (tx.normalizedActivity as any).createMany({
+            data: insertData,
+            skipDuplicates: true,
+          });
+          insertedRows = insertData.map((d: any, idx: number) => ({
+            id: d.id || `mock-${idx}`,
+            externalId: d.externalId,
+            timestamp: d.timestamp,
+            duration: d.duration,
+          }));
+        }
       }
 
-      // Group all affected events by localDate (YYYY-MM-DD) to compute scope and update revisions
-      const dateMap = new Map<string, { start: Date; end: Date }>();
-      const allTouched = [
+      actuallyInsertedCount = insertedRows.length;
+
+      // ACTUAL-MUTATION RULE:
+      // A Timeline revision may advance ONLY for an authoritative database mutation.
+      // An attempted insert is not automatically a mutation.
+      const mutatedItems: Array<{ timestamp: Date; durationMs: number }> = [
         ...updateEvents.map((u) => ({
-          timestamp: new Date(),
+          timestamp: u.timestamp,
           durationMs: u.durationMs,
         })),
-        ...newEvents.map((e) => ({
-          timestamp: new Date(e.timestamp),
-          durationMs: e.durationMs || 0,
+        ...insertedRows.map((r) => ({
+          timestamp: r.timestamp,
+          durationMs: Math.round(r.duration * 1000),
         })),
       ];
 
-      for (const item of allTouched) {
-        const localDate = item.timestamp.toISOString().slice(0, 10);
-        const itemEnd = new Date(item.timestamp.getTime() + item.durationMs);
-        const existingScope = dateMap.get(localDate);
-        if (!existingScope) {
-          dateMap.set(localDate, { start: item.timestamp, end: itemEnd });
-        } else {
-          if (item.timestamp < existingScope.start) existingScope.start = item.timestamp;
-          if (itemEnd > existingScope.end) existingScope.end = itemEnd;
+      // If no mutations occurred (e.g. concurrent duplicate batch), do not bump revision or emit outbox event
+      if (mutatedItems.length === 0) {
+        return;
+      }
+
+      // Group affected mutations by localDate using canonical half-open interval semantics [start, end)
+      const dateMap = new Map<string, { start: Date; end: Date }>();
+      for (const item of mutatedItems) {
+        const itemStart = item.timestamp;
+        const itemEnd = new Date(item.timestamp.getTime() + Math.max(item.durationMs, 0));
+        const touched = getDatesIntersectingInterval(itemStart, itemEnd, timezone);
+
+        for (const { localDate, interval } of touched) {
+          const scopeStart = new Date(Math.max(itemStart.getTime(), interval.start.getTime()));
+          const scopeEnd = new Date(Math.min(itemEnd.getTime(), interval.end.getTime()));
+          const existingScope = dateMap.get(localDate);
+          if (!existingScope) {
+            dateMap.set(localDate, { start: scopeStart, end: scopeEnd });
+          } else {
+            if (scopeStart < existingScope.start) existingScope.start = scopeStart;
+            if (scopeEnd > existingScope.end) existingScope.end = scopeEnd;
+          }
         }
       }
 
@@ -244,9 +294,10 @@ export const handleTelemetryBatch: RequestHandler = async (request, response, ne
       });
     }
 
+    const totalDuplicates = batchDuplicates + (newEvents.length - actuallyInsertedCount);
     response.json({
-      accepted: newEvents.length,
-      duplicates,
+      accepted: actuallyInsertedCount + updateEvents.length,
+      duplicates: totalDuplicates,
       rejected: 0,
     });
   } catch (error) {

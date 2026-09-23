@@ -100,48 +100,14 @@ function toTimelineBlockPayload(
 
 export { normalizeAppName, cleanWindowTitle, categorizeActivity };
 
+import { resolveLocalDayInterval } from "@repo/types";
+
 /**
- * Accurately calculate day boundaries in the target timezone
+ * Accurately calculate day boundaries in the target timezone using canonical local-day interval resolver.
  */
 export function getDayBoundaries(dateStr: string, timezone: string): { startOfDay: Date; endOfDay: Date } {
-  const parts = dateStr.split("-").map(Number);
-  const year = parts[0] ?? new Date().getFullYear();
-  const month = (parts[1] ?? 1) - 1;
-  const day = parts[2] ?? new Date().getDate();
-
-  try {
-    const candidateUtc = new Date(Date.UTC(year, month, day, 0, 0, 0));
-    const formatter = new Intl.DateTimeFormat("en-US", {
-      timeZone: timezone,
-      year: "numeric",
-      month: "numeric",
-      day: "numeric",
-      hour: "numeric",
-      minute: "numeric",
-      second: "numeric",
-      hour12: false,
-    });
-    const formattedParts = formatter.formatToParts(candidateUtc);
-    const getPart = (type: string) => parseInt(formattedParts.find((p) => p.type === type)?.value || "0", 10);
-    const tzHour = getPart("hour") === 24 ? 0 : getPart("hour");
-    const tzUtcEquiv = new Date(Date.UTC(
-      getPart("year"),
-      getPart("month") - 1,
-      getPart("day"),
-      tzHour,
-      getPart("minute"),
-      getPart("second"),
-    ));
-    const offsetMs = tzUtcEquiv.getTime() - candidateUtc.getTime();
-
-    const startOfDay = new Date(candidateUtc.getTime() - offsetMs);
-    const endOfDay = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000 - 1);
-    return { startOfDay, endOfDay };
-  } catch {
-    const startOfDay = new Date(Date.UTC(year, month, day, 0, 0, 0));
-    const endOfDay = new Date(Date.UTC(year, month, day, 23, 59, 59, 999));
-    return { startOfDay, endOfDay };
-  }
+  const iv = resolveLocalDayInterval(dateStr, { timezone });
+  return { startOfDay: iv.start, endOfDay: iv.end };
 }
 
 export async function getTimelineForDay(

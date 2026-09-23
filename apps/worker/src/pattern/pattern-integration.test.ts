@@ -19,6 +19,8 @@ import { PatternWorker } from "./pattern-worker";
 import { PrismaPatternDataProvider } from "./prisma-provider";
 
 configDotenv({ path: new URL("../../.env", import.meta.url) });
+// Keep this suite a small neighbor on shared pooler-based databases.
+process.env.PGPOOL_MAX ??= "2";
 
 type Database = ReturnType<typeof getDb>;
 

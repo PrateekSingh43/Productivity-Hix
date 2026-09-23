@@ -1,4 +1,4 @@
-import { computeObservationSetFingerprint, toEpochMs } from "@repo/validation";
+import { computeObservationSetFingerprint } from "@repo/validation";
 
 export interface BlockEngineInput {
   activityId: string;
@@ -67,7 +67,7 @@ interface WorkingEvent {
 
 export function materializeTemporalBlocks(
   events: BlockEngineInput[],
-  options: BlockEngineOptions = {}
+  options: BlockEngineOptions = {},
 ): MaterializedBlock[] {
   const opts = { ...DEFAULTS, ...options };
   const working: WorkingEvent[] = events
@@ -96,18 +96,6 @@ export function materializeTemporalBlocks(
   return blocks;
 }
 
-function carveAroundBreaks(events: WorkingEvent[], minBreakMs: number, maxBreakMs: number): WorkingEvent[] {
-  const sorted = [...events].sort((a, b) => a.start - b.start);
-  const result: WorkingEvent[] = [];
-  for (const ev of sorted) {
-    if (ev.isAfk) {
-      const dur = ev.end - ev.start;
-      if (dur < minBreakMs || dur > maxBreakMs) continue;
-    }
-    result.push(ev);
-  }
-  return result;
-}
 
 interface WorkingInterval {
   start: number;
@@ -126,7 +114,12 @@ function splitEventsAroundAfk(events: WorkingEvent[]): WorkingInterval[] {
     for (const afk of afkEvents) {
       if (afk.end <= cursor || afk.start >= work.end) continue;
       if (afk.start > cursor) {
-        intervals.push({ start: cursor, end: Math.min(afk.start, work.end), isAfk: false, sourceEvent: work });
+        intervals.push({
+          start: cursor,
+          end: Math.min(afk.start, work.end),
+          isAfk: false,
+          sourceEvent: work,
+        });
       }
       cursor = Math.max(cursor, afk.end);
       if (cursor >= work.end) break;
@@ -143,7 +136,11 @@ function splitEventsAroundAfk(events: WorkingEvent[]): WorkingInterval[] {
   return intervals.sort((a, b) => a.start - b.start);
 }
 
-function groupIntoBlocks(events: WorkingEvent[], maxGapMs: number, transientThresholdMs: number): MaterializedBlock[] {
+function groupIntoBlocks(
+  events: WorkingEvent[],
+  maxGapMs: number,
+  transientThresholdMs: number,
+): MaterializedBlock[] {
   const blocks: MaterializedBlock[] = [];
   let current: { events: WorkingEvent[]; start: number; end: number } | null = null;
 
@@ -154,7 +151,11 @@ function groupIntoBlocks(events: WorkingEvent[], maxGapMs: number, transientThre
   };
 
   for (const ev of events) {
-    if (current && ev.start - current.end <= maxGapMs && compatible(current.events[current.events.length - 1]!, ev)) {
+    if (
+      current &&
+      ev.start - current.end <= maxGapMs &&
+      compatible(current.events[current.events.length - 1]!, ev)
+    ) {
       current.events.push(ev);
       current.end = Math.max(current.end, ev.end);
     } else {
@@ -181,7 +182,7 @@ function compatible(prev: WorkingEvent, next: WorkingEvent): boolean {
 export function buildFingerprint(
   userId: string,
   deviceId: string | null,
-  contributions: Array<{ activityId: string; contributionStart: number; contributionEnd: number }>
+  contributions: Array<{ activityId: string; contributionStart: number; contributionEnd: number }>,
 ): string {
   return computeObservationSetFingerprint({
     userId,
@@ -190,11 +191,15 @@ export function buildFingerprint(
   });
 }
 
-export function unionIntervals(intervals: Array<{ start: number; end: number }>): Array<{ start: number; end: number }> {
+export function unionIntervals(
+  intervals: Array<{ start: number; end: number }>,
+): Array<{ start: number; end: number }> {
   const valid = intervals.filter((iv) => iv.end > iv.start);
   if (valid.length === 0) return [];
   const sorted = [...valid].sort((a, b) => a.start - b.start || a.end - b.end);
-  const merged: Array<{ start: number; end: number }> = [{ start: sorted[0]!.start, end: sorted[0]!.end }];
+  const merged: Array<{ start: number; end: number }> = [
+    { start: sorted[0]!.start, end: sorted[0]!.end },
+  ];
   for (let i = 1; i < sorted.length; i++) {
     const current = sorted[i]!;
     const last = merged[merged.length - 1]!;
@@ -216,7 +221,7 @@ function buildBlock(events: WorkingEvent[], start: number, end: number): Materia
     contributionDurationMs: Math.max(0, Math.min(ev.end, end) - Math.max(ev.start, start)),
   }));
   const activeIntervals = unionIntervals(
-    contributions.map((c) => ({ start: c.contributionStart, end: c.contributionEnd }))
+    contributions.map((c) => ({ start: c.contributionStart, end: c.contributionEnd })),
   );
   const observedActive = activeIntervals.reduce((s, iv) => s + (iv.end - iv.start), 0);
   const wallClock = end - start;
@@ -235,13 +240,21 @@ function buildBlock(events: WorkingEvent[], start: number, end: number): Materia
     cleanTitle: primary.raw.title,
     domain: primary.raw.domain,
     sanitizedUrl: primary.raw.url,
-    sourceChannel: browserCount > 0 && desktopCount > 0 ? "COORDINATED_DESKTOP_WEB" : browserCount > 0 ? "BROWSER_TAB" : "DESKTOP_WINDOW",
+    sourceChannel:
+      browserCount > 0 && desktopCount > 0
+        ? "COORDINATED_DESKTOP_WEB"
+        : browserCount > 0
+          ? "BROWSER_TAB"
+          : "DESKTOP_WINDOW",
     rawEventCount: events.length,
     isAfkBlock,
     interactionDensity: { totalInputEvents: 0 },
     sourceComposition: { desktop: desktopCount, browser: browserCount },
     observations: contributions,
-    observationSetFingerprint: buildFingerprint(primary.raw.userId, primary.raw.deviceId, contributions),
+    observationSetFingerprint: buildFingerprint(
+      primary.raw.userId,
+      primary.raw.deviceId,
+      contributions,
+    ),
   };
 }
-

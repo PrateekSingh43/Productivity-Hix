@@ -28,5 +28,6 @@ export * from "./evidence";
 export * from "./patterns";
 export * from "./insights";
 export * from "./temporal/blocks";
+export * from "./temporal/availability";
 export * from "./semantic/classify";
 

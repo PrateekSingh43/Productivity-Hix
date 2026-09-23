@@ -17,6 +17,11 @@ export function setTestDb(mockDb: any) {
     if (!mockDb.$transaction) {
       mockDb.$transaction = async (fn: (tx: any) => any) => fn(mockDb);
     }
+    if (!mockDb.userPreference) {
+      mockDb.userPreference = {
+        findUnique: async () => null,
+      };
+    }
     if (!mockDb.timelineDayState) {
       mockDb.timelineDayState = {
         upsert: async () => ({ currentObservationRevision: 1, currentRuleRevision: 1 }),

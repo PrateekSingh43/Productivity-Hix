@@ -13,6 +13,8 @@ import { createApp } from "../../app";
 import { disconnectDb, getDb } from "../../lib/prisma";
 
 configDotenv({ path: new URL("../../../.env", import.meta.url) });
+// Keep this suite a small neighbor on shared pooler-based databases.
+process.env.PGPOOL_MAX ??= "2";
 
 process.env.NODE_ENV = "test";
 process.env.ALLOW_DEV_AUTH = "true";

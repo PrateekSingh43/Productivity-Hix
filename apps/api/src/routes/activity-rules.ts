@@ -11,76 +11,155 @@ export const activityRulesRouter: Router = Router();
 
 activityRulesRouter.use(requireAuth);
 
+import {
+  resolveAffectedDatesForRuleChange,
+  resolveAffectedDatesForOverride,
+  resolveLocalDayInterval,
+} from "@repo/types";
+
 /**
- * Transactional helper to record rule revision and publish outbox event.
+ * Transactional helper to record rule revision and publish outbox events for global rules.
+ * Applies explicit RuleEffectiveScope policy (bounded_retention 14 days by default).
  * Invariant: Never deletes historical activity blocks. Marks state STALE for background recomputation.
  */
-async function emitRuleChangedEventTx(
+async function emitGlobalRuleChangedTx(
   tx: any,
   params: {
     userId: string;
     correlationId: string;
-    targetWindow?: { start?: Date | null; end?: Date | null };
   }
 ): Promise<void> {
   const now = new Date();
-  const hasValidStart = params.targetWindow?.start instanceof Date && !isNaN(params.targetWindow.start.getTime());
-  const hasValidEnd = params.targetWindow?.end instanceof Date && !isNaN(params.targetWindow.end.getTime());
+  const pref = await tx.userPreference?.findUnique?.({
+    where: { userId: params.userId },
+    select: { timezone: true },
+  });
+  const timezone = pref?.timezone || "UTC";
 
-  const localDate = hasValidStart
-    ? params.targetWindow!.start!.toISOString().slice(0, 10)
-    : now.toISOString().slice(0, 10);
-
-  const startIso = hasValidStart
-    ? params.targetWindow!.start!.toISOString()
-    : new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())).toISOString();
-
-  const endIso = hasValidEnd
-    ? params.targetWindow!.end!.toISOString()
-    : new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59, 999)).toISOString();
-
-  const dayState = await tx.timelineDayState.upsert({
-    where: { userId_localDate: { userId: params.userId, localDate } },
-    create: {
-      userId: params.userId,
-      localDate,
-      currentObservationRevision: 0,
-      currentRuleRevision: 1,
-      status: "STALE",
-    },
-    update: {
-      currentRuleRevision: { increment: 1 },
-      status: "STALE",
-      updatedAt: now,
-    },
+  const affectedDates = resolveAffectedDatesForRuleChange({
+    timezone,
+    referenceDate: now,
   });
 
-  await tx.outboxEvent.create({
-    data: {
-      eventType: "rule.changed",
-      aggregateType: "user",
-      aggregateId: params.userId,
-      payload: {
+  for (const localDate of affectedDates) {
+    const dayInterval = resolveLocalDayInterval(localDate, { timezone });
+    const dayState = await tx.timelineDayState.upsert({
+      where: { userId_localDate: { userId: params.userId, localDate } },
+      create: {
         userId: params.userId,
         localDate,
-        sourceRevision: dayState.currentObservationRevision,
-        scope: {
-          start: startIso,
-          end: endIso,
-        },
-        reason: "rule_changed",
-        ruleRevision: dayState.currentRuleRevision,
+        currentObservationRevision: 0,
+        currentRuleRevision: 1,
+        status: "STALE",
       },
-      correlationId: params.correlationId,
-      causationId: null,
-      schemaVersion: "1.0.0",
-      occurredAt: now,
-      status: "PENDING",
-      publicationAttemptCount: 0,
-      maxAttempts: 5,
-      availableAt: now,
-    },
+      update: {
+        currentRuleRevision: { increment: 1 },
+        status: "STALE",
+        updatedAt: now,
+      },
+    });
+
+    await tx.outboxEvent.create({
+      data: {
+        eventType: "rule.changed",
+        aggregateType: "user",
+        aggregateId: params.userId,
+        payload: {
+          userId: params.userId,
+          localDate,
+          sourceRevision: dayState.currentObservationRevision,
+          scope: {
+            start: dayInterval.startIso,
+            end: dayInterval.endIso,
+          },
+          reason: "rule_changed",
+          ruleRevision: dayState.currentRuleRevision,
+        },
+        correlationId: params.correlationId,
+        causationId: null,
+        schemaVersion: "1.0.0",
+        occurredAt: now,
+        status: "PENDING",
+        publicationAttemptCount: 0,
+        maxAttempts: 5,
+        availableAt: now,
+      },
+    });
+  }
+}
+
+/**
+ * Transactional helper to record rule revision and publish outbox events for targeted overrides.
+ * Resolves affected dates strictly from [targetTimeWindowStart, targetTimeWindowEnd) in user timezone.
+ */
+async function emitOverrideRuleChangedTx(
+  tx: any,
+  params: {
+    userId: string;
+    correlationId: string;
+    start?: Date | string | null;
+    end?: Date | string | null;
+  }
+): Promise<void> {
+  const now = new Date();
+  const pref = await tx.userPreference?.findUnique?.({
+    where: { userId: params.userId },
+    select: { timezone: true },
   });
+  const timezone = pref?.timezone || "UTC";
+
+  const rawStart = params.start ? new Date(params.start) : now;
+  const rawEnd = params.end ? new Date(params.end) : now;
+  const start = isNaN(rawStart.getTime()) ? now : rawStart;
+  const end = isNaN(rawEnd.getTime()) ? now : rawEnd;
+
+  const affected = resolveAffectedDatesForOverride({
+    start,
+    end,
+    timezone,
+  });
+
+  for (const { localDate, scope } of affected) {
+    const dayState = await tx.timelineDayState.upsert({
+      where: { userId_localDate: { userId: params.userId, localDate } },
+      create: {
+        userId: params.userId,
+        localDate,
+        currentObservationRevision: 0,
+        currentRuleRevision: 1,
+        status: "STALE",
+      },
+      update: {
+        currentRuleRevision: { increment: 1 },
+        status: "STALE",
+        updatedAt: now,
+      },
+    });
+
+    await tx.outboxEvent.create({
+      data: {
+        eventType: "rule.changed",
+        aggregateType: "user",
+        aggregateId: params.userId,
+        payload: {
+          userId: params.userId,
+          localDate,
+          sourceRevision: dayState.currentObservationRevision,
+          scope,
+          reason: "rule_changed",
+          ruleRevision: dayState.currentRuleRevision,
+        },
+        correlationId: params.correlationId,
+        causationId: null,
+        schemaVersion: "1.0.0",
+        occurredAt: now,
+        status: "PENDING",
+        publicationAttemptCount: 0,
+        maxAttempts: 5,
+        availableAt: now,
+      },
+    });
+  }
 }
 
 activityRulesRouter.get("/rules", async (request, response, next) => {
@@ -121,7 +200,7 @@ activityRulesRouter.post("/rules", async (request, response, next) => {
         },
       });
 
-      await emitRuleChangedEventTx(tx, { userId, correlationId });
+      await emitGlobalRuleChangedTx(tx, { userId, correlationId });
       return created;
     });
 
@@ -165,7 +244,7 @@ activityRulesRouter.patch("/rules/:id", async (request, response, next) => {
         },
       });
 
-      await emitRuleChangedEventTx(tx, { userId, correlationId });
+      await emitGlobalRuleChangedTx(tx, { userId, correlationId });
       return updated;
     });
 
@@ -193,7 +272,7 @@ activityRulesRouter.delete("/rules/:id", async (request, response, next) => {
 
     await getDb().$transaction(async (tx) => {
       await tx.userActivityRule.delete({ where: { id: existing.id } });
-      await emitRuleChangedEventTx(tx, { userId, correlationId });
+      await emitGlobalRuleChangedTx(tx, { userId, correlationId });
     });
 
     response.json({ deleted: true });
@@ -245,10 +324,11 @@ activityRulesRouter.post("/overrides", async (request, response, next) => {
         },
       });
 
-      await emitRuleChangedEventTx(tx, {
+      await emitOverrideRuleChangedTx(tx, {
         userId,
         correlationId,
-        targetWindow: { start, end },
+        start,
+        end,
       });
 
       return created;
@@ -278,13 +358,11 @@ activityRulesRouter.delete("/overrides/:id", async (request, response, next) => 
 
     await getDb().$transaction(async (tx) => {
       await tx.userActivityOverride.delete({ where: { id: existing.id } });
-      await emitRuleChangedEventTx(tx, {
+      await emitOverrideRuleChangedTx(tx, {
         userId,
         correlationId,
-        targetWindow: {
-          start: existing.targetTimeWindowStart,
-          end: existing.targetTimeWindowEnd,
-        },
+        start: existing.targetTimeWindowStart,
+        end: existing.targetTimeWindowEnd,
       });
     });
 

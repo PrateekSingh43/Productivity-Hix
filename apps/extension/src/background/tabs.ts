@@ -11,6 +11,14 @@ type StoredTabState = {
 
 const TAB_STATE_KEY = "productivehix_tab_state";
 
+/**
+ * Defensive browser continuity threshold.
+ * When the browser service worker resumes after machine suspension, sleep,
+ * or prolonged idle, any restored state older than this threshold is capped/reset
+ * to prevent generating multi-hour continuous activity intervals.
+ */
+export const MAX_BROWSER_CONTINUITY_GAP_MS = 5 * 60 * 1000; // 5 minutes
+
 export class TabTracker {
   private currentTabId: number | null = null;
   private currentUrl: string | null = null;
@@ -32,7 +40,16 @@ export class TabTracker {
           this.currentTabId = state.tabId;
           this.currentUrl = state.url;
           this.currentTitle = state.title;
-          this.activeStartTime = state.activeStartTime || Date.now();
+          const now = Date.now();
+          const persistedStart = state.activeStartTime || now;
+          const gap = now - persistedStart;
+          if (gap > MAX_BROWSER_CONTINUITY_GAP_MS) {
+            // Service worker was suspended or machine slept across an extended gap.
+            // Reset activeStartTime to now to avoid emitting an enormous false duration.
+            this.activeStartTime = now;
+          } else {
+            this.activeStartTime = persistedStart;
+          }
           this.windowFocused = state.windowFocused ?? true;
         }
       }
