@@ -47,13 +47,16 @@ export function resolveAffectedDatesForRuleChange(params: {
   const currentLocalDate = currentLocalInterval.localDate;
 
   if (config.policy === "future_only") {
-    return [currentLocalDate];
+    // True future-only semantics: does NOT retroactively reprocess historical days or today's already materialized state.
+    // The rule will only apply to future incoming telemetry as it arrives.
+    return [];
   }
 
   if (config.policy === "explicit_range" && config.rangeStart && config.rangeEnd) {
     const dates: string[] = [];
     let cur = config.rangeStart;
-    while (cur <= config.rangeEnd) {
+    // Canonical half-open interval semantics [rangeStart, rangeEnd)
+    while (cur < config.rangeEnd) {
       dates.push(cur);
       const [y, m, d] = cur.split("-").map(Number);
       const next = new Date(Date.UTC(y, m - 1, d + 1));

@@ -5,6 +5,7 @@ import {
   getDatesIntersectingInterval,
   localDateTimeToUtc,
 } from "../../types/src/productive-day";
+import { resolveAffectedDatesForRuleChange } from "../../types/src/rule-scope";
 
 describe("Canonical Local-Day Partitioning & Interval Semantics", () => {
   test("Scenario 1: Asia/Kolkata standard day interval has duration 24 hours", () => {
@@ -77,5 +78,27 @@ describe("Canonical Local-Day Partitioning & Interval Semantics", () => {
     assert.equal(touched[0]!.localDate, "2026-09-20");
     assert.equal(touched[1]!.localDate, "2026-09-21");
     assert.equal(touched[2]!.localDate, "2026-09-22");
+  });
+
+  test("Rule scope policy: future_only returns empty array (zero retroactive invalidation)", () => {
+    const dates = resolveAffectedDatesForRuleChange({
+      policyConfig: { policy: "future_only" },
+      referenceDate: new Date("2026-09-23T12:00:00.000Z"),
+      timezone: "UTC",
+    });
+    assert.deepEqual(dates, []);
+  });
+
+  test("Rule scope policy: explicit_range strictly follows half-open [start, end) semantics", () => {
+    const dates = resolveAffectedDatesForRuleChange({
+      policyConfig: {
+        policy: "explicit_range",
+        rangeStart: "2026-09-01",
+        rangeEnd: "2026-09-04",
+      },
+      timezone: "UTC",
+    });
+    // [2026-09-01, 2026-09-04) includes 09-01, 09-02, 09-03 (3 days, 09-04 excluded)
+    assert.deepEqual(dates, ["2026-09-01", "2026-09-02", "2026-09-03"]);
   });
 });

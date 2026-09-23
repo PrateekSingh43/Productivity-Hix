@@ -18,7 +18,7 @@ export const timelineQueries = {
             : "UTC";
         return getTimeline(date, timezone);
       },
-      staleTime: isToday ? 15_000 : 5 * 60_000,
+      staleTime: isToday ? 30_000 : Infinity,
       refetchInterval: isToday ? 30_000 : false,
     });
   },
@@ -37,7 +37,10 @@ export function useTimeline(date?: string) {
       clearTimeout(debounceTimerRef.current);
     }
     debounceTimerRef.current = setTimeout(() => {
-      queryClient.invalidateQueries({ queryKey: timelineQueries.all() });
+      // Invariant: Targeted invalidation! Invalidate ONLY today's date, never the historical query family.
+      const todayStr = new Date().toLocaleDateString("en-CA");
+      queryClient.invalidateQueries({ queryKey: timelineQueries.day(todayStr).queryKey });
+      queryClient.invalidateQueries({ queryKey: timelineQueries.day(undefined).queryKey });
     }, 5000);
 
     return () => {

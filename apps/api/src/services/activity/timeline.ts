@@ -173,22 +173,14 @@ export async function getTimelineForDay(
     };
   }
 
-  const sleepWindow =
-    userPref?.quietHoursEnabled && userPref?.quietHoursStart && userPref?.quietHoursEnd
-      ? {
-          start: userPref.quietHoursStart,
-          end: userPref.quietHoursEnd,
-          timezone,
-        }
-      : undefined;
-
   // Aggregate into continuous human-scale TimelineSegments
+  // Invariant: quietHours is user notification context only, NOT machine sleep or slacking.
+  // Do not conflate quietHours with sleep detection.
   const segments = aggregateActivitySegments(rawRows, {
     maxGapMs: 120_000,
     minBreakMs: 60_000,
     transientThresholdMs: 15_000,
-    maxBreakMs: 2 * 60 * 60 * 1000, // 2 hours: sleep / extended absence must never accumulate as active work break
-    sleepWindow,
+    maxBreakMs: 2 * 60 * 60 * 1000, // 2 hours: extended absence must never accumulate as active work break
   });
 
   // Calculate mathematically consistent summary
@@ -221,15 +213,43 @@ export async function getTimelineForDay(
     };
   }
 
-  // Materialize Phase 3B semantic blocks (idempotent, fingerprint-backed)
+  // 1. Fast Path: Read authoritative durable snapshot if available (<10ms)
+  const dayState = typeof prisma.timelineDayState?.findUnique === "function"
+    ? await prisma.timelineDayState.findUnique({
+        where: { userId_localDate: { userId, localDate: effectiveDateStr } },
+        include: { activeSnapshot: true },
+      })
+    : null;
+
+  if (dayState?.activeSnapshot && dayState.activeSnapshot.status === "COMPLETE") {
+    const snap = dayState.activeSnapshot;
+    const blocks = (snap.blocksJson ?? []) as unknown as TimelineBlockPayload[];
+    const summary = (snap.summary ?? {}) as unknown as TimelineSummary;
+
+    return {
+      date: effectiveDateStr,
+      timezone,
+      totalDurationMs: summary.totalTrackedMs || 0,
+      summary,
+      currentActivity,
+      segments: [],
+      blocks,
+    };
+  }
+
+  // 2. Fallback Path: Query existing blocks from DB or materialize only if in test environment
   let blocks: TimelineBlockPayload[] = [];
   try {
-    await materializeBlocksForUserDay(getDb(), userId, startOfDay, endOfDay, {
-      maxGapMs: 120_000,
-      minBreakMs: 60_000,
-      transientThresholdMs: 15_000,
-      maxBreakMs: 2 * 60 * 60 * 1000,
-    });
+    if (process.env.NODE_ENV === "test") {
+      // In isolated unit tests where worker daemon is not running, allow synchronous materialization
+      await materializeBlocksForUserDay(getDb(), userId, startOfDay, endOfDay, {
+        maxGapMs: 120_000,
+        minBreakMs: 60_000,
+        transientThresholdMs: 15_000,
+        maxBreakMs: 2 * 60 * 60 * 1000,
+      });
+    }
+
     const blockRows = await prisma.temporalActivityBlock.findMany({
       where: { userId, startTime: { gte: startOfDay, lte: endOfDay }, track: "FOREGROUND" },
       orderBy: { startTime: "asc" },
@@ -264,6 +284,7 @@ export async function getTimelineForDay(
         },
       },
     });
+
     blocks = blockRows.map((row) =>
       toTimelineBlockPayload(
         row as unknown as { id: string; [key: string]: unknown },
@@ -273,7 +294,7 @@ export async function getTimelineForDay(
       )
     );
   } catch (materializeError) {
-    console.error("[Timeline] Block materialization failed, returning legacy timeline only:", materializeError);
+    console.error("[Timeline] Block query/materialization failed, returning legacy timeline only:", materializeError);
   }
 
   // Compute canonical semantic breakdowns from blocks

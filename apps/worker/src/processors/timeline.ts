@@ -1,31 +1,28 @@
 /**
- * Phase 0 Timeline Materialization Processor Contract (STUB)
+ * Timeline Materialization Processor
  * 
- * IMPORTANT:
- * This file is an architectural contract and preparation skeleton for Phase 1.
- * Actual runtime materialization logic MUST NOT be implemented in Phase 0.
- * 
- * Scheduled implementation: PHASE 1.
+ * Delegates execution to the authoritative TimelineWorker.
  */
 
 import type { TimelineMaterializationJobData, WorkerJobResult } from '@repo/types';
 import type { WorkerJobContext } from '../shared/context';
+import { TimelineWorker } from '../timeline/timeline-worker';
+import { getDb } from '@repo/db';
 
 export interface TimelineProcessorOptions {
   enableShadowVerification?: boolean;
 }
 
-/**
- * Phase 1 Target Processor Contract
- */
 export async function processTimelineMaterializationJob(
   jobData: TimelineMaterializationJobData,
   context: WorkerJobContext,
   _options: TimelineProcessorOptions = {}
 ): Promise<WorkerJobResult> {
-  // Phase 0 Safeguard: explicitly prevent runtime execution before Phase 1
-  throw new Error(
-    `[PHASE_0_SAFETY_GUARD] Timeline materialization processor is a contract scaffold. ` +
-    `Runtime implementation is scheduled for Phase 1. JobId: ${context.jobId}, User: ${jobData.userId}, Date: ${jobData.localDate}`
-  );
+  const worker = new TimelineWorker(getDb());
+  const res = await worker.run(jobData, {
+    jobId: context.jobId,
+    correlationId: context.correlationId,
+    attempt: context.attempt,
+  });
+  return res as unknown as WorkerJobResult;
 }

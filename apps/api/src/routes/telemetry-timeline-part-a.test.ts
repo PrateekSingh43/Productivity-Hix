@@ -400,4 +400,69 @@ describe("Timeline Part A: Telemetry Ingestion, Revisions & Concurrent Duplicate
     expect(res2.status).toBe(200);
     expect(upsertedDayStates2).toEqual(["2026-09-23", "2026-09-24"]);
   });
+
+  it("Scenario 9B: Duration update with OLD interval union NEW interval invalidates both Day 1 and Day 2", async () => {
+    const upsertedDayStates: string[] = [];
+
+    // Existing event in DB: started at 23:30 on Sep 23, duration 90m (ended at 01:00 on Sep 24)
+    const existingTimestamp = new Date("2026-09-23T23:30:00.000Z");
+    const oldDurationSec = 90 * 60; // 90 minutes (crossed midnight into Sep 24)
+
+    const mockDb: any = {
+      userPreference: {
+        findUnique: vi.fn().mockResolvedValue({ timezone: "UTC" }),
+      },
+      normalizedActivity: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: "act_shrink_across_midnight",
+            externalId: "shrink_001",
+            duration: oldDurationSec,
+            timestamp: existingTimestamp,
+          },
+        ]),
+        update: vi.fn().mockResolvedValue({}),
+        createManyAndReturn: vi.fn().mockResolvedValue([]),
+      },
+      timelineDayState: {
+        upsert: vi.fn().mockImplementation(({ where }) => {
+          upsertedDayStates.push(where.userId_localDate.localDate);
+          return Promise.resolve({ currentObservationRevision: 2 });
+        }),
+      },
+      outboxEvent: {
+        create: vi.fn().mockResolvedValue({}),
+      },
+      $transaction: vi.fn().mockImplementation(async (callback: any) => callback(mockDb)),
+    };
+
+    setTestDb(mockDb);
+
+    // Incoming update: duration changed to 120 minutes (2 hours, still crosses midnight)
+    // Both Sep 23 and Sep 24 must be invalidated!
+    const res = await request(createApp())
+      .post("/api/telemetry/batch")
+      .set("x-user-id", DEV_USER)
+      .send({
+        installationId: "inst_001",
+        source: "desktop",
+        sentAt: "2026-09-24T01:35:00.000Z",
+        events: [
+          {
+            eventId: "shrink_001",
+            installationId: "inst_001",
+            source: "desktop",
+            eventType: "active_window",
+            timestamp: "2026-09-23T23:30:00.000Z",
+            durationMs: 120 * 60 * 1000, // 120 mins = 2 hours
+            data: { application: "Code", windowTitle: "midnight.ts" },
+          },
+        ],
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.accepted).toBe(1);
+    expect(upsertedDayStates).toContain("2026-09-23");
+    expect(upsertedDayStates).toContain("2026-09-24");
+  });
 });

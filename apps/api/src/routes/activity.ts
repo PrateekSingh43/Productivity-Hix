@@ -23,6 +23,16 @@ activityRouter.get("/timeline", async (request, response, next) => {
   }
 });
 
+activityRouter.get("/timeline/day/:date", async (request, response, next) => {
+  try {
+    const dateStr = request.params.date;
+    const timezone = typeof request.query.timezone === "string" ? request.query.timezone : undefined;
+    response.json(await getTimelineForDay(userIdFrom(request), dateStr, timezone));
+  } catch (error) {
+    next(error);
+  }
+});
+
 activityRouter.get("/today", async (request, response, next) => {
   try {
     const timezone = (request.query.timezone as string) || undefined;

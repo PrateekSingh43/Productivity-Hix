@@ -39,21 +39,34 @@ function serialize(row: {
 }
 
 export async function activityInRange(userId: string, from: Date, to: Date) {
-  const rows = await getDb().normalizedActivity.findMany({
+  const db = getDb();
+  // Safe 24-hour lookback bound so observations starting before `from` and continuing into [from, to) are retrieved
+  const maxLookbackMs = 24 * 60 * 60 * 1000;
+  const lowerBound = new Date(from.getTime() - maxLookbackMs);
+
+  const rows = await db.normalizedActivity.findMany({
     where: {
       userId,
-      timestamp: { gte: from, lt: to },
+      timestamp: { gte: lowerBound, lt: to },
       duration: { gt: 0 },
     },
     orderBy: [{ timestamp: "asc" }, { id: "asc" }],
   });
+
   return rows.flatMap((row) => {
     const timestamp = row.timestamp.getTime();
     const duration = row.duration;
     if (!Number.isFinite(timestamp) || !Number.isFinite(duration) || duration <= 0) return [];
+    const itemEnd = timestamp + duration * 1000;
+
+    // Strict half-open overlap test with [from, to):
+    // An observation overlaps [from, to) iff itemEnd > from AND timestamp < to
+    if (itemEnd <= from.getTime() || timestamp >= to.getTime()) return [];
+
     const start = Math.max(from.getTime(), timestamp);
-    const end = Math.min(to.getTime(), timestamp + duration * 1000);
+    const end = Math.min(to.getTime(), itemEnd);
     if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return [];
+
     return [serialize({ ...row, timestamp: new Date(start), duration: (end - start) / 1000 })];
   });
 }

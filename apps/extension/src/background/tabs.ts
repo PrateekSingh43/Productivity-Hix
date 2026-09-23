@@ -6,6 +6,7 @@ type StoredTabState = {
   url: string | null;
   title: string | null;
   activeStartTime: number;
+  lastEvidenceTime?: number;
   windowFocused: boolean;
 };
 
@@ -14,8 +15,8 @@ const TAB_STATE_KEY = "productivehix_tab_state";
 /**
  * Defensive browser continuity threshold.
  * When the browser service worker resumes after machine suspension, sleep,
- * or prolonged idle, any restored state older than this threshold is capped/reset
- * to prevent generating multi-hour continuous activity intervals.
+ * or prolonged idle, any restored state with an evidence gap older than this threshold
+ * is capped/reset to prevent generating multi-hour continuous activity intervals.
  */
 export const MAX_BROWSER_CONTINUITY_GAP_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -24,6 +25,7 @@ export class TabTracker {
   private currentUrl: string | null = null;
   private currentTitle: string | null = null;
   private activeStartTime: number = Date.now();
+  private lastEvidenceTime: number = Date.now();
   private windowFocused: boolean = true;
   private installationId = "browser-ext-default";
 
@@ -41,14 +43,17 @@ export class TabTracker {
           this.currentUrl = state.url;
           this.currentTitle = state.title;
           const now = Date.now();
-          const persistedStart = state.activeStartTime || now;
-          const gap = now - persistedStart;
+          const lastEvidence = state.lastEvidenceTime || state.activeStartTime || now;
+          const gap = now - lastEvidence;
           if (gap > MAX_BROWSER_CONTINUITY_GAP_MS) {
-            // Service worker was suspended or machine slept across an extended gap.
+            // Continuity gap exceeded: evidence was interrupted by sleep, suspension, or offline state.
             // Reset activeStartTime to now to avoid emitting an enormous false duration.
             this.activeStartTime = now;
+            this.lastEvidenceTime = now;
           } else {
-            this.activeStartTime = persistedStart;
+            // Continuous evidence preserved across benign storage refresh
+            this.activeStartTime = state.activeStartTime || now;
+            this.lastEvidenceTime = now;
           }
           this.windowFocused = state.windowFocused ?? true;
         }
@@ -66,6 +71,7 @@ export class TabTracker {
           url: this.currentUrl,
           title: this.currentTitle,
           activeStartTime: this.activeStartTime,
+          lastEvidenceTime: this.lastEvidenceTime,
           windowFocused: this.windowFocused,
         };
         await chrome.storage.local.set({ [TAB_STATE_KEY]: state });
@@ -118,6 +124,7 @@ export class TabTracker {
     this.currentUrl = tab.url ?? null;
     this.currentTitle = tab.title ?? null;
     this.activeStartTime = now;
+    this.lastEvidenceTime = now;
     this.windowFocused = true;
 
     await this.savePersistedState();
@@ -142,6 +149,7 @@ export class TabTracker {
   async handleWindowFocusChanged(windowId: number): Promise<BrowserActivityEvent | null> {
     await this.loadPersistedState();
     const now = Date.now();
+    this.lastEvidenceTime = now;
 
     if (windowId === chrome.windows.WINDOW_ID_NONE) {
       // User switched focus away from browser window to desktop / another application
@@ -179,6 +187,8 @@ export class TabTracker {
    */
   async handlePeriodicHeartbeat(): Promise<BrowserActivityEvent | null> {
     await this.loadPersistedState();
+    const now = Date.now();
+    this.lastEvidenceTime = now;
 
     // Verify whether the browser window is physically focused
     try {
@@ -200,7 +210,6 @@ export class TabTracker {
 
     if (!this.windowFocused || !this.currentUrl || !this.currentTitle) return null;
 
-    const now = Date.now();
     const elapsed = now - this.activeStartTime;
     // Emit segment if on the same page for >= 30 seconds
     if (elapsed >= 30_000) {

@@ -63,6 +63,7 @@ export const handleTelemetryBatch: RequestHandler = async (request, response, ne
       eventId: string;
       duration: number;
       durationMs: number;
+      oldDurationMs: number;
       timestamp: Date;
       data: Record<string, unknown>;
     }> = [];
@@ -78,6 +79,7 @@ export const handleTelemetryBatch: RequestHandler = async (request, response, ne
             eventId: ev.eventId,
             duration: incomingDurationSec,
             durationMs: ev.durationMs || Math.round(incomingDurationSec * 1000),
+            oldDurationMs: Math.round(match.duration * 1000),
             timestamp: match.timestamp, // Original observation timestamp
             data: (ev.data ?? {}) as Record<string, unknown>,
           });
@@ -162,28 +164,38 @@ export const handleTelemetryBatch: RequestHandler = async (request, response, ne
 
       // ACTUAL-MUTATION RULE:
       // A Timeline revision may advance ONLY for an authoritative database mutation.
-      // An attempted insert is not automatically a mutation.
-      const mutatedItems: Array<{ timestamp: Date; durationMs: number }> = [
-        ...updateEvents.map((u) => ({
-          timestamp: u.timestamp,
-          durationMs: u.durationMs,
-        })),
-        ...insertedRows.map((r) => ({
-          timestamp: r.timestamp,
-          durationMs: Math.round(r.duration * 1000),
-        })),
-      ];
-
       // If no mutations occurred (e.g. concurrent duplicate batch), do not bump revision or emit outbox event
-      if (mutatedItems.length === 0) {
+      if (updateEvents.length === 0 && insertedRows.length === 0) {
         return;
       }
 
       // Group affected mutations by localDate using canonical half-open interval semantics [start, end)
+      // For duration updates: affected interval is strictly OLD interval ∪ NEW interval!
       const dateMap = new Map<string, { start: Date; end: Date }>();
-      for (const item of mutatedItems) {
-        const itemStart = item.timestamp;
-        const itemEnd = new Date(item.timestamp.getTime() + Math.max(item.durationMs, 0));
+
+      for (const u of updateEvents) {
+        const itemStart = u.timestamp;
+        const oldEnd = new Date(itemStart.getTime() + Math.max(u.oldDurationMs, 0));
+        const newEnd = new Date(itemStart.getTime() + Math.max(u.durationMs, 0));
+        const unionEnd = new Date(Math.max(oldEnd.getTime(), newEnd.getTime()));
+        const touched = getDatesIntersectingInterval(itemStart, unionEnd, timezone);
+
+        for (const { localDate, interval } of touched) {
+          const scopeStart = new Date(Math.max(itemStart.getTime(), interval.start.getTime()));
+          const scopeEnd = new Date(Math.min(unionEnd.getTime(), interval.end.getTime()));
+          const existingScope = dateMap.get(localDate);
+          if (!existingScope) {
+            dateMap.set(localDate, { start: scopeStart, end: scopeEnd });
+          } else {
+            if (scopeStart < existingScope.start) existingScope.start = scopeStart;
+            if (scopeEnd > existingScope.end) existingScope.end = scopeEnd;
+          }
+        }
+      }
+
+      for (const r of insertedRows) {
+        const itemStart = r.timestamp;
+        const itemEnd = new Date(r.timestamp.getTime() + Math.max(Math.round(r.duration * 1000), 0));
         const touched = getDatesIntersectingInterval(itemStart, itemEnd, timezone);
 
         for (const { localDate, interval } of touched) {

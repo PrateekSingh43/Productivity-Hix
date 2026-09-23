@@ -203,7 +203,7 @@ describe.skipIf(!hasDb)("pattern real-postgres integration", () => {
       idempotencyProvider: new InMemoryLockProvider(),
     });
     expect(retry.status).toBe("SUCCEEDED");
-    expect((await db.patternAnalysisRun.findFirst({ where: { userId } }))?.status).toBe("COMPLETED");
+    expect((await db.patternAnalysisRun.findFirst({ where: { userId }, orderBy: { computedAt: "desc" } }))?.status).toBe("COMPLETED");
   }, 90_000);
 
   it("duplicate logical requests stay idempotent on real rows", async () => {

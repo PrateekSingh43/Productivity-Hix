@@ -518,7 +518,59 @@ export function TimelineView() {
     setSelectedBlockIndex(null);
   };
 
-  const blocks = data?.blocks || [];
+  const blocks = useMemo(() => {
+    if (data?.blocks && data.blocks.length > 0) {
+      return data.blocks;
+    }
+    const segments = data?.segments || [];
+    if (segments.length === 0) return [];
+
+    // Map raw/legacy segments to TimelineBlock shape for seamless visual presentation when blocks are not yet materialized
+    return segments.map((seg): TimelineBlock => {
+      const isAfk = Boolean(seg.isAfk || seg.category === "break");
+      const categoryModalityMap: Record<string, string> = {
+        focused: "development",
+        browser: "reading_research",
+        leisure: "media_consumption",
+        break: "idle_away",
+        communication: "communication",
+        general: "unknown",
+      };
+      const modValue = categoryModalityMap[seg.category] ?? "unknown";
+      return {
+        id: seg.id,
+        startTime: seg.start,
+        endTime: seg.end,
+        wallClockDurationMs: seg.durationMs,
+        observedActiveDurationMs: isAfk ? 0 : seg.durationMs,
+        pausedDurationMs: seg.pausedMs ?? (isAfk ? seg.durationMs : 0),
+        track: "desktop",
+        primaryApplication: seg.application || "Activity",
+        cleanTitle: seg.displayTitle || seg.primaryTitle || seg.title || "Activity",
+        domain: seg.domain ?? null,
+        sanitizedUrl: null,
+        sourceChannel: seg.source || "desktop",
+        rawEventCount: seg.rawEventCount ?? 1,
+        observationSetFingerprint: seg.id,
+        isAfkBlock: isAfk,
+        activityType: seg.activityType || seg.type || "application",
+        modality: {
+          primary: {
+            value: modValue,
+            confidence: 0.8,
+            provenance: "segment_heuristic",
+            authority: "heuristic",
+          },
+          secondary: [],
+          context: null,
+        },
+        attention: null,
+        coverageGaps: [],
+        pendingInterpretation: false,
+      };
+    });
+  }, [data?.blocks, data?.segments]);
+
   const summary = data?.summary;
   const currentActivity = data?.currentActivity;
 
@@ -863,7 +915,7 @@ export function TimelineView() {
                 {summary ? formatDuration(summary.totalTrackedMs / 1000) : "0m"}
               </p>
               <span className="text-xs text-text-muted font-mono">
-                {blocks.length} semantic blocks
+                {blocks.length} {data?.blocks && data.blocks.length > 0 ? "semantic blocks" : "activity segments"}
               </span>
             </div>
 
@@ -874,7 +926,9 @@ export function TimelineView() {
                 <Code className="w-3.5 h-3.5 text-accent-default" />
               </div>
               <p className="text-xl sm:text-2xl font-bold font-mono tracking-tight text-text-primary">
-                {summary ? formatDuration((summary.developmentMs ?? 0) / 1000) : "0m"}
+                {summary
+                  ? formatDuration(((summary.developmentMs ?? 0) || (summary.focusedMs ?? 0)) / 1000)
+                  : "0m"}
               </p>
               <span className="text-xs text-text-muted font-mono">
                 Coding, Debugging &amp; Review
@@ -890,7 +944,9 @@ export function TimelineView() {
               <p className="text-xl sm:text-2xl font-bold font-mono tracking-tight text-text-primary">
                 {summary
                   ? formatDuration(
-                      ((summary.readingResearchMs ?? 0) + (summary.writingDocumentationMs ?? 0)) / 1000
+                      (((summary.readingResearchMs ?? 0) + (summary.writingDocumentationMs ?? 0)) ||
+                        (summary.browserMs ?? 0)) /
+                        1000
                     )
                   : "0m"}
               </p>
@@ -908,10 +964,11 @@ export function TimelineView() {
               <p className="text-xl sm:text-2xl font-bold font-mono tracking-tight text-text-primary">
                 {summary
                   ? formatDuration(
-                      ((summary.communicationModalityMs ?? 0) +
+                      (((summary.communicationModalityMs ?? 0) +
                         (summary.mediaConsumptionMs ?? 0) +
                         (summary.gamingMs ?? 0) +
-                        (summary.administrationMs ?? 0)) /
+                        (summary.administrationMs ?? 0)) ||
+                        ((summary.communicationMs ?? 0) + (summary.leisureMs ?? 0))) /
                         1000
                     )
                   : "0m"}
