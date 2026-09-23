@@ -66,21 +66,26 @@ export function AnalyticsState({
   if (data.state === "ok" && !noInsight) return null;
 
   if (data.state === "pending") {
+    const isWorking = isFetching || isRunningAnalysis;
     return (
       <div role="status" className="space-y-3 rounded-xl border border-border-subtle bg-bg-card p-6 sm:p-8">
-        <h2 className="text-base font-medium text-text-primary">Pattern analysis hasn&apos;t run for this period.</h2>
+        <h2 className="text-base font-medium text-text-primary">
+          {isWorking ? "Computing patterns from your activity…" : "Pattern analysis hasn't run for this period."}
+        </h2>
         <p className="text-sm text-text-secondary">
-          Run analysis to compute findings from your recorded activity. This may take a minute.
+          {isWorking
+            ? "Your request was accepted and the analysis worker is calculating multi-day recurrence and baseline statistics."
+            : "Run analysis to compute findings from your recorded activity. This usually takes a few seconds."}
         </p>
         {onRunAnalysis && (
           <button
             type="button"
             onClick={onRunAnalysis}
-            disabled={isFetching || isRunningAnalysis}
+            disabled={isWorking}
             className="inline-flex min-h-11 items-center gap-2 rounded-md border border-border-subtle px-3 text-sm text-text-primary disabled:opacity-50"
           >
-            <RefreshCw size={14} aria-hidden="true" />
-            {isRunningAnalysis ? "Running…" : "Run analysis"}
+            <RefreshCw size={14} className={isWorking ? "animate-spin" : ""} aria-hidden="true" />
+            {isWorking ? "Analyzing…" : "Run analysis"}
           </button>
         )}
       </div>

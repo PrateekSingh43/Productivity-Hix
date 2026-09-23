@@ -118,8 +118,15 @@ export async function bootstrap(): Promise<BootstrapResult> {
   };
 }
 
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+
 // Auto-run if executed directly as entrypoint
-if (import.meta.url === `file://${process.argv[1]}`) {
+const isDirectEntry =
+  Boolean(process.argv[1]) &&
+  path.resolve(process.argv[1]).toLowerCase() === fileURLToPath(import.meta.url).toLowerCase();
+
+if (isDirectEntry) {
   bootstrap().catch((err) => {
     console.error('[WorkerBootstrap] Fatal error during startup:', err);
     process.exit(1);
