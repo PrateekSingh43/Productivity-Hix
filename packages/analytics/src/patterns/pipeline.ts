@@ -49,6 +49,8 @@ export const PATTERN_CONFIG_VERSION = "api-prototype-1";
 
 export type PatternsState = "not-connected" | "no-observations" | "insufficient-evidence" | "no-findings" | "ok" | "pending";
 
+export type DetectorAvailability = "AVAILABLE" | "NOT_AVAILABLE";
+
 export interface DetectorDiagnostics {
   identity: DetectorIdentity;
   status: string;
@@ -56,6 +58,12 @@ export interface DetectorDiagnostics {
   eligibleOccasions: number;
   eligibleDays: number;
   meanCoverageRatio: number | null;
+  /**
+   * Whether the detector could actually evaluate. NOT_AVAILABLE means required
+   * upstream input does not exist (missing infrastructure), which is NOT the
+   * same as evaluating and finding nothing.
+   */
+  availability: DetectorAvailability;
 }
 
 export interface RecordingHistory {
@@ -186,11 +194,17 @@ function taskEpisodes(data: PatternPipelineInput, timeline: EvidenceTimeline): E
   }));
 }
 
-function diagnostic(identity: DetectorIdentity, result: BehavioralPatternOutput<unknown>, reason: string): DetectorDiagnostics {
+function diagnostic(
+  identity: DetectorIdentity,
+  result: BehavioralPatternOutput<unknown>,
+  reason: string,
+  availability: DetectorAvailability = "AVAILABLE",
+): DetectorDiagnostics {
   return {
     identity, status: result.executionStatus, reason,
     eligibleOccasions: result.sample.qualifyingEpisodes, eligibleDays: result.sample.qualifyingDays,
     meanCoverageRatio: result.sample.qualifyingEpisodes ? result.sample.meanCoverageRatio : null,
+    availability,
   };
 }
 
@@ -279,6 +293,10 @@ export function evaluatePatterns(data: PatternPipelineInput): PatternPipelineRes
       ...episode.metrics, episodeId: episode.metadata.evaluationId, userId: data.userId,
       startedAt: episode.temporalWindow.start, endedAt: episode.temporalWindow.end, coverageRatio: episode.coverageRatio,
     })), fragmentationConfig);
+  // D4 input contract (§13 State B): no plan/schedule snapshot provider exists, so
+  // the detector is deliberately NOT fed real instances. Passing [] would
+  // masquerade missing infrastructure as a legitimate "no finding", therefore
+  // the diagnostic is explicitly marked NOT_AVAILABLE. Detector untouched.
   const d4 = new ScheduleVarianceDetector(scheduleConfig).evaluatePatternWithInstances(
     patternContext(data.userId, data.timezone, data.timeline, "schedule_variance", data.window.end),
     stableId("D4", data.window), stableId("D4-pattern", data.window),
@@ -287,7 +305,12 @@ export function evaluatePatterns(data: PatternPipelineInput): PatternPipelineRes
   const diagnostics: DetectorDiagnostics[] = [
     diagnostic("context_switching_density", d1, "Changes between recorded software contexts are evaluated alongside other findings."),
     diagnostic("task_execution_fragmentation", d2, "More earlier comparable work and baseline history are needed for this comparison."),
-    diagnostic("schedule_variance", d4, "Saved plans from before work began (snapshots) are missing."),
+    diagnostic(
+      "schedule_variance",
+      d4,
+      "Schedule variance is not available yet because plan/schedule snapshots are not currently available to Pattern Analytics.",
+      "NOT_AVAILABLE",
+    ),
   ];
   const taskIds = [...new Set(current.flatMap((item) => item.session.taskId ? [item.session.taskId] : []))].sort();
   const patterns: PatternPromotionInput[] = [];
@@ -312,9 +335,10 @@ export function evaluatePatterns(data: PatternPipelineInput): PatternPipelineRes
   }
   const d3Eligible = current.filter((item) => item.session.taskId && item.d3.executionStatus === "QUALIFIED");
   diagnostics.push({ identity: "extended_continuous_activity", status: patterns.length ? "PROMOTED" : qualifiedEvaluation ? "NO_PATTERN" : "INSUFFICIENT_EVIDENCE",
-    reason: d3Diagnostics.length ? [...new Set(d3Diagnostics.map((item) => item.reason))].join(" ") : "No closed task-linked sessions are available for comparison.",
+    reason: d3Diagnostics.length ? [...new Set(d3Diagnostics.map((item) => item.reason))].join(" ") : "No closed task-linked sessions are available for comparison. D3 only evaluates closed sessions explicitly linked to the same task; unlinked continuous work is not eligible evidence.",
     eligibleOccasions: d3Eligible.length, eligibleDays: countDistinctCalendarDays(d3Eligible.map((item) => item.session.startedAt), data.timezone),
-    meanCoverageRatio: d3Eligible.length ? d3Eligible.reduce((sum, item) => sum + item.d3.coverageRatio, 0) / d3Eligible.length : null });
+    meanCoverageRatio: d3Eligible.length ? d3Eligible.reduce((sum, item) => sum + item.d3.coverageRatio, 0) / d3Eligible.length : null,
+    availability: "AVAILABLE" });
   const hasObservations = data.timeline.blocks.some((block) => block.observation !== null);
   const state: PatternsState = patterns.length ? "ok" : !hasObservations ? data.connected ? "no-observations" : "not-connected"
     : qualifiedEvaluation ? "no-findings" : "insufficient-evidence";

@@ -97,6 +97,18 @@ describe("Patterns and Insights orchestration contracts", () => {
     expect(result.diagnostics.perDetector.find((item) => item.identity === "schedule_variance")?.reason).toContain("snapshots");
   });
 
+  it("marks D4 schedule_variance NOT_AVAILABLE instead of a silent empty-input finding", async () => {
+    fixture();
+    const result = await runPatternPipeline(userId, window);
+    const d4 = result.diagnostics.perDetector.find((item) => item.identity === "schedule_variance")!;
+    expect(d4.availability).toBe("NOT_AVAILABLE");
+    expect(d4.reason).toContain("not available yet");
+    // Available detectors stay explicitly available.
+    for (const item of result.diagnostics.perDetector) {
+      if (item.identity !== "schedule_variance") expect(item.availability).toBe("AVAILABLE");
+    }
+  });
+
   it("returns insufficient evidence for sparse history without zero-filled findings", async () => {
     fixture({ count: 1, history: false });
     const result = await runPatternPipeline(userId, window);
