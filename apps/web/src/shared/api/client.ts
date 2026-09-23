@@ -23,10 +23,25 @@ export class ApiClientError extends Error {
   }
 }
 
+/**
+ * Explicit browser identity for development authentication.
+ *
+ * The API resolves the user from (in order): device token, then the
+ * `x-user-id` dev header when `ALLOW_DEV_AUTH` is enabled server-side.
+ * This value MUST be explicit per install — it is read from
+ * `NEXT_PUBLIC_DEV_USER_ID` (documented in `.env.example`) with a local-dev
+ * fallback. Set it to an empty string to omit the header entirely (session /
+ * device-token auth). Never inline a literal user id at call sites.
+ */
+export function getBrowserDevUserId(): string {
+  return process.env.NEXT_PUBLIC_DEV_USER_ID ?? "00000000-0000-0000-0000-000000000001";
+}
+
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const devUserId = getBrowserDevUserId();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
-    "x-user-id": "00000000-0000-0000-0000-000000000001",
+    ...(devUserId ? { "x-user-id": devUserId } : {}),
     ...((init?.headers as Record<string, string>) || {}),
   };
   const response = await fetch(`${apiUrl}${path}`, {

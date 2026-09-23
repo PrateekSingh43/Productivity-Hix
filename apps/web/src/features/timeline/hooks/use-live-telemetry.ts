@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { getWebSocketBaseUrl } from "@shared/api/client";
+import { getBrowserDevUserId, getWebSocketBaseUrl } from "@shared/api/client";
 
 export interface LiveTelemetryState {
   connected: boolean;
@@ -55,7 +55,7 @@ export function useLiveTelemetry() {
 
     function connect() {
       const wsUrl = getWebSocketBaseUrl();
-      const url = `${wsUrl}?userId=00000000-0000-0000-0000-000000000001`;
+      const url = `${wsUrl}?userId=${encodeURIComponent(getBrowserDevUserId())}`;
 
       try {
         const ws = new WebSocket(url);

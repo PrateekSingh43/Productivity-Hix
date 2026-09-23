@@ -60,6 +60,7 @@ describe("persisted pattern reads", () => {
   it("returns persisted patterns and diagnostics from the completed run", async () => {
     const run = {
       id: "run-1",
+      userId,
       state: "ok",
       diagnosticsJson: {
         perDetector: [{ identity: "extended_continuous_activity", status: "PROMOTED", eligibleOccasions: 3, eligibleDays: 3, meanCoverageRatio: 0.9 }],
@@ -68,8 +69,14 @@ describe("persisted pattern reads", () => {
     };
     const stored = patternResult("pattern-abc");
     setTestDb({
-      patternAnalysisRun: { findFirst: async () => run },
-      patternFinding: { findMany: async () => [{ id: "f-1", resultJson: stored }] },
+      patternAnalysisRun: {
+        findFirst: async ({ where }: { where: Record<string, unknown> }) =>
+          where.userId === run.userId ? run : null,
+      },
+      patternFinding: {
+        findMany: async ({ where }: { where: Record<string, unknown> }) =>
+          where.runId === run.id ? [{ id: "f-1", userId, runId: run.id, resultJson: stored }] : [],
+      },
     });
     const res = await request(createApp())
       .get("/api/patterns?from=2026-09-01&to=2026-09-15")
@@ -81,6 +88,48 @@ describe("persisted pattern reads", () => {
     expect(res.body.patterns[0].claim).toContain("longer than before");
     expect(res.body.diagnostics.perDetector).toHaveLength(1);
     expect(res.body.diagnostics.recordingHistory.recordedDays).toBe(20);
+  });
+
+  it("isolates users: User B never receives User A's findings", async () => {
+    const runA = { id: "run-a", userId, state: "ok", diagnosticsJson: { perDetector: [] } };
+    const storedA = patternResult("pattern-user-a");
+    const db = {
+      patternAnalysisRun: {
+        findFirst: async ({ where }: { where: Record<string, unknown> }) =>
+          where.userId === runA.userId ? runA : null,
+      },
+      patternFinding: {
+        findMany: async ({ where }: { where: Record<string, unknown> }) =>
+          where.runId === runA.id ? [{ id: "f-a", userId, runId: runA.id, resultJson: storedA }] : [],
+      },
+      outboxEvent: { create: async ({ data }: { data: Record<string, unknown> }) => ({ id: "evt-b", ...data }) },
+    };
+    setTestDb(db);
+    const userB = "user-b-isolated";
+    const resB = await request(createApp())
+      .get("/api/patterns?from=2026-09-01&to=2026-09-15")
+      .set({ "x-user-id": userB });
+    expect(resB.status).toBe(200);
+    expect(resB.body.patterns).toEqual([]);
+    expect(JSON.stringify(resB.body)).not.toContain("pattern-user-a");
+    const resA = await request(createApp())
+      .get("/api/patterns?from=2026-09-01&to=2026-09-15")
+      .set(auth);
+    expect(resA.body.patterns).toHaveLength(1);
+    expect(resA.body.patterns[0].metadata.patternId).toBe("pattern-user-a");
+    // B's analyze request is attributed to B, never A.
+    const created: Array<Record<string, unknown>> = [];
+    (db.outboxEvent.create as unknown) = async ({ data }: { data: Record<string, unknown> }) => {
+      created.push(data);
+      return { id: "evt-b", ...data };
+    };
+    const postB = await request(createApp())
+      .post("/api/patterns/analyze")
+      .set({ "x-user-id": userB })
+      .send({ from: "2026-09-01", to: "2026-09-15" });
+    expect(postB.status).toBe(202);
+    expect(created[0]!.aggregateId).toBe(userB);
+    expect((created[0]!.payload as Record<string, unknown>).userId).toBe(userB);
   });
 });
 
