@@ -8,3 +8,10 @@ export function getPatterns({ from, to }: AnalyticsPeriod) {
 export function getInsights({ from, to }: AnalyticsPeriod) {
   return apiFetch<InsightsResponse>(`/api/insights?${new URLSearchParams({ from, to })}`);
 }
+
+export function requestPatternAnalysis({ from, to }: AnalyticsPeriod) {
+  return apiFetch<{ accepted: boolean; correlationId: string }>(`/api/patterns/analyze`, {
+    method: "POST",
+    body: JSON.stringify({ from, to }),
+  });
+}

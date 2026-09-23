@@ -12,6 +12,8 @@ interface AnalyticsStateProps {
   data?: AnalyticsResponse;
   onRetry: () => void;
   noInsight?: boolean;
+  onRunAnalysis?: () => void;
+  isRunningAnalysis?: boolean;
 }
 
 export function AnalyticsState({
@@ -21,6 +23,8 @@ export function AnalyticsState({
   data,
   onRetry,
   noInsight,
+  onRunAnalysis,
+  isRunningAnalysis,
 }: AnalyticsStateProps) {
   if (isLoading) {
     return (
@@ -60,6 +64,28 @@ export function AnalyticsState({
   }
 
   if (data.state === "ok" && !noInsight) return null;
+
+  if (data.state === "pending") {
+    return (
+      <div role="status" className="space-y-3 rounded-xl border border-border-subtle bg-bg-card p-6 sm:p-8">
+        <h2 className="text-base font-medium text-text-primary">Pattern analysis hasn&apos;t run for this period.</h2>
+        <p className="text-sm text-text-secondary">
+          Run analysis to compute findings from your recorded activity. This may take a minute.
+        </p>
+        {onRunAnalysis && (
+          <button
+            type="button"
+            onClick={onRunAnalysis}
+            disabled={isFetching || isRunningAnalysis}
+            className="inline-flex min-h-11 items-center gap-2 rounded-md border border-border-subtle px-3 text-sm text-text-primary disabled:opacity-50"
+          >
+            <RefreshCw size={14} aria-hidden="true" />
+            {isRunningAnalysis ? "Running…" : "Run analysis"}
+          </button>
+        )}
+      </div>
+    );
+  }
 
   const count = data.observationCount ?? data.diagnostics?.observationCount;
   const title =

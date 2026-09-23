@@ -5,6 +5,7 @@ export type AnalyticsState =
   | "no-observations"
   | "insufficient-evidence"
   | "no-findings"
+  | "pending"
   | "ok";
 
 export interface AnalyticsPeriod {

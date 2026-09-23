@@ -5,12 +5,13 @@ import { PatternCard } from "./pattern-card";
 import { OnboardingNote } from "./onboarding-note";
 import { AnalyticsState } from "./analytics-state";
 import { onboardingMessage } from "./analytics-evidence";
-import { usePatterns } from "../api/queries";
+import { usePatterns, useRequestPatternAnalysis } from "../api/queries";
 import { analyticsPeriod } from "../lib/presentation";
 
 export function PatternsView() {
   const period = analyticsPeriod(14);
   const query = usePatterns(period);
+  const runAnalysis = useRequestPatternAnalysis(period);
   const data = query.data;
   const showCards = !query.isPending && !query.isError && data?.state === "ok" && data.patterns.length > 0;
   const stateData = data?.state === "ok" && !data.patterns.length ? { ...data, state: "no-findings" as const } : data;
@@ -41,6 +42,8 @@ export function PatternsView() {
             isFetching={query.isFetching}
             data={stateData}
             onRetry={() => void query.refetch()}
+            onRunAnalysis={() => runAnalysis.mutate()}
+            isRunningAnalysis={runAnalysis.isPending}
           />
         )}
       </div>

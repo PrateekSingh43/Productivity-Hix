@@ -1,7 +1,7 @@
 "use client";
 
-import { queryOptions, useQuery } from "@tanstack/react-query";
-import { getPatterns, getInsights } from "./client";
+import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { getPatterns, getInsights, requestPatternAnalysis } from "./client";
 import type { AnalyticsPeriod } from "../types";
 
 export const analyticsQueries = {
@@ -26,4 +26,14 @@ export function usePatterns(period: AnalyticsPeriod) {
 
 export function useInsights(period: AnalyticsPeriod) {
   return useQuery(analyticsQueries.insights(period));
+}
+
+export function useRequestPatternAnalysis(period: AnalyticsPeriod) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => requestPatternAnalysis(period),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: analyticsQueries.patterns(period).queryKey });
+    },
+  });
 }
