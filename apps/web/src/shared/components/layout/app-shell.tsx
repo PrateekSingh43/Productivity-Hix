@@ -53,8 +53,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </div>
 
       <main className="min-w-0 flex-1 flex flex-col overflow-hidden">
-        {/* Standardized h-14 header: perfectly aligns with sidebar header divider */}
-        <header className="sticky top-0 z-30 h-14 shrink-0 border-b border-border-subtle bg-bg-default/85 px-4 backdrop-blur-xl sm:px-6 xl:px-10">
+        {/* Mobile-only header: desktop pages carry their own PageHeader title,
+            so the shell bar is hidden on lg+ to avoid a duplicate title row. */}
+        <header className="sticky top-0 z-30 h-14 shrink-0 border-b border-border-subtle bg-bg-default/85 px-4 backdrop-blur-xl sm:px-6 lg:hidden">
           <div className="mx-auto flex h-full w-full max-w-[1440px] items-center justify-between gap-4">
             <div className="flex min-w-0 items-center gap-3">
               {/* Mobile menu trigger */}
