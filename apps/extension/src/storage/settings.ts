@@ -6,6 +6,8 @@ export type ExtensionSettings = {
   trackingPaused: boolean;
   eventsCreated: number;
   eventsUploaded: number;
+  focusGuardEnabled?: boolean;
+  focusGuardLimit?: number;
   lastEvent?: {
     domain: string;
     pageTitle: string;
@@ -44,6 +46,8 @@ export async function getSettings(): Promise<ExtensionSettings> {
     trackingPaused: current?.trackingPaused ?? false,
     eventsCreated: current?.eventsCreated ?? 0,
     eventsUploaded: current?.eventsUploaded ?? 0,
+    focusGuardEnabled: current?.focusGuardEnabled ?? true,
+    focusGuardLimit: current?.focusGuardLimit ?? 3,
     lastEvent: current?.lastEvent ?? null,
     lastUpload: current?.lastUpload ?? null,
   };

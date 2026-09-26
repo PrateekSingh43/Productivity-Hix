@@ -43,10 +43,19 @@ export class ReflectionEngine {
     }
     
     // Load config from old scheduler state so UI settings (like 50m / 10s presets) continue working
+    const defaults = {
+      devMode: true,
+      devIntervalSeconds: 10,
+      checkInsPaused: false,
+      sleepScheduleEnabled: true,
+      sleepStart: "23:00",
+      sleepEnd: "07:00",
+      suppressCheckInsDuringFocus: true,
+    };
     if (data[SCHEDULER_STORAGE_KEY]) {
-      this.config = data[SCHEDULER_STORAGE_KEY];
+      this.config = { ...defaults, ...data[SCHEDULER_STORAGE_KEY] };
     } else {
-      this.config = { devMode: true, devIntervalSeconds: 10, checkInsPaused: false, sleepScheduleEnabled: true, sleepStart: "23:00", sleepEnd: "07:00" };
+      this.config = defaults;
     }
     this.loaded = true;
   }
@@ -191,9 +200,10 @@ export class ReflectionEngine {
 
     // If a focus session is active and suppression is enabled, do not accumulate periodic time and do not trigger!
     if (this.config.suppressCheckInsDuringFocus !== false) {
-      const focusActive = await this.isFocusSessionActive();
+      const focusActive = await this.isFocusSessionActive(true);
       if (focusActive) {
         this.previousActivityState = activityState;
+        this.state.activeTimeMs = 0; // Clear accumulated time so check-in does not fire during or immediately after focus
         return;
       }
     }
@@ -237,8 +247,9 @@ export class ReflectionEngine {
     }
 
     if (this.config.suppressCheckInsDuringFocus !== false) {
-      const focusActive = await this.isFocusSessionActive();
+      const focusActive = await this.isFocusSessionActive(true);
       if (focusActive) {
+        this.state.activeTimeMs = 0;
         return;
       }
     }
@@ -246,24 +257,57 @@ export class ReflectionEngine {
     await this.triggerNotification(now, false);
   }
 
-  private async isFocusSessionActive(): Promise<boolean> {
+  private lastApiFocusCheckMs = 0;
+  private cachedApiFocusResult = false;
+
+  public clearFocusCache() {
+    this.lastApiFocusCheckMs = 0;
+    this.cachedApiFocusResult = false;
+  }
+
+  public async isFocusSessionActive(allowApiFetch = true): Promise<boolean> {
     try {
       const { focusGuard } = await import("./focus-guard");
-      const current = focusGuard.getCurrentSession();
-      if (current && !current.endedAt) {
+      if (focusGuard.isSessionActive()) {
         return true;
       }
     } catch {}
 
     try {
-      const { apiClient } = await import("../api/client");
-      const active = await apiClient.getActiveSession();
-      if (active && !active.endedAt) {
-        return true;
+      if (typeof chrome !== "undefined" && chrome.storage?.local) {
+        const stored = await chrome.storage.local.get("productivehix_active_focus_session");
+        const s = stored["productivehix_active_focus_session"];
+        if (s && !s.endedAt) {
+          import("./focus-guard").then(({ focusGuard }) => {
+            if (!focusGuard.isSessionActive()) {
+              focusGuard.setSession(s);
+            }
+          }).catch(() => {});
+          return true;
+        }
       }
     } catch {}
 
-    return false;
+    const now = Date.now();
+    if (allowApiFetch && now - this.lastApiFocusCheckMs >= 3000) {
+      this.lastApiFocusCheckMs = now;
+      try {
+        const { apiClient } = await import("../api/client");
+        const session = await apiClient.getActiveSession();
+        if (session && !session.endedAt) {
+          this.cachedApiFocusResult = true;
+          const { focusGuard } = await import("./focus-guard");
+          focusGuard.setSession(session);
+          return true;
+        } else {
+          this.cachedApiFocusResult = false;
+        }
+      } catch {
+        this.cachedApiFocusResult = false;
+      }
+    }
+
+    return this.cachedApiFocusResult;
   }
 
   private async triggerNotification(now: number, force: boolean) {
@@ -271,10 +315,11 @@ export class ReflectionEngine {
     this.isTriggering = true;
 
     try {
-      if (!force || this.config.suppressCheckInsDuringFocus !== false) {
-        const focusActive = await this.isFocusSessionActive();
+      if (this.config.suppressCheckInsDuringFocus !== false) {
+        const focusActive = await this.isFocusSessionActive(true);
         if (focusActive) {
-          console.log("[ReflectionEngine] Blocked periodic notification because a focus session is active.");
+          console.log("[ReflectionEngine] Blocked notification because a focus session is active.");
+          this.state.activeTimeMs = 0;
           return;
         }
       }

@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { resolveProductiveDay, type Task, type TaskPriority, type TaskStatus } from "@repo/types";
+import { dueDateKey } from "../lib/task-scopes";
 import { useTaskDetail, useTaskActivity } from "../api/queries";
 import { useTodayPlan } from "@features/today";
 import { useUpdateTaskMutation, useDeleteTaskMutation } from "../api/mutations";
@@ -128,9 +129,7 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
       return;
     }
     if (task.id !== lastLoadedId) {
-      const parsedDueDate = task.dueAt
-        ? format(new Date(task.dueAt), "yyyy-MM-dd")
-        : "";
+      const parsedDueDate = dueDateKey(task.dueAt) ?? "";
       const initial = {
         title: task.title || "",
         description: task.description || "",
@@ -195,7 +194,7 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
       )
     : 0;
 
-  const dueDateStr = currentTask.dueAt ? format(new Date(currentTask.dueAt), "yyyy-MM-dd") : null;
+  const dueDateStr = dueDateKey(currentTask.dueAt);
   const isPastDue = Boolean(
     dueDateStr && dueDateStr < localToday && currentTask.status !== "done" && currentTask.status !== "cancelled"
   );

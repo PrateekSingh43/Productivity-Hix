@@ -29,3 +29,14 @@ export interface CreateCheckInInput {
   note?: string | null;
   source?: string;
 }
+
+export type SessionRangePreset = "today" | "7d" | "30d" | "90d" | "all";
+
+export interface SessionListFilters {
+  rangePreset?: SessionRangePreset;
+  from?: string;
+  to?: string;
+  taskId?: string | null;
+  search?: string;
+  limit?: number;
+}

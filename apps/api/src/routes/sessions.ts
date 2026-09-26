@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { sessionCreateSchema, sessionUpdateSchema } from "@repo/validation";
+import { sessionCreateSchema, sessionUpdateSchema, sessionListQuerySchema } from "@repo/validation";
 import { requireAuth, userIdFrom } from "../middleware/auth";
 import {
   createSession,
@@ -16,7 +16,8 @@ sessionsRouter.use(requireAuth);
 
 sessionsRouter.get("/", async (request, response, next) => {
   try {
-    response.json(await listSessions(userIdFrom(request)));
+    const query = sessionListQuerySchema.parse(request.query);
+    response.json(await listSessions(userIdFrom(request), query));
   } catch (error) {
     next(error);
   }

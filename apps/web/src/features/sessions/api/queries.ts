@@ -2,14 +2,15 @@
 
 import { queryOptions, useQuery } from "@tanstack/react-query";
 import { getSessions, getActiveSession } from "./client";
+import type { SessionListFilters } from "../types";
 
 export const sessionQueries = {
   all: () => ["sessions"] as const,
   lists: () => [...sessionQueries.all(), "list"] as const,
-  list: () =>
+  list: (filters?: SessionListFilters) =>
     queryOptions({
-      queryKey: sessionQueries.lists(),
-      queryFn: getSessions,
+      queryKey: [...sessionQueries.lists(), filters ?? {}] as const,
+      queryFn: () => getSessions(filters),
       staleTime: 5_000,
       refetchInterval: 5_000,
     }),
@@ -22,8 +23,8 @@ export const sessionQueries = {
     }),
 };
 
-export function useSessionsList() {
-  return useQuery(sessionQueries.list());
+export function useSessionsList(filters?: SessionListFilters) {
+  return useQuery(sessionQueries.list(filters));
 }
 
 export function useActiveSession() {

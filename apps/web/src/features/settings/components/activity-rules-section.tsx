@@ -183,7 +183,7 @@ export function ActivityRulesSection() {
                   onClick={() => handleToggleRule(rule.id, rule.isEnabled)}
                   className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer ${
                     rule.isEnabled
-                      ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20"
+                      ? "bg-bg-active text-text-primary border border-border-hover font-semibold"
                       : "bg-bg-secondary text-text-muted border border-border-subtle"
                   }`}
                 >

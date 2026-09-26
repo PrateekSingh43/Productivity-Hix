@@ -93,13 +93,29 @@ export async function showFocusStartedNotification(options: {
   taskTitle?: string;
   targetMinutes?: number;
 }): Promise<string> {
+  if (typeof chrome === "undefined" || !chrome.notifications?.create) {
+    return "focus-started";
+  }
+
+  const notificationId = `focus-started-${Date.now()}`;
+  const iconUrl = getNotificationIconUrl();
   const title = "ProductiveHix — Focus Mode Active";
   const message = options.taskTitle
-    ? `Started focus on "${options.taskTitle}" (${options.targetMinutes ?? 25}m target). Distraction guard active.`
-    : `Focus session active (${options.targetMinutes ?? 25}m target). Distraction guard active.`;
-  return showNativeCheckInNotification({
-    customTitle: title,
-    customMessage: message,
+    ? `Started focus on "${options.taskTitle}" (${options.targetMinutes ?? 25}m target). Guard active.`
+    : `Focus session active (${options.targetMinutes ?? 25}m target). Guard active.`;
+
+  return new Promise((resolve) => {
+    chrome.notifications.create(
+      notificationId,
+      {
+        type: "basic",
+        iconUrl,
+        title,
+        message,
+        priority: 1,
+      },
+      (createdId) => resolve(createdId || notificationId),
+    );
   });
 }
 
@@ -155,6 +171,89 @@ export async function showFocusTargetNotification(options: {
       }
       resolve(createdId || notificationId);
     });
+  });
+}
+
+let lastFocusGuardNotificationTime = 0;
+
+export async function showFocusGuardTabNotification(options: {
+  taskTitle: string;
+  limit: number;
+}): Promise<string> {
+  const now = Date.now();
+  // Throttle to at most once per 10 seconds to avoid notification spam
+  if (now - lastFocusGuardNotificationTime < 10000) {
+    return "throttled";
+  }
+  lastFocusGuardNotificationTime = now;
+
+  const notificationId = `focus-guard-${now}`;
+  const iconUrl = getNotificationIconUrl();
+  const title = `Focus Guard — ${options.limit} Tab Limit Reached`;
+  const message = `You're in active focus on "${options.taskTitle}". Tab limits keep you in flow without distraction.`;
+
+  return new Promise((resolve) => {
+    if (typeof chrome === "undefined" || !chrome.notifications?.create) {
+      resolve(notificationId);
+      return;
+    }
+
+    const notificationOptions: chrome.notifications.NotificationOptions<true> = {
+      type: "basic",
+      iconUrl,
+      title,
+      message,
+      buttons: [{ title: "Stay Focused" }],
+      priority: 2,
+    };
+
+    chrome.notifications.create(notificationId, notificationOptions, (createdId) => {
+      if (chrome.runtime?.lastError) {
+        chrome.notifications.create(
+          notificationId,
+          {
+            type: "basic",
+            iconUrl: FALLBACK_ICON_DATA_URL,
+            title,
+            message,
+            priority: 2,
+          },
+          (fallbackId) => resolve(fallbackId || notificationId),
+        );
+        return;
+      }
+      resolve(createdId || notificationId);
+    });
+  });
+}
+
+export async function showFocusGuardStartupNudge(options: {
+  taskTitle: string;
+  limit: number;
+  openCount: number;
+}): Promise<string> {
+  const notificationId = `focus-guard-startup-${Date.now()}`;
+  const iconUrl = getNotificationIconUrl();
+  const title = "Focus Guard Active";
+  const message = `You have ${options.openCount} tabs open for "${options.taskTitle}". The recommended limit is ${options.limit} tabs to eliminate tab sprawl.`;
+
+  return new Promise((resolve) => {
+    if (typeof chrome === "undefined" || !chrome.notifications?.create) {
+      resolve(notificationId);
+      return;
+    }
+
+    chrome.notifications.create(
+      notificationId,
+      {
+        type: "basic",
+        iconUrl,
+        title,
+        message,
+        priority: 1,
+      },
+      (createdId) => resolve(createdId || notificationId),
+    );
   });
 }
 
@@ -279,7 +378,7 @@ async function handleReflectAction(notificationId: string) {
   try {
     if (typeof chrome !== "undefined" && chrome.action?.setBadgeText) {
       await chrome.action.setBadgeText({ text: "!" });
-      await chrome.action.setBadgeBackgroundColor({ color: "#3b82f6" });
+      await chrome.action.setBadgeBackgroundColor({ color: "#27272a" });
     }
   } catch {
     // Ignore
@@ -324,6 +423,15 @@ if (typeof chrome !== "undefined" && chrome.notifications?.onButtonClicked) {
       return;
     }
 
+    if (notificationId.startsWith("focus-guard-")) {
+      try {
+        if (typeof chrome !== "undefined" && chrome.notifications?.clear) {
+          chrome.notifications.clear(notificationId);
+        }
+      } catch {}
+      return;
+    }
+
     if (notificationId.startsWith(CHECKIN_NOTIFICATION_PREFIX) || notificationId === LEGACY_NOTIFICATION_ID) {
       if (buttonIndex === 0) {
         handleReflectAction(notificationId);
@@ -339,6 +447,15 @@ if (typeof chrome !== "undefined" && chrome.notifications?.onClicked) {
   chrome.notifications.onClicked.addListener((notificationId) => {
     if (notificationId.startsWith("focus-target-")) {
       void handleFocusTargetAction(notificationId);
+      return;
+    }
+
+    if (notificationId.startsWith("focus-guard-")) {
+      try {
+        if (typeof chrome !== "undefined" && chrome.notifications?.clear) {
+          chrome.notifications.clear(notificationId);
+        }
+      } catch {}
       return;
     }
 

@@ -1,4 +1,5 @@
 import type { WorkSession } from "@repo/types";
+import type { SessionListQueryInput } from "@repo/validation";
 import { getDb } from "../../lib/prisma";
 import { wsManager } from "../websocket/server";
 
@@ -59,12 +60,55 @@ function serializeSession(session: {
   };
 }
 
-export async function listSessions(userId: string, window?: { from: Date; to: Date }) {
+export async function listSessions(
+  userId: string,
+  options?: SessionListQueryInput | { from: Date; to: Date },
+) {
+  const where: Record<string, unknown> = { userId };
+
+  if (options) {
+    if ("taskId" in options && options.taskId) {
+      where.taskId = options.taskId;
+    }
+
+    if ("search" in options && options.search) {
+      const term = options.search.trim();
+      if (term) {
+        where.OR = [
+          { notes: { contains: term, mode: "insensitive" } },
+          { task: { title: { contains: term, mode: "insensitive" } } },
+          { task: { goal: { title: { contains: term, mode: "insensitive" } } } },
+        ];
+      }
+    }
+
+    // Check if legacy pattern window format { from: Date, to: Date } without limit
+    if ("from" in options && options.from && "to" in options && options.to && !("limit" in options)) {
+      where.startedAt = { lt: options.to };
+      where.AND = [
+        {
+          OR: [{ endedAt: { gt: options.from } }, { endedAt: null }],
+        },
+      ];
+    } else {
+      if (options.from || options.to) {
+        const startedAtFilter: Record<string, Date> = {};
+        if (options.from) startedAtFilter.gte = options.from;
+        if (options.to) startedAtFilter.lte = options.to;
+        where.startedAt = startedAtFilter;
+      }
+    }
+  }
+
+  const limit =
+    options && "limit" in options && typeof options.limit === "number"
+      ? Math.min(Math.max(options.limit, 1), 500)
+      : options && "from" in options && "to" in options && !("limit" in options)
+      ? undefined
+      : 50;
+
   const sessions = await getDb().workSession.findMany({
-    where: {
-      userId,
-      ...(window ? { startedAt: { lt: window.to }, OR: [{ endedAt: { gt: window.from } }, { endedAt: null }] } : {}),
-    },
+    where,
     include: {
       task: {
         select: {
@@ -77,7 +121,7 @@ export async function listSessions(userId: string, window?: { from: Date; to: Da
       },
     },
     orderBy: [{ startedAt: "desc" }, { id: "asc" }],
-    ...(window ? {} : { take: 50 }),
+    ...(limit !== undefined ? { take: limit } : {}),
   });
   return sessions.map(serializeSession);
 }

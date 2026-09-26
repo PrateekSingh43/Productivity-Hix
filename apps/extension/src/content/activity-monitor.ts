@@ -119,6 +119,17 @@ chrome.runtime.onMessage.addListener((message: any) => {
 window.addEventListener("message", (event) => {
   if (event.data?.type === "PRODUCTIVEHIX_CLOSE_MODAL") {
     closeReflectionModal();
+  } else if (event.data?.type === "PRODUCTIVEHIX_SESSION_UPDATE") {
+    const { action, session } = event.data;
+    try {
+      if (action === "start" || action === "resume") {
+        chrome.runtime.sendMessage({ type: "session:started_local", session }).catch(() => {});
+      } else if (action === "pause") {
+        chrome.runtime.sendMessage({ type: "session:paused_local", session }).catch(() => {});
+      } else if (action === "end") {
+        chrome.runtime.sendMessage({ type: "session:ended_local" }).catch(() => {});
+      }
+    } catch {}
   }
 });
 
@@ -132,3 +143,4 @@ window.addEventListener(
   },
   { capture: true },
 );
+

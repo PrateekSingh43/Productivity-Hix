@@ -304,3 +304,18 @@ export function submitCheckIn(payload: CheckInCreateInput) {
     error?: string;
   }>;
 }
+
+export function getFocusGuardConfig() {
+  return chrome.runtime.sendMessage({ type: "get-focus-guard-config" }) as Promise<{
+    enabled: boolean;
+    limit: number;
+  }>;
+}
+
+export function updateFocusGuardConfig(config: { enabled?: boolean; limit?: number }) {
+  return chrome.runtime.sendMessage({ type: "update-focus-guard-config", config }) as Promise<{
+    success: boolean;
+    config: { enabled: boolean; limit: number };
+  }>;
+}
+

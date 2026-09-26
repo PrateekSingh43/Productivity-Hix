@@ -19,6 +19,14 @@ import type { DailyGoal, GoalOutcome, Task } from "@repo/types";
 import { formatProductiveDateLabel } from "@repo/types";
 import { OutcomeBadge, PriorityBadge } from "@shared/components/primitives/data-badge";
 
+export interface DraftSubTask {
+  title: string;
+  plannedDurationMinutes: number;
+  productiveDate?: string;
+  dueAt?: string | null;
+  priority?: "low" | "medium" | "high" | "urgent";
+}
+
 export interface DailyPlanViewProps {
   date: string;
   hasPlan: boolean;
@@ -30,7 +38,19 @@ export interface DailyPlanViewProps {
    */
   todayTaskCount?: number;
   isLoading?: boolean;
-  onSavePlan: (goals: Array<{ id?: string; title: string; order: number; outcome?: GoalOutcome | null; newTasks?: string[] }>) => Promise<void> | void;
+  onSavePlan: (goals: Array<{
+    id?: string;
+    title: string;
+    order: number;
+    outcome?: GoalOutcome | null;
+    newTasks?: Array<string | {
+      title: string;
+      plannedDurationMinutes: number;
+      productiveDate?: string;
+      dueAt?: string | null;
+      priority: "high" | "low" | "medium" | "urgent";
+    }>;
+  }>) => Promise<void> | void;
   onAssessOutcome?: (goalId: string, outcome: GoalOutcome) => Promise<void> | void;
   onToggleTask?: (task: Task) => Promise<void> | void;
   className?: string;
@@ -51,7 +71,7 @@ export function DailyPlanView({
   const [isEditing, setIsEditing] = useState(false);
   const [isAssessing, setIsAssessing] = useState(false);
   const [expandedGoals, setExpandedGoals] = useState<Record<string, boolean>>({});
-  const [draftGoals, setDraftGoals] = useState<Array<{ id?: string; title: string, newTasks: string[] }>>([]);
+  const [draftGoals, setDraftGoals] = useState<Array<{ id?: string; title: string; newTasks: DraftSubTask[] }>>([]);
 
   const formattedDate = date ? formatProductiveDateLabel(date) : "";
 
@@ -87,16 +107,30 @@ export function DailyPlanView({
   const addTaskToDraftGoal = (goalIndex: number) => {
     setDraftGoals((prev) => {
       const next = [...prev];
-      next[goalIndex] = { ...next[goalIndex], newTasks: [...(next[goalIndex].newTasks || []), ""] };
+      next[goalIndex] = {
+        ...next[goalIndex],
+        newTasks: [
+          ...(next[goalIndex].newTasks || []),
+          {
+            title: "",
+            plannedDurationMinutes: 60, // Default 1 hour
+            productiveDate: date || undefined,
+          },
+        ],
+      };
       return next;
     });
   };
 
-  const updateDraftGoalTask = (goalIndex: number, taskIndex: number, title: string) => {
+  const updateDraftGoalTask = (
+    goalIndex: number,
+    taskIndex: number,
+    updates: Partial<DraftSubTask>
+  ) => {
     setDraftGoals((prev) => {
       const next = [...prev];
       const tasks = [...(next[goalIndex].newTasks || [])];
-      tasks[taskIndex] = title;
+      tasks[taskIndex] = { ...tasks[taskIndex], ...updates };
       next[goalIndex] = { ...next[goalIndex], newTasks: tasks };
       return next;
     });
@@ -119,7 +153,15 @@ export function DailyPlanView({
         id: g.id, 
         title: g.title.trim(), 
         order: idx,
-        newTasks: (g.newTasks || []).filter(t => t.trim().length > 0)
+        newTasks: (g.newTasks || [])
+          .filter(t => t.title.trim().length > 0)
+          .map(t => ({
+            title: t.title.trim(),
+            plannedDurationMinutes: t.plannedDurationMinutes || 60,
+            productiveDate: t.productiveDate || date || undefined,
+            dueAt: t.dueAt || undefined,
+            priority: (t.priority || "medium") as "low" | "medium" | "high" | "urgent",
+          }))
       }));
     await onSavePlan(cleaned);
     setIsEditing(false);
@@ -205,35 +247,72 @@ export function DailyPlanView({
                 {/* Subtasks List */}
                 {g.newTasks && g.newTasks.length > 0 && (
                   <div className="ml-[36px] flex flex-col gap-2">
-                    {g.newTasks.map((taskTitle, tIdx) => (
-                      <div key={tIdx} className="flex items-center gap-2 group">
-                        <Circle size={10} className="text-text-muted shrink-0" />
-                        <input
-                          type="text"
-                          value={taskTitle}
-                          onChange={(e) => updateDraftGoalTask(idx, tIdx, e.target.value)}
-                          placeholder="Sub-task title..."
-                          className="flex-1 text-xs bg-bg-card border border-border-subtle rounded-md px-2.5 py-1.5 text-text-primary placeholder:text-text-muted focus-visible:outline-none focus-visible:border-text-muted transition-colors"
-                          autoFocus={tIdx === g.newTasks!.length - 1}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") {
-                              e.preventDefault();
-                              if (taskTitle.trim() === "") {
-                                removeDraftGoalTask(idx, tIdx);
-                                addDraftGoal();
-                              } else {
-                                addTaskToDraftGoal(idx);
+                    {g.newTasks.map((taskItem, tIdx) => (
+                      <div key={tIdx} className="flex flex-col sm:flex-row sm:items-center gap-2 p-2 rounded-lg bg-bg-secondary/40 border border-border-subtle group">
+                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                          <Circle size={10} className="text-text-muted shrink-0" />
+                          <input
+                            type="text"
+                            value={taskItem.title}
+                            onChange={(e) => updateDraftGoalTask(idx, tIdx, { title: e.target.value })}
+                            placeholder="Sub-task title..."
+                            className="flex-1 text-xs bg-transparent border-0 px-1 py-0.5 text-text-primary placeholder:text-text-muted focus-visible:outline-none focus-visible:ring-0"
+                            autoFocus={tIdx === g.newTasks!.length - 1}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                if (taskItem.title.trim() === "") {
+                                  removeDraftGoalTask(idx, tIdx);
+                                  addDraftGoal();
+                                } else {
+                                  addTaskToDraftGoal(idx);
+                                }
                               }
-                            }
-                          }}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => removeDraftGoalTask(idx, tIdx)}
-                          className="p-1.5 text-text-muted hover:text-rose-500 rounded hover:bg-bg-secondary transition-colors opacity-0 group-hover:opacity-100"
-                        >
-                          <X size={12} />
-                        </button>
+                            }}
+                          />
+                        </div>
+
+                        {/* Inline duration & due date controls */}
+                        <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                          {/* Duration Selector (Default 1h) */}
+                          <div className="flex items-center gap-1 bg-bg-card border border-border-subtle rounded px-2 py-0.5 text-[11px] text-text-secondary">
+                            <Clock size={11} className="text-text-muted shrink-0" />
+                            <select
+                              value={taskItem.plannedDurationMinutes}
+                              onChange={(e) => updateDraftGoalTask(idx, tIdx, { plannedDurationMinutes: Number(e.target.value) })}
+                              className="bg-transparent border-0 text-[11px] text-text-primary focus:outline-none cursor-pointer py-0.5"
+                              title="Estimated duration"
+                            >
+                              <option value={15}>15m</option>
+                              <option value={30}>30m</option>
+                              <option value={45}>45m</option>
+                              <option value={60}>1h (default)</option>
+                              <option value={90}>1.5h</option>
+                              <option value={120}>2h</option>
+                              <option value={180}>3h</option>
+                            </select>
+                          </div>
+
+                          {/* Due Date Selector (Default today) */}
+                          <div className="flex items-center gap-1 bg-bg-card border border-border-subtle rounded px-2 py-0.5 text-[11px] text-text-secondary">
+                            <input
+                              type="date"
+                              value={taskItem.productiveDate || date || ""}
+                              onChange={(e) => updateDraftGoalTask(idx, tIdx, { productiveDate: e.target.value })}
+                              className="bg-transparent border-0 text-[11px] text-text-primary focus:outline-none cursor-pointer font-mono"
+                              title="Productive Date / Due Date"
+                            />
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => removeDraftGoalTask(idx, tIdx)}
+                            className="p-1 text-text-muted hover:text-rose-500 rounded hover:bg-bg-secondary transition-colors"
+                            title="Remove subtask"
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>

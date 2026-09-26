@@ -1415,6 +1415,15 @@ function FocusView({
       if (!activeSession) return;
       const currentTaskTitle = task?.title;
       const elapsedMins = Math.max(1, Math.round(elapsedSec / 60));
+      const endingSessionId = activeSession.id;
+
+      // Pre-announce the end intent BEFORE the finish API call: the server
+      // broadcasts `session:ended` back to this client, and without this the
+      // background would raise a focus-ended notification even though the
+      // popup is already navigating to Reflect.
+      if (typeof chrome !== "undefined" && chrome.runtime?.sendMessage) {
+        chrome.runtime.sendMessage({ type: "session:ending_local", sessionId: endingSessionId }).catch(() => {});
+      }
 
       if (markDone && task) {
         try {
@@ -1426,7 +1435,7 @@ function FocusView({
       }
       await apiClient.finishSession(activeSession.id);
       if (typeof chrome !== "undefined" && chrome.runtime?.sendMessage) {
-        chrome.runtime.sendMessage({ type: "session:ended_local" }).catch(() => {});
+        chrome.runtime.sendMessage({ type: "session:ended_local", sessionId: endingSessionId }).catch(() => {});
       }
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });
       setShowEndDialog(false);

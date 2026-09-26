@@ -1,35 +1,67 @@
 import { apiFetch, jsonBody } from "@shared/api/client";
-import type { WorkSession, CreateSessionInput, UpdateSessionInput, CheckIn, CreateCheckInInput } from "../types";
+import type {
+  WorkSession,
+  CreateSessionInput,
+  UpdateSessionInput,
+  CheckIn,
+  CreateCheckInInput,
+  SessionListFilters,
+} from "../types";
 
-export function getSessions() {
-  return apiFetch<WorkSession[]>("/api/sessions");
+export function getSessions(filters?: SessionListFilters) {
+  const params = new URLSearchParams();
+  if (filters?.from) params.set("from", filters.from);
+  if (filters?.to) params.set("to", filters.to);
+  if (filters?.taskId) params.set("taskId", filters.taskId);
+  if (filters?.search) params.set("search", filters.search);
+  if (filters?.limit) params.set("limit", String(filters.limit));
+  const query = params.toString() ? `?${params.toString()}` : "";
+  return apiFetch<WorkSession[]>(`/api/sessions${query}`);
 }
 
 export function getActiveSession() {
   return apiFetch<WorkSession | null>("/api/sessions/active");
 }
 
-export function createSession(input: CreateSessionInput) {
-  return apiFetch<WorkSession>("/api/sessions", jsonBody(input));
+function notifyExtensionSessionUpdate(action: "start" | "pause" | "resume" | "end", session?: WorkSession | null) {
+  if (typeof window !== "undefined") {
+    try {
+      window.postMessage({ type: "PRODUCTIVEHIX_SESSION_UPDATE", action, session }, "*");
+    } catch {}
+  }
 }
 
-export function pauseSession(id: string) {
-  return apiFetch<WorkSession>(`/api/sessions/${id}/pause`, {
+export async function createSession(input: CreateSessionInput) {
+  const session = await apiFetch<WorkSession>("/api/sessions", jsonBody(input));
+  notifyExtensionSessionUpdate("start", session);
+  return session;
+}
+
+export async function pauseSession(id: string) {
+  const session = await apiFetch<WorkSession>(`/api/sessions/${id}/pause`, {
     method: "POST",
   });
+  notifyExtensionSessionUpdate("pause", session);
+  return session;
 }
 
-export function resumeSession(id: string) {
-  return apiFetch<WorkSession>(`/api/sessions/${id}/resume`, {
+export async function resumeSession(id: string) {
+  const session = await apiFetch<WorkSession>(`/api/sessions/${id}/resume`, {
     method: "POST",
   });
+  notifyExtensionSessionUpdate("resume", session);
+  return session;
 }
 
-export function updateSession(id: string, input: UpdateSessionInput) {
-  return apiFetch<WorkSession>(`/api/sessions/${id}`, {
+export async function updateSession(id: string, input: UpdateSessionInput) {
+  const session = await apiFetch<WorkSession>(`/api/sessions/${id}`, {
     ...jsonBody(input),
     method: "PATCH",
   });
+  if (input.endedAt) {
+    notifyExtensionSessionUpdate("end", session);
+  }
+  return session;
 }
 
 export function finishSession(id: string, notes?: string | null) {
@@ -39,10 +71,12 @@ export function finishSession(id: string, notes?: string | null) {
   });
 }
 
-export function deleteSession(id: string) {
-  return apiFetch<{ success: boolean }>(`/api/sessions/${id}`, {
+export async function deleteSession(id: string) {
+  const res = await apiFetch<{ success: boolean }>(`/api/sessions/${id}`, {
     method: "DELETE",
   });
+  notifyExtensionSessionUpdate("end", null);
+  return res;
 }
 
 export function getCheckIns() {

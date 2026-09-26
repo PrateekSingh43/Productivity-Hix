@@ -33,10 +33,17 @@ export class InactivityEngine {
       this.state = { ...this.state, ...data[STORAGE_KEY] };
     }
     
+    const defaults = {
+      devMode: true,
+      sleepScheduleEnabled: true,
+      sleepStart: "23:00",
+      sleepEnd: "07:00",
+      suppressCheckInsDuringFocus: true,
+    };
     if (data[SCHEDULER_STORAGE_KEY]) {
-      this.config = data[SCHEDULER_STORAGE_KEY];
+      this.config = { ...defaults, ...data[SCHEDULER_STORAGE_KEY] };
     } else {
-      this.config = { devMode: true, sleepScheduleEnabled: true, sleepStart: "23:00", sleepEnd: "07:00" };
+      this.config = defaults;
     }
     this.loaded = true;
   }
@@ -71,8 +78,72 @@ export class InactivityEngine {
     }
   }
 
+  private lastApiFocusCheckMs = 0;
+  private cachedApiFocusResult = false;
+
+  public clearFocusCache() {
+    this.lastApiFocusCheckMs = 0;
+    this.cachedApiFocusResult = false;
+  }
+
+  private async isFocusSessionActive(allowApiFetch = true): Promise<boolean> {
+    try {
+      const { focusGuard } = await import("./focus-guard");
+      if (focusGuard.isSessionActive()) {
+        return true;
+      }
+    } catch {}
+
+    try {
+      if (typeof chrome !== "undefined" && chrome.storage?.local) {
+        const stored = await chrome.storage.local.get("productivehix_active_focus_session");
+        const s = stored["productivehix_active_focus_session"];
+        if (s && !s.endedAt) {
+          import("./focus-guard").then(({ focusGuard }) => {
+            if (!focusGuard.isSessionActive()) {
+              focusGuard.setSession(s);
+            }
+          }).catch(() => {});
+          return true;
+        }
+      }
+    } catch {}
+
+    const now = Date.now();
+    if (allowApiFetch && now - this.lastApiFocusCheckMs >= 3000) {
+      this.lastApiFocusCheckMs = now;
+      try {
+        const { apiClient } = await import("../api/client");
+        const session = await apiClient.getActiveSession();
+        if (session && !session.endedAt) {
+          this.cachedApiFocusResult = true;
+          const { focusGuard } = await import("./focus-guard");
+          focusGuard.setSession(session);
+          return true;
+        } else {
+          this.cachedApiFocusResult = false;
+        }
+      } catch {
+        this.cachedApiFocusResult = false;
+      }
+    }
+
+    return this.cachedApiFocusResult;
+  }
+
   public async handleWakeupGap(gapMs: number, now: number) {
     if (!this.loaded) await this.loadState();
+    if (this.config.suppressCheckInsDuringFocus !== false) {
+      const focusActive = await this.isFocusSessionActive(true);
+      if (focusActive) {
+        console.log("[InactivityEngine] Suppressed wakeup gap review because focus session is active.");
+        this.state.lastActiveMs = now;
+        this.previousActivityState = "ACTIVE";
+        await this.saveState();
+        return;
+      }
+    }
+
     const thresholdMs = this.config.devMode ? 15000 : 15 * 60 * 1000;
     if (gapMs >= thresholdMs) {
       console.log(`[InactivityEngine] Wake-up gap detected: ${gapMs}ms. Triggering away review.`);
@@ -93,6 +164,15 @@ export class InactivityEngine {
         const thresholdMs = this.config.devMode ? 15000 : 15 * 60 * 1000;
         
         if (gapMs >= thresholdMs) {
+          if (this.config.suppressCheckInsDuringFocus !== false) {
+            const focusActive = await this.isFocusSessionActive(true);
+            if (focusActive) {
+              console.log("[InactivityEngine] Suppressed away review because focus session is active.");
+              this.state.lastActiveMs = now;
+              this.previousActivityState = activityState;
+              return;
+            }
+          }
           console.log(`[InactivityEngine] Away review triggered for gap: ${gapMs}ms`);
           await this.triggerAwayReviewNotification(gapMs);
         }
@@ -111,6 +191,14 @@ export class InactivityEngine {
     if (this.isTriggering) return;
     this.isTriggering = true;
     try {
+      if (this.config.suppressCheckInsDuringFocus !== false) {
+        const focusActive = await this.isFocusSessionActive(true);
+        if (focusActive) {
+          console.log("[InactivityEngine] Blocked away review notification: focus session is active.");
+          return;
+        }
+      }
+
       const gapTotalMinutes = Math.max(1, Math.round(gapMs / (1000 * 60)));
       let timeStr: string;
       if (gapTotalMinutes >= 60) {

@@ -1,13 +1,32 @@
 import dotenv from "dotenv";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 
 const configDirectory = path.dirname(fileURLToPath(import.meta.url));
-// The provider credentials intentionally live with the AI app. Loading this
-// explicit path keeps local API startup deterministic from both src/ and dist/.
-dotenv.config();
-dotenv.config({ path: path.resolve(configDirectory, "../../../ai/.env") });
+
+// Explicitly load configuration from multiple candidate locations
+// to ensure deterministic configuration whether run from root, apps/api, or dist.
+const envCandidatePaths = [
+  path.resolve(configDirectory, "../../.env"),
+  path.resolve(configDirectory, "../.env"),
+  path.resolve(configDirectory, ".env"),
+  path.resolve(process.cwd(), "apps/api/.env"),
+  path.resolve(process.cwd(), ".env"),
+  path.resolve(configDirectory, "../../../../packages/db/.env"),
+  path.resolve(configDirectory, "../../../packages/db/.env"),
+  path.resolve(process.cwd(), "packages/db/.env"),
+  path.resolve(configDirectory, "../../../ai/.env"),
+  path.resolve(configDirectory, "../../ai/.env"),
+  path.resolve(process.cwd(), "apps/ai/.env"),
+];
+
+for (const envPath of envCandidatePaths) {
+  if (fs.existsSync(envPath)) {
+    dotenv.config({ path: envPath, quiet: true });
+  }
+}
 
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),

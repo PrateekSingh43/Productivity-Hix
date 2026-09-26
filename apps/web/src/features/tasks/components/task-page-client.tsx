@@ -21,6 +21,13 @@ import {
 } from "lucide-react";
 import { resolveProductiveDay, type Task } from "@repo/types";
 import { format } from "date-fns";
+import {
+  compareByEffectiveDateAsc,
+  isBacklogTask,
+  isOverdueTask,
+  isTodayTask,
+  isUpcomingTask,
+} from "../lib/task-scopes";
 import { useTasksList } from "../api/queries";
 import { useSessionsList } from "@features/sessions";
 import { useTodayPlan } from "@features/today";
@@ -60,35 +67,16 @@ export function TaskPageClient() {
     return tasks.find((t) => t.id === selectedTask.id) || selectedTask;
   }, [tasks, selectedTask]);
 
-  // 1. Overdue / Missed tasks from previous days (strictly past deadlines, excluding items scheduled for today or later)
+  // 1. Overdue / Missed tasks from previous days (canonical scope: productive-day aware).
   const overdueTasks = useMemo(() => {
-    return tasks.filter((t) => {
-      if (t.status === "done" || t.status === "cancelled") return false;
-      // If the task has an active session, is linked to today's active goals, or is scheduled for today/future, it is NOT overdue!
-      if (t.hasActiveSession) return false;
-      if (t.productiveDate && t.productiveDate >= todayDate) return false;
-      if (t.goalId && todayGoalIds.has(t.goalId)) return false;
-
-      if (t.dueAt) {
-        const dueDateStr = format(new Date(t.dueAt), "yyyy-MM-dd");
-        return dueDateStr < todayDate;
-      }
-      return Boolean(t.productiveDate && t.productiveDate < todayDate);
-    });
+    return tasks.filter((t) => isOverdueTask(t, todayDate, todayGoalIds));
   }, [tasks, todayDate, todayGoalIds]);
 
-  // 2. Tasks belonging specifically to Today (cancelled tasks are never actionable)
+  // 2. Tasks belonging specifically to Today (canonical scope; cancelled never actionable).
   const todayTasks = useMemo(() => {
     return tasks.filter((t) => {
       if (t.status === "cancelled") return false;
-      if (t.hasActiveSession) return true;
-      if (t.goalId && todayGoalIds.has(t.goalId)) return true;
-      if (t.productiveDate === todayDate) return true;
-      if (t.dueAt) {
-        const dueDateStr = format(new Date(t.dueAt), "yyyy-MM-dd");
-        if (dueDateStr === todayDate) return true;
-      }
-      return false;
+      return isTodayTask(t, todayDate, todayGoalIds);
     });
   }, [tasks, todayDate, todayGoalIds]);
 
@@ -128,15 +116,21 @@ export function TaskPageClient() {
     return todayTasks.filter((t) => t.hasActiveSession || t.status === "in_progress");
   }, [todayTasks]);
 
-  // 3. Backlog tasks: Incomplete tasks not assigned to today or overdue (unscheduled or future scheduled)
+  // 3. Upcoming vs Backlog split (Todoist Upcoming / Linear backlog semantics):
+  // Upcoming = future-scheduled or future-due, sorted ascending so Sep 28
+  // surfaces before Sep 30. Backlog = genuinely unscheduled (no date at all).
+  const upcomingTasks = useMemo(() => {
+    return tasks
+      .filter((t) => isUpcomingTask(t, todayDate, todayGoalIds))
+      .sort(compareByEffectiveDateAsc);
+  }, [tasks, todayDate, todayGoalIds]);
+
   const backlogTasks = useMemo(() => {
-    return tasks.filter((t) => {
-      if (t.status === "done" || t.status === "cancelled") return false;
-      if (todayTasks.some((tt) => tt.id === t.id)) return false;
-      if (overdueTasks.some((ot) => ot.id === t.id)) return false;
-      return true;
-    });
-  }, [tasks, todayTasks, overdueTasks]);
+    return tasks.filter((t) => isBacklogTask(t, todayDate, todayGoalIds));
+  }, [tasks, todayDate, todayGoalIds]);
+
+  // Legacy combined count (upcoming + unscheduled) for the tab badge.
+  const backlogTotalCount = upcomingTasks.length + backlogTasks.length;
 
   // Planned time for today's incomplete tasks
   const todayPlannedMinutes = useMemo(() => {
@@ -269,7 +263,7 @@ export function TaskPageClient() {
             {filterTab === "history"
               ? `${historyTotalTasksCount} tasks`
               : filterTab === "backlog"
-              ? `${backlogTasks.length} tasks`
+              ? `${backlogTotalCount} tasks (${upcomingTasks.length} upcoming)`
               : formatHoursMinutes(todayPlannedMinutes)}
           </div>
         </div>
@@ -290,7 +284,7 @@ export function TaskPageClient() {
             {filterTab === "overdue"
               ? "Overdue from Past"
               : filterTab === "backlog"
-              ? "Unscheduled / Future"
+              ? "Upcoming / Unscheduled"
               : filterTab === "history"
               ? "Missed / Incomplete"
               : "Incomplete Today"}
@@ -305,7 +299,7 @@ export function TaskPageClient() {
             {filterTab === "overdue"
               ? overdueTasks.length
               : filterTab === "backlog"
-              ? backlogTasks.length
+              ? backlogTotalCount
               : filterTab === "history"
               ? historyMissedTasksCount
               : todayTodos.length}
@@ -394,7 +388,7 @@ export function TaskPageClient() {
           >
             <Inbox size={13} className="shrink-0" />
             <span>Backlog</span>
-            <span className="text-[11px] font-mono opacity-80">({backlogTasks.length})</span>
+            <span className="text-[11px] font-mono opacity-80">({backlogTotalCount})</span>
           </button>
 
           {/* VIEW 4: HISTORY / LOGBOOK */}
@@ -661,7 +655,7 @@ export function TaskPageClient() {
           )}
 
           {/* ========================================================= */}
-          {/* VIEW 3: BACKLOG & UNSCHEDULED */}
+          {/* VIEW 3: UPCOMING + BACKLOG (split, Todoist/Linear semantics) */}
           {/* ========================================================= */}
           {filterTab === "backlog" && (
             <Section>
@@ -669,19 +663,20 @@ export function TaskPageClient() {
                 <div>
                   <h3 className="text-sm font-semibold text-text-primary flex items-center gap-2">
                     <Inbox size={15} className="text-text-primary" />
-                    <span>Backlog & Unscheduled Tasks</span>
+                    <span>Upcoming & Backlog</span>
                   </h3>
                   <p className="text-xs text-text-muted mt-0.5">
-                    Ideas, upcoming projects, and tasks waiting for an intentional scheduled day
+                    Upcoming: scheduled or due on a future day (auto-promotes to Today on that day).
+                    Backlog: unscheduled ideas with no date.
                   </p>
                 </div>
 
                 <span className="text-xs font-mono text-text-muted shrink-0 self-start sm:self-auto">
-                  {backlogTasks.length} {backlogTasks.length === 1 ? "task" : "tasks"}
+                  {backlogTotalCount} {backlogTotalCount === 1 ? "task" : "tasks"} · {upcomingTasks.length} upcoming · {backlogTasks.length} unscheduled
                 </span>
               </div>
 
-              {backlogTasks.length === 0 ? (
+              {backlogTotalCount === 0 ? (
                 <div className="rounded-xl border border-dashed border-border-subtle bg-bg-card p-12 text-center space-y-2">
                   <h3 className="text-base font-semibold text-text-primary">Backlog is empty</h3>
                   <p className="text-xs sm:text-sm text-text-muted max-w-sm mx-auto">
@@ -689,15 +684,64 @@ export function TaskPageClient() {
                   </p>
                 </div>
               ) : (
-                <div className="rounded-xl border border-border-subtle bg-bg-card divide-y divide-border-subtle overflow-hidden">
-                  {backlogTasks.map((task) => (
-                    <TaskItem
-                      key={task.id}
-                      task={task}
-                      onSelect={(t) => setSelectedTask(t)}
-                      onRescheduleToday={handleRescheduleToToday}
-                    />
-                  ))}
+                <div className="space-y-6">
+                  {/* Upcoming: future-dated, sorted ascending */}
+                  <div>
+                    <div className="flex items-center gap-2 mb-2.5">
+                      <Calendar size={13} className="text-text-primary" />
+                      <span className="text-xs font-semibold text-text-primary">
+                        Upcoming — scheduled for a future day
+                      </span>
+                      <span className="text-xs font-mono text-text-muted">
+                        ({upcomingTasks.length})
+                      </span>
+                    </div>
+                    {upcomingTasks.length === 0 ? (
+                      <p className="text-xs text-text-muted px-1">
+                        No future-scheduled tasks. Set a Custom Date in Quick Add to park work for Sep 28 / Sep 30 here.
+                      </p>
+                    ) : (
+                      <div className="rounded-xl border border-border-subtle bg-bg-card divide-y divide-border-subtle overflow-hidden">
+                        {upcomingTasks.map((task) => (
+                          <TaskItem
+                            key={task.id}
+                            task={task}
+                            onSelect={(t) => setSelectedTask(t)}
+                            onRescheduleToday={handleRescheduleToToday}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Backlog: genuinely unscheduled */}
+                  <div>
+                    <div className="flex items-center gap-2 mb-2.5">
+                      <Inbox size={13} className="text-text-muted" />
+                      <span className="text-xs font-semibold text-text-primary">
+                        Backlog — unscheduled ideas
+                      </span>
+                      <span className="text-xs font-mono text-text-muted">
+                        ({backlogTasks.length})
+                      </span>
+                    </div>
+                    {backlogTasks.length === 0 ? (
+                      <p className="text-xs text-text-muted px-1">
+                        No unscheduled ideas. Everything pending has a date.
+                      </p>
+                    ) : (
+                      <div className="rounded-xl border border-border-subtle bg-bg-card divide-y divide-border-subtle overflow-hidden">
+                        {backlogTasks.map((task) => (
+                          <TaskItem
+                            key={task.id}
+                            task={task}
+                            onSelect={(t) => setSelectedTask(t)}
+                            onRescheduleToday={handleRescheduleToToday}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </Section>

@@ -6,16 +6,19 @@
   <title>Focus Guard — ProductiveHix</title>
   <style>
     :root {
-      --bg-canvas: #07080d;
-      --bg-card: #0f121d;
-      --border: #1a2030;
-      --border-focus: #3b4562;
-      --text-main: #f8fafc;
-      --text-muted: #94a3b8;
-      --accent: #6366f1;
-      --accent-hover: #4f46e5;
-      --accent-glow: rgba(99, 102, 241, 0.2);
-      --amber: #f59e0b;
+      --bg-canvas: #09090b;
+      --bg-card: #121217;
+      --border: #23232d;
+      --border-focus: #424250;
+      --text-main: #f7f7fb;
+      --text-muted: #858493;
+      --btn-primary-bg: #f7f7fb;
+      --btn-primary-text: #09090b;
+      --btn-primary-hover-bg: #ffffff;
+      --badge-bg: rgba(255, 255, 255, 0.06);
+      --badge-border: rgba(255, 255, 255, 0.14);
+      --badge-color: #f7f7fb;
+      --amber: #f6c76c;
     }
 
     * {
@@ -43,7 +46,7 @@
       border: 1px solid var(--border);
       border-radius: 16px;
       padding: 32px;
-      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6), 0 0 80px var(--accent-glow);
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.04);
       text-align: center;
       animation: fadeIn 0.2s ease-out;
     }
@@ -60,9 +63,9 @@
       width: 52px;
       height: 52px;
       border-radius: 14px;
-      background: rgba(99, 102, 241, 0.12);
-      border: 1px solid rgba(99, 102, 241, 0.3);
-      color: var(--accent);
+      background: var(--badge-bg);
+      border: 1px solid var(--badge-border);
+      color: var(--badge-color);
       margin-bottom: 20px;
     }
 
@@ -71,7 +74,7 @@
       text-transform: uppercase;
       letter-spacing: 0.08em;
       font-weight: 700;
-      color: var(--accent);
+      color: var(--text-muted);
       margin-bottom: 6px;
     }
 
@@ -89,8 +92,8 @@
       gap: 6px;
       font-size: 12px;
       color: var(--amber);
-      background: rgba(245, 158, 11, 0.1);
-      border: 1px solid rgba(245, 158, 11, 0.25);
+      background: rgba(246, 199, 108, 0.10);
+      border: 1px solid rgba(246, 199, 108, 0.25);
       border-radius: 8px;
       padding: 6px 12px;
       margin: 12px 0 16px;
@@ -140,20 +143,21 @@
     }
 
     .btn-primary {
-      background: var(--accent);
-      color: white;
-      border: none;
+      background: var(--btn-primary-bg);
+      color: var(--btn-primary-text);
+      border: 1px solid rgba(255, 255, 255, 0.88);
       padding: 12px 20px;
       font-size: 13.5px;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.28);
     }
 
     .btn-primary:hover {
-      background: var(--accent-hover);
+      background: var(--btn-primary-hover-bg);
       transform: translateY(-1px);
     }
 
     .btn-secondary {
-      background: transparent;
+      background: rgba(255, 255, 255, 0.04);
       color: var(--text-main);
       border: 1px solid var(--border);
       padding: 10px 18px;
@@ -162,7 +166,7 @@
 
     .btn-secondary:hover {
       border-color: var(--border-focus);
-      background: rgba(255, 255, 255, 0.04);
+      background: rgba(255, 255, 255, 0.08);
     }
 
     .btn-ghost {
@@ -190,7 +194,7 @@
     </div>
 
     <div class="kicker">Focus Guard Active</div>
-    <h1>3 Tab Limit Reached</h1>
+    <h1 id="guard-heading">Tab Limit Reached</h1>
 
     <div class="session-banner" id="session-box">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -200,7 +204,7 @@
       <span id="session-title">Active Focus Session</span>
     </div>
 
-    <p class="description">
+    <p class="description" id="guard-desc">
       You are in an intentional focus block. To maintain high cognitive momentum and eliminate tab sprawl, your browser is limited to 3 active tabs.
     </p>
 

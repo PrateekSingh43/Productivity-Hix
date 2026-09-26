@@ -196,18 +196,19 @@ export function SettingsView() {
                   onClick={() => {
                     updatePreferences.mutate({ quietHoursEnabled: !quietEnabled });
                   }}
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-all cursor-pointer ${
+                  className={`inline-flex items-center justify-center min-w-[54px] gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all cursor-pointer ${
                     quietEnabled
-                      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-500 font-semibold"
+                      ? "border-border-hover bg-bg-active text-text-primary"
                       : "border-border-default bg-bg-secondary text-text-muted hover:text-text-primary"
                   }`}
+                  aria-label="Toggle rest hours"
                 >
                   <span
                     className={`w-1.5 h-1.5 rounded-full ${
-                      quietEnabled ? "bg-emerald-500" : "bg-text-muted"
+                      quietEnabled ? "bg-text-primary" : "bg-text-muted"
                     }`}
                   />
-                  {quietEnabled ? "Active" : "Disabled"}
+                  {quietEnabled ? "ON" : "OFF"}
                 </button>
               </div>
             </div>
@@ -271,10 +272,10 @@ export function SettingsView() {
             <div className="px-5 py-3.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div>
                 <span className="text-xs font-medium text-text-primary block">
-                  Silence Check-ins During Focus Mode
+                  Silence Check-ins During Focus
                 </span>
                 <p className="text-[11px] text-text-muted mt-0.5 max-w-md leading-relaxed">
-                  Automatically suppress standard 50-minute periodic check-ins while a Deliberate Focus session is active.
+                  Turn ON to silence normal notifications during focus mode.
                 </p>
               </div>
               <div className="shrink-0">
@@ -285,18 +286,19 @@ export function SettingsView() {
                       suppressCheckInsDuringFocus: !suppressFocusCheckIns,
                     });
                   }}
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-all cursor-pointer ${
+                  className={`inline-flex items-center justify-center min-w-[54px] gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all cursor-pointer ${
                     suppressFocusCheckIns
-                      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-500 font-semibold"
+                      ? "border-border-hover bg-bg-active text-text-primary"
                       : "border-border-default bg-bg-secondary text-text-muted hover:text-text-primary"
                   }`}
+                  aria-label="Toggle silence check-ins during focus"
                 >
                   <span
                     className={`w-1.5 h-1.5 rounded-full ${
-                      suppressFocusCheckIns ? "bg-emerald-500" : "bg-text-muted"
+                      suppressFocusCheckIns ? "bg-text-primary" : "bg-text-muted"
                     }`}
                   />
-                  {suppressFocusCheckIns ? "Active" : "Disabled"}
+                  {suppressFocusCheckIns ? "ON" : "OFF"}
                 </button>
               </div>
             </div>

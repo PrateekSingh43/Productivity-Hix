@@ -34,11 +34,11 @@ export function InactivityView({
       if (!reason.trim()) return;
       return submitCheckIn({
         eventType: "AWAY_REVIEW",
-        activityAssessment: "AWAY",
+        activityAssessment: "break",
         note: reason.trim(),
         reasons: [],
-        questionVersion: "",
-        source: ""
+        questionVersion: "v1",
+        source: "extension_away_review",
       });
     },
     onSuccess: () => {

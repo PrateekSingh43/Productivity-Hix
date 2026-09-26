@@ -17,6 +17,8 @@ import {
   apiClient,
   updateSchedulerConfig,
   triggerCheckInNotification,
+  getFocusGuardConfig,
+  updateFocusGuardConfig,
   type ExtensionStatus,
 } from "../api/client";
 import {
@@ -81,6 +83,10 @@ export function SettingsView({ status, onBack, onRefresh }: SettingsViewProps) {
   const [customValue, setCustomValue] = useState(10);
   const [customUnit, setCustomUnit] = useState<"sec" | "min">("sec");
 
+  // Focus Guard settings
+  const [focusGuardEnabled, setFocusGuardEnabled] = useState(true);
+  const [focusGuardLimit, setFocusGuardLimit] = useState(3);
+
   // Live countdown state
   const [countdown, setCountdown] = useState<number | null>(null);
   const [testDispatched, setTestDispatched] = useState(false);
@@ -109,6 +115,14 @@ export function SettingsView({ status, onBack, onRefresh }: SettingsViewProps) {
         });
       })
       .catch((err) => console.error("Failed to load user preferences in extension:", err));
+
+    getFocusGuardConfig()
+      .then((cfg) => {
+        if (!mounted || !cfg) return;
+        setFocusGuardEnabled(cfg.enabled ?? true);
+        setFocusGuardLimit(cfg.limit ?? 3);
+      })
+      .catch(() => {});
 
     return () => {
       mounted = false;
@@ -230,6 +244,24 @@ export function SettingsView({ status, onBack, onRefresh }: SettingsViewProps) {
     } finally {
       setTimeout(() => setTestDispatched(false), 3000);
       onRefresh();
+    }
+  };
+
+  const handleToggleFocusGuard = async (enabled: boolean) => {
+    setFocusGuardEnabled(enabled);
+    try {
+      await updateFocusGuardConfig({ enabled });
+    } catch (err) {
+      console.error("Failed to update focus guard enabled state:", err);
+    }
+  };
+
+  const handleSelectFocusGuardLimit = async (limit: number) => {
+    setFocusGuardLimit(limit);
+    try {
+      await updateFocusGuardConfig({ limit });
+    } catch (err) {
+      console.error("Failed to update focus guard limit:", err);
     }
   };
 
@@ -635,13 +667,14 @@ export function SettingsView({ status, onBack, onRefresh }: SettingsViewProps) {
         <div className="setting-row">
           <div className="setting-copy">
             <strong>Hourly Reflection</strong>
-            <span>Prompt for quick check-in after work blocks</span>
+            <span>Prompt for quick check-in after continuous work blocks</span>
           </div>
           <button
             type="button"
             className={`secondary-button ${!checkInsPaused ? "is-active" : ""}`}
             style={{
-              padding: "3px 8px",
+              padding: "3px 12px",
+              minWidth: 42,
               fontSize: 10,
               fontWeight: 600,
               background: !checkInsPaused ? "var(--bg-active)" : "var(--bg-subtle)",
@@ -655,20 +688,50 @@ export function SettingsView({ status, onBack, onRefresh }: SettingsViewProps) {
             }}
             aria-label="Toggle hourly reflection"
           >
-            {!checkInsPaused ? "Enabled" : "Paused"}
+            {!checkInsPaused ? "ON" : "OFF"}
           </button>
         </div>
 
         <div className="setting-row">
           <div className="setting-copy">
-            <strong>After-Focus Reflection Notification</strong>
-            <span>Send notification to prompt reflection when a focus session ends</span>
+            <strong>Silence Check-ins During Focus</strong>
+            <span>Turn ON to silence normal notifications during focus mode</span>
+          </div>
+          <button
+            type="button"
+            className={`secondary-button ${suppressDuringFocus ? "is-active" : ""}`}
+            style={{
+              padding: "3px 12px",
+              minWidth: 42,
+              fontSize: 10,
+              fontWeight: 600,
+              background: suppressDuringFocus ? "var(--bg-active)" : "var(--bg-subtle)",
+              borderColor: suppressDuringFocus ? "var(--border-hover)" : "var(--border-default)",
+              color: suppressDuringFocus ? "var(--text-primary)" : "var(--text-muted)",
+            }}
+            onClick={() => {
+              const newVal = !suppressDuringFocus;
+              setSuppressDuringFocus(newVal);
+              void saveSchedulerSetting({ suppressCheckInsDuringFocus: newVal });
+              void apiClient.updateUserPreferences({ suppressCheckInsDuringFocus: newVal });
+            }}
+            aria-label="Toggle silence check-ins during focus"
+          >
+            {suppressDuringFocus ? "ON" : "OFF"}
+          </button>
+        </div>
+
+        <div className="setting-row">
+          <div className="setting-copy">
+            <strong>Prompt Reflection When Focus Ends</strong>
+            <span>Send a check-in prompt when your focus session completes</span>
           </div>
           <button
             type="button"
             className={`secondary-button ${afterFocusReflection ? "is-active" : ""}`}
             style={{
-              padding: "3px 8px",
+              padding: "3px 12px",
+              minWidth: 42,
               fontSize: 10,
               fontWeight: 600,
               background: afterFocusReflection ? "var(--bg-active)" : "var(--bg-subtle)",
@@ -682,35 +745,7 @@ export function SettingsView({ status, onBack, onRefresh }: SettingsViewProps) {
             }}
             aria-label="Toggle after focus reflection"
           >
-            {afterFocusReflection ? "Enabled" : "Disabled"}
-          </button>
-        </div>
-
-        <div className="setting-row">
-          <div className="setting-copy">
-            <strong>Silence During Focus</strong>
-            <span>Hold 50m check-ins while a focus session is active</span>
-          </div>
-          <button
-            type="button"
-            className={`secondary-button ${suppressDuringFocus ? "is-active" : ""}`}
-            style={{
-              padding: "3px 8px",
-              fontSize: 10,
-              fontWeight: 600,
-              background: suppressDuringFocus ? "var(--bg-active)" : "var(--bg-subtle)",
-              borderColor: suppressDuringFocus ? "var(--border-hover)" : "var(--border-default)",
-              color: suppressDuringFocus ? "var(--text-primary)" : "var(--text-muted)",
-            }}
-            onClick={() => {
-              const newVal = !suppressDuringFocus;
-              setSuppressDuringFocus(newVal);
-              void saveSchedulerSetting({ suppressCheckInsDuringFocus: newVal });
-              void apiClient.updateUserPreferences({ suppressCheckInsDuringFocus: newVal });
-            }}
-            aria-label="Toggle silence during focus"
-          >
-            {suppressDuringFocus ? "Enabled" : "Disabled"}
+            {afterFocusReflection ? "ON" : "OFF"}
           </button>
         </div>
 
@@ -845,6 +880,83 @@ export function SettingsView({ status, onBack, onRefresh }: SettingsViewProps) {
           </div>
           <span style={{ fontSize: 10.5, color: "var(--text-muted)" }}>5 to 180 min</span>
         </div>
+      </section>
+
+      {/* 6. FOCUS GUARD (TAB LIMIT) */}
+      <section className="settings-card">
+        <div style={{ padding: "8px 0 4px", display: "flex", alignItems: "center", gap: 6 }}>
+          <ShieldCheck size={13} style={{ color: "var(--text-muted)" }} />
+          <span className="section-kicker">
+            FOCUS GUARD (TAB LIMIT)
+          </span>
+        </div>
+
+        <div className="setting-row">
+          <div className="setting-copy">
+            <strong>Tab Limit Intervention</strong>
+            <span>Prevent tab sprawl and distraction during active focus blocks</span>
+          </div>
+          <button
+            type="button"
+            className={`secondary-button ${focusGuardEnabled ? "is-active" : ""}`}
+            style={{
+              padding: "3px 8px",
+              fontSize: 10,
+              fontWeight: 600,
+              background: focusGuardEnabled ? "var(--bg-active)" : "var(--bg-subtle)",
+              borderColor: focusGuardEnabled ? "var(--border-hover)" : "var(--border-default)",
+              color: focusGuardEnabled ? "var(--text-primary)" : "var(--text-muted)",
+            }}
+            onClick={() => void handleToggleFocusGuard(!focusGuardEnabled)}
+            aria-label="Toggle focus guard"
+          >
+            {focusGuardEnabled ? "Enabled" : "Disabled"}
+          </button>
+        </div>
+
+        {focusGuardEnabled && (
+          <div
+            className="setting-row"
+            style={{
+              flexDirection: "column",
+              alignItems: "stretch",
+              padding: "8px 0",
+              minHeight: "auto",
+              gap: 6,
+            }}
+          >
+            <div className="setting-copy">
+              <strong>Tab Limit</strong>
+              <span>Opening tabs beyond this limit redirects to the Focus Guard screen</span>
+            </div>
+
+            <div style={{ display: "flex", gap: 4, marginTop: 4 }}>
+              {[
+                { label: "3 Tabs (Strict)", value: 3 },
+                { label: "4 Tabs (Balanced)", value: 4 },
+                { label: "5 Tabs (Relaxed)", value: 5 },
+              ].map((opt) => {
+                const isSelected = focusGuardLimit === opt.value;
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    className={`filter-toggle ${isSelected ? "active" : ""}`}
+                    onClick={() => void handleSelectFocusGuardLimit(opt.value)}
+                    style={{
+                      flex: 1,
+                      marginTop: 0,
+                      padding: "6px 2px",
+                      fontSize: 10,
+                    }}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </section>
 
       {/* 6. PRIVACY SETTINGS */}

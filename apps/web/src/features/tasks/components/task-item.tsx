@@ -1,8 +1,10 @@
 "use client";
 
 import { CheckCircle2, Circle, Clock, Play, Square, ChevronRight, Edit3, Target, Calendar, RotateCcw } from "lucide-react";
-import { format, isBefore, startOfDay } from "date-fns";
+import { format } from "date-fns";
 import type { Task } from "@repo/types";
+import { resolveProductiveDay } from "@repo/types";
+import { dueDateKey } from "../lib/task-scopes";
 import { useUpdateTaskMutation } from "../api/mutations";
 import {
   useStartTaskSessionMutation,
@@ -65,22 +67,26 @@ export function TaskItem({ task, onSelect, isPrioritySection, onRescheduleToday 
     return `${h}h ${m}m`;
   };
 
-  const todayStr = format(new Date(), "yyyy-MM-dd");
+  // Productive-day aware badges: due dates resolve through the same
+  // productive-day boundary as `productiveDate` so 00:30 deadlines with a
+  // 04:00 boundary still belong to the previous productive day.
+  const todayStr = resolveProductiveDay(new Date());
+  const dueKey = dueDateKey(task.dueAt);
   const isScheduledToday = task.productiveDate === todayStr;
   const isRollover =
     !isDone &&
     Boolean(
       task.productiveDate &&
         task.productiveDate >= todayStr &&
-        task.dueAt &&
-        isBefore(new Date(task.dueAt), startOfDay(new Date()))
+        dueKey &&
+        dueKey < todayStr
     );
 
   const isOverdue =
     !isDone &&
     !isRollover &&
-    (task.dueAt
-      ? isBefore(new Date(task.dueAt), startOfDay(new Date()))
+    (dueKey
+      ? dueKey < todayStr
       : Boolean(task.productiveDate && task.productiveDate < todayStr));
 
   const displayDate = task.dueAt

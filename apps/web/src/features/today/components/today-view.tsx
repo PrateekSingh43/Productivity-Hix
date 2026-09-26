@@ -36,6 +36,7 @@ import { useSavePlan, useUpdateGoalOutcome } from "../api/mutations";
 import { useLiveTelemetry } from "@features/timeline";
 import { useActivitySummary } from "@features/dashboard";
 import { resolveProductiveDay, formatProductiveDateLabel, type Task } from "@repo/types";
+import { isOverdueTask, isTodayTask, resolveTargetDate } from "@features/tasks";
 import { useQueryClient } from "@tanstack/react-query";
 
 export function TodayView() {
@@ -82,30 +83,18 @@ export function TodayView() {
   const goals = plan?.goals ?? [];
   const independentTasks = plan?.independentTasks ?? [];
 
-  // Date context
+  // Date context (canonical scope helpers keep Today/Tasks/Home identical).
   const localTodayDate = resolveProductiveDay(new Date());
-  const targetDate = plan?.date && plan.date >= localTodayDate ? plan.date : localTodayDate;
+  const targetDate = resolveTargetDate(plan?.date, localTodayDate);
   const dateFormatted = formatProductiveDateLabel(targetDate);
+  const goalIdSet = React.useMemo(() => new Set(goals.map((g) => g.id)), [goals]);
 
   const rawTasks = tasksQuery.data ?? [];
 
   // Overdue / Missed tasks from previous days
   const overdueTasks = React.useMemo(() => {
-    return rawTasks.filter((t) => {
-      if (t.status === "done" || t.status === "cancelled") return false;
-      // Active session or today's goal always surfaces in Today, not in overdue rollover prompt
-      if (t.hasActiveSession) return false;
-      if (goals.some((g) => g.id === t.goalId)) return false;
-      // If task is scheduled for targetDate or later, it is handled in Today or future
-      if (t.productiveDate && t.productiveDate >= targetDate) return false;
-
-      if (t.dueAt) {
-        const dueDateStr = format(new Date(t.dueAt), "yyyy-MM-dd");
-        return dueDateStr < targetDate;
-      }
-      return Boolean(t.productiveDate && t.productiveDate < targetDate);
-    });
-  }, [rawTasks, targetDate, goals]);
+    return rawTasks.filter((t) => isOverdueTask(t, targetDate, goalIdSet));
+  }, [rawTasks, targetDate, goalIdSet]);
 
   // Tasks belonging specifically to Today (cancelled tasks are never actionable here)
   const tasks = React.useMemo(() => {
@@ -113,25 +102,14 @@ export function TodayView() {
     return rawTasks
       .filter((t) => {
         if (t.status === "cancelled") return false;
-        // Active session always surfaces in Today
-        if (t.hasActiveSession) return true;
-        // Belongs to one of today's goals
-        if (goals.some((g) => g.id === t.goalId)) return true;
-        // Specifically assigned to today's productive day
-        if (t.productiveDate === targetDate) return true;
-        // Due today
-        if (t.dueAt) {
-          const dueDateStr = format(new Date(t.dueAt), "yyyy-MM-dd");
-          if (dueDateStr === targetDate) return true;
-        }
-        return false;
+        return isTodayTask(t, targetDate, goalIdSet);
       })
       .sort((a, b) => {
         const pDiff = (priorityWeight[b.priority || "none"] || 0) - (priorityWeight[a.priority || "none"] || 0);
         if (pDiff !== 0) return pDiff;
         return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
       });
-  }, [rawTasks, targetDate, goals]);
+  }, [rawTasks, targetDate, goalIdSet]);
 
   // Handler to roll over overdue tasks to today
   const handleRollOverOverdue = async () => {

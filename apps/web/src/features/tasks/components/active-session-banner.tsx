@@ -45,11 +45,11 @@ export function ActiveSessionBanner({ sessions, tasks, onSelectTask }: ActiveSes
   const isPaused = Boolean(activeSession?.isPaused);
   const baseDuration = activeSession?.durationSeconds ?? 0;
 
-  const elapsedSeconds = !activeSession
-    ? 0
-    : isPaused
-      ? baseDuration
-      : baseDuration + Math.max(0, Math.floor((now - new Date(activeSession.startedAt).getTime()) / 1000));
+  const startMs = Date.parse(activeSession?.lastResumedAt ?? activeSession?.startedAt ?? "");
+  const currentSegment = !isPaused && Number.isFinite(startMs)
+    ? Math.max(0, Math.floor((now - startMs) / 1000))
+    : 0;
+  const elapsedSeconds = !activeSession ? 0 : baseDuration + currentSegment;
 
   const targetDurationMinutes =
     activeSession?.targetDurationMinutes ??
@@ -97,7 +97,7 @@ export function ActiveSessionBanner({ sessions, tasks, onSelectTask }: ActiveSes
     <div className="rounded-xl border border-border-strong bg-bg-secondary p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 animate-in fade-in slide-in-from-top-2 duration-300">
       <div className="flex items-center gap-3.5 min-w-0">
         <div className="h-10 w-10 rounded-full bg-bg-secondary border border-border-strong flex items-center justify-center text-text-primary shrink-0">
-          <Activity size={18} className={isPaused ? "text-amber-500" : "animate-pulse text-emerald-500"} />
+          <Activity size={18} className={isPaused ? "text-amber-500" : "animate-pulse text-text-primary"} />
         </div>
 
         <div className="min-w-0 space-y-0.5">
@@ -105,9 +105,9 @@ export function ActiveSessionBanner({ sessions, tasks, onSelectTask }: ActiveSes
             <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium border ${
               isPaused
                 ? "bg-amber-500/15 border-amber-500/30 text-amber-600 dark:text-amber-400"
-                : "bg-emerald-500/15 border-emerald-500/30 text-emerald-600 dark:text-emerald-400"
+                : "bg-bg-card border-border-subtle text-text-primary"
             }`}>
-              <span className={`h-1.5 w-1.5 rounded-full ${isPaused ? "bg-amber-500" : "bg-emerald-500 animate-ping"}`} />
+              <span className={`h-1.5 w-1.5 rounded-full ${isPaused ? "bg-amber-500" : "bg-text-primary animate-ping"}`} />
               {isPaused ? "Focus Paused" : "Focus Session In Progress"}
             </span>
             <span className="text-xs text-text-muted">
@@ -123,14 +123,18 @@ export function ActiveSessionBanner({ sessions, tasks, onSelectTask }: ActiveSes
 
       <div className="flex items-center gap-3 shrink-0 self-end sm:self-auto">
         <div className="text-right">
+          <span className="text-[11px] text-text-muted font-mono block">
+            {isPaused
+              ? `paused · target ${targetDurationMinutes}m`
+              : isOvertime
+              ? `flow (+${formatTimer(elapsedSeconds - targetSeconds)}) · target ${targetDurationMinutes}m`
+              : `target ${targetDurationMinutes}m`}
+          </span>
           <div className={`font-mono text-base sm:text-lg font-semibold tabular-nums tracking-tight ${
             isPaused ? "text-amber-500" : isOvertime ? "text-amber-400" : "text-text-primary"
           }`}>
-            {isOvertime ? `+${formatTimer(remainingSeconds)}` : formatTimer(remainingSeconds)}
+            {formatTimer(elapsedSeconds)}
           </div>
-          <span className="text-[11px] text-text-muted font-mono block">
-            {isPaused ? "paused" : isOvertime ? "overtime (flow)" : "remaining"}
-          </span>
         </div>
 
         <div className="flex items-center gap-2">

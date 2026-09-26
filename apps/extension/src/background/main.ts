@@ -281,6 +281,42 @@ chrome.runtime.onMessage.addListener(
       void focusGuard.refreshSession().then(sendResponse);
       return true;
     }
+    if (message.type === "session:started_local" || message.type === "session:resumed_local") {
+      if (message.session) {
+        focusGuard.setSession(message.session);
+      } else {
+        void focusGuard.refreshSession();
+      }
+      sendResponse({ success: true });
+      return true;
+    }
+    if (message.type === "session:paused_local") {
+      if (message.session) {
+        focusGuard.setSession(message.session);
+      } else {
+        void focusGuard.refreshSession();
+      }
+      sendResponse({ success: true });
+      return true;
+    }
+    if (message.type === "session:ending_local") {
+      // Intent pre-announcement: the popup is about to end this session via
+      // the API. The server will broadcast a `session:ended` echo back to us;
+      // that echo must not raise a notification since the popup is already
+      // taking the user to Reflect (or firing its own single notification).
+      // Recorded BEFORE the API call so no broadcast ordering can beat it.
+      focusGuard.suppressEndedNotificationFor(message.sessionId);
+      sendResponse({ success: true });
+      return true;
+    }
+    if (message.type === "session:ended_local") {
+      // Belt-and-braces: also suppress here in case the intent message was
+      // missed (e.g. background restarted mid-flow).
+      focusGuard.suppressEndedNotificationFor(message.sessionId);
+      focusGuard.setSession(null);
+      sendResponse({ success: true });
+      return true;
+    }
     if (message.type === "focus-guard-swap") {
       void focusGuard.handleSwap(message.tabId, message.targetUrl).then((success) => {
         sendResponse({ success });
@@ -296,6 +332,16 @@ chrome.runtime.onMessage.addListener(
     if (message.type === "focus-guard-allow-tab") {
       void focusGuard.handleAllowTab(message.tabId, message.targetUrl).then((success) => {
         sendResponse({ success });
+      });
+      return true;
+    }
+    if (message.type === "get-focus-guard-config") {
+      sendResponse(focusGuard.getConfig());
+      return true;
+    }
+    if (message.type === "update-focus-guard-config" && message.config) {
+      void focusGuard.updateConfig(message.config).then((config) => {
+        sendResponse({ success: true, config });
       });
       return true;
     }

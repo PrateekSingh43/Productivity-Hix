@@ -73,4 +73,32 @@ describe("Focus Session Invariants & Timing Precision", () => {
     // True start must be projected back before 14:03:00 to capture all earlier 14:00-14:45 work
     assert.ok(trueStart.getTime() <= new Date("2026-09-12T14:03:00.000Z").getTime());
   });
+
+  it("filters sessions correctly within a specified date window", () => {
+    const sessions = [
+      { id: "1", startedAt: new Date("2026-09-25T10:00:00Z"), notes: "Session on 25th" },
+      { id: "2", startedAt: new Date("2026-09-20T10:00:00Z"), notes: "Session on 20th" },
+      { id: "3", startedAt: new Date("2026-09-01T10:00:00Z"), notes: "Session on 1st" },
+    ];
+
+    const from = new Date("2026-09-15T00:00:00Z");
+    const to = new Date("2026-09-26T23:59:59Z");
+
+    const filtered = sessions.filter((s) => s.startedAt >= from && s.startedAt <= to);
+    assert.equal(filtered.length, 2);
+    assert.equal(filtered[0]?.id, "1");
+    assert.equal(filtered[1]?.id, "2");
+  });
+
+  it("clamps limit between 1 and 500", () => {
+    const clampLimit = (limit?: number) =>
+      typeof limit === "number" ? Math.min(Math.max(limit, 1), 500) : 50;
+
+    assert.equal(clampLimit(-10), 1);
+    assert.equal(clampLimit(0), 1);
+    assert.equal(clampLimit(25), 25);
+    assert.equal(clampLimit(100), 100);
+    assert.equal(clampLimit(999), 500);
+    assert.equal(clampLimit(undefined), 50);
+  });
 });

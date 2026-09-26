@@ -87,6 +87,9 @@ export class ActivityEngine {
         sub(state, dtMs, now);
       }
     }, 1000);
+    if (typeof (this.tickInterval as any)?.unref === "function") {
+      (this.tickInterval as any).unref();
+    }
   }
 }
 
