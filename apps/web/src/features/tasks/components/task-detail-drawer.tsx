@@ -108,6 +108,7 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
   const [dueDate, setDueDate] = useState<string>("");
   const [lastLoadedId, setLastLoadedId] = useState<string | null>(null);
   const [isSaved, setIsSaved] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState<"task" | string | null>(null);
   const [baseline, setBaseline] = useState({
     title: "",
     description: "",
@@ -123,6 +124,7 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
     if (!task) {
       setLastLoadedId(null);
       setIsSaved(false);
+      setConfirmingDelete(null);
       return;
     }
     if (task.id !== lastLoadedId) {
@@ -274,8 +276,6 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
       },
     );
   };
-
-  const [confirmingDelete, setConfirmingDelete] = useState<"task" | string | null>(null);
 
   const handleDelete = () => {
     setConfirmingDelete("task");
