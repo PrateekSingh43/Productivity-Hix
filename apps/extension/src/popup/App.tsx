@@ -1705,8 +1705,8 @@ function FocusView({
       <section className="focus-card">
         {/* Timer Box */}
         <div className="focus-timer-box">
-          <div>
-            <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0, flex: 1 }}>
+            <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--text-secondary)", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {activeSession && (
                 <span
                   style={{
@@ -1925,42 +1925,51 @@ function FocusView({
                   justifyContent: "space-between",
                   gap: 8,
                   marginTop: 8,
-                  padding: "8px 10px",
+                  padding: "6px 6px 6px 10px",
                   background: "var(--bg-subtle)",
                   border: "1px solid var(--border-subtle)",
                   borderRadius: 8,
                 }}
               >
-                <span style={{ fontSize: 10.5, color: "var(--text-secondary)" }}>
+                <span style={{ fontSize: 10.5, color: "var(--text-secondary)", whiteSpace: "nowrap" }}>
                   Custom length
                 </span>
-                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 2,
+                    padding: 2,
+                    background: "var(--bg-surface-elevated)",
+                    border: "1px solid var(--border-default)",
+                    borderRadius: 7,
+                  }}
+                >
                   <button
                     type="button"
-                    aria-label="Decrease custom duration"
+                    aria-label="Decrease custom duration by 5 minutes"
                     onClick={() => setCustomMins((m) => Math.max(5, m - 5))}
                     style={{
-                      width: 22,
-                      height: 22,
+                      width: 26,
+                      height: 26,
                       display: "grid",
                       placeItems: "center",
-                      borderRadius: 6,
-                      border: "1px solid var(--border-default)",
-                      background: "var(--bg-surface-elevated)",
+                      borderRadius: 5,
+                      border: 0,
+                      background: "transparent",
                       color: "var(--text-secondary)",
                       cursor: "pointer",
                     }}
                   >
-                    <Minus size={12} />
+                    <Minus size={13} />
                   </button>
                   <span
                     style={{
                       display: "inline-flex",
                       alignItems: "baseline",
-                      gap: 2,
-                      minWidth: 52,
                       justifyContent: "center",
-                      fontSize: 12.5,
+                      minWidth: 52,
+                      fontSize: 13,
                       fontWeight: 650,
                       fontVariantNumeric: "tabular-nums",
                       color: "var(--text-primary)",
@@ -1970,43 +1979,45 @@ function FocusView({
                       type="number"
                       min={5}
                       max={180}
-                      aria-label="Custom duration in minutes"
+                      aria-label="Custom duration in minutes, 5 to 180"
+                      title="5–180 minutes"
                       value={customMins}
                       onChange={(e) =>
                         setCustomMins(Math.max(5, Math.min(180, Number(e.target.value) || 25)))
                       }
                       style={{
-                        width: 36,
+                        width: 34,
+                        height: 26,
                         background: "transparent",
                         border: 0,
                         outline: "none",
                         color: "inherit",
                         font: "inherit",
                         textAlign: "right",
+                        padding: 0,
                       }}
                     />
                     <span>m</span>
                   </span>
                   <button
                     type="button"
-                    aria-label="Increase custom duration"
+                    aria-label="Increase custom duration by 5 minutes"
                     onClick={() => setCustomMins((m) => Math.min(180, m + 5))}
                     style={{
-                      width: 22,
-                      height: 22,
+                      width: 26,
+                      height: 26,
                       display: "grid",
                       placeItems: "center",
-                      borderRadius: 6,
-                      border: "1px solid var(--border-default)",
-                      background: "var(--bg-surface-elevated)",
+                      borderRadius: 5,
+                      border: 0,
+                      background: "transparent",
                       color: "var(--text-secondary)",
                       cursor: "pointer",
                     }}
                   >
-                    <Plus size={12} />
+                    <Plus size={13} />
                   </button>
                 </div>
-                <span style={{ fontSize: 10, color: "var(--text-muted)" }}>5–180</span>
               </div>
             )}
           </div>

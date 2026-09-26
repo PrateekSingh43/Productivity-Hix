@@ -518,6 +518,18 @@
       }
       .wide, .full { width: 100%; }
 
+      /* Number inputs: hide native spinners (unstyled in dark popup) —
+         steppers are provided inline where needed */
+      input[type="number"]::-webkit-outer-spin-button,
+      input[type="number"]::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+      }
+      input[type="number"] {
+        -moz-appearance: textfield;
+        appearance: textfield;
+      }
+
       /* Focus View Layout */
       .focus-card { padding: 14px; display: flex; flex-direction: column; gap: 12px; }
       .focus-timer-box {
