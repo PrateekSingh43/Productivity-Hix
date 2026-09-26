@@ -29,6 +29,7 @@ export function FocusReflectionModal({ isOpen, onClose, session }: FocusReflecti
   const [energy, setEnergy] = useState<"low" | "medium" | "high">("medium");
   const [outcome, setOutcome] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   if (!isOpen || !session) return null;
 
@@ -39,6 +40,7 @@ export function FocusReflectionModal({ isOpen, onClose, session }: FocusReflecti
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setIsSubmitting(true);
+    setSubmitError(null);
     try {
       await createCheckIn({
         workSessionId: session.id,
@@ -59,7 +61,8 @@ export function FocusReflectionModal({ isOpen, onClose, session }: FocusReflecti
       onClose();
     } catch (err) {
       console.error("Failed to save focus reflection:", err);
-      onClose();
+      // Keep the modal open so the reflection is not silently lost.
+      setSubmitError("Could not save this reflection. Check your connection and try again — your notes above are preserved.");
     } finally {
       setIsSubmitting(false);
     }
@@ -179,6 +182,13 @@ export function FocusReflectionModal({ isOpen, onClose, session }: FocusReflecti
               className="w-full px-3 py-2 text-xs rounded-xl border border-border-subtle bg-bg-secondary/50 text-text-primary placeholder:text-text-muted focus:outline-none focus:border-border-strong transition-colors resize-none"
             />
           </div>
+
+          {/* Submit error (kept visible instead of silently discarding) */}
+          {submitError && (
+            <p role="alert" className="text-xs text-rose-600 dark:text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded-lg px-3 py-2">
+              {submitError}
+            </p>
+          )}
 
           {/* Action Buttons */}
           <div className="flex items-center justify-end gap-2.5 pt-1">

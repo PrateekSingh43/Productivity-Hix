@@ -2,6 +2,16 @@
 
 @custom-variant dark (&:is(.dark, .dark *));
 
+/* Native form controls (date picker indicator, scrollbars) follow the
+   active theme. Without this the calendar icon renders dark-on-dark. */
+:root {
+  color-scheme: dark;
+}
+.light,
+[data-theme="light"] {
+  color-scheme: light;
+}
+
 :root, [data-theme="dark"], .dark {
   --background-default: #09090b;
   --background-inset: #0d0d10;
