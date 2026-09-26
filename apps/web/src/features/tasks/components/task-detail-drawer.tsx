@@ -36,6 +36,7 @@ import {
   useResumeSessionMutation,
 } from "@features/sessions";
 import { FocusReflectionModal } from "./focus-reflection-modal";
+import { ConfirmDiscardModal } from "./confirm-discard-modal";
 import { PlannedFocusPicker } from "./planned-focus-picker";
 
 interface TaskDetailDrawerProps {
@@ -274,12 +275,26 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
     );
   };
 
+  const [confirmingDelete, setConfirmingDelete] = useState<"task" | string | null>(null);
+
   const handleDelete = () => {
-    if (confirm("Are you sure you want to delete this task?")) {
-      deleteTaskMutation.mutate(currentTask.id, {
-        onSuccess: () => onClose(),
-      });
-    }
+    setConfirmingDelete("task");
+  };
+
+  const handleConfirmDeleteTask = () => {
+    deleteTaskMutation.mutate(currentTask.id, {
+      onSuccess: () => {
+        setConfirmingDelete(null);
+        onClose();
+      },
+    });
+  };
+
+  const handleConfirmDeleteSession = () => {
+    if (typeof confirmingDelete !== "string" || confirmingDelete === "task") return;
+    deleteSessionMutation.mutate(confirmingDelete, {
+      onSuccess: () => setConfirmingDelete(null),
+    });
   };
 
   return (
@@ -735,11 +750,7 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
 
                         <button
                           type="button"
-                          onClick={() => {
-                            if (confirm("Delete this focus session?")) {
-                              deleteSessionMutation.mutate(session.id);
-                            }
-                          }}
+                          onClick={() => setConfirmingDelete(session.id)}
                           disabled={deleteSessionMutation.isPending}
                           className="opacity-0 group-hover:opacity-100 p-1 rounded text-text-muted hover:text-rose-500 hover:bg-bg-secondary transition-all cursor-pointer"
                           title="Delete session"
@@ -924,6 +935,30 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
         isOpen={Boolean(reflectionSession)}
         onClose={() => setReflectionSession(null)}
         session={reflectionSession}
+      />
+
+      <ConfirmDiscardModal
+        isOpen={confirmingDelete === "task"}
+        onConfirm={handleConfirmDeleteTask}
+        onCancel={() => setConfirmingDelete(null)}
+        isPending={deleteTaskMutation.isPending}
+        title="Delete this task?"
+        description="This will permanently remove the task and its associations. This action cannot be undone."
+        confirmLabel="Delete Task"
+        pendingLabel="Deleting..."
+        cancelLabel="Keep Task"
+      />
+
+      <ConfirmDiscardModal
+        isOpen={typeof confirmingDelete === "string" && confirmingDelete !== "task"}
+        onConfirm={handleConfirmDeleteSession}
+        onCancel={() => setConfirmingDelete(null)}
+        isPending={deleteSessionMutation.isPending}
+        title="Delete this focus session?"
+        description="This will remove the session and its recorded time from your history. This action cannot be undone."
+        confirmLabel="Delete Session"
+        pendingLabel="Deleting..."
+        cancelLabel="Keep Session"
       />
     </div>
   );

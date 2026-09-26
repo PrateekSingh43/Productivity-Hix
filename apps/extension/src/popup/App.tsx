@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   Brain,
+  Check,
+  ChevronDown,
   ExternalLink,
   MoreHorizontal,
   Pause,
@@ -9,6 +11,7 @@ import {
   ShieldCheck,
   Sun,
   Timer,
+  Minus,
   Monitor,
   Square,
   CheckCircle2,
@@ -36,7 +39,7 @@ import {
   formatProductiveDateLabel,
 } from "@repo/types";
 import { normalizeTimezone } from "@repo/validation";
-import { CheckInView } from "./CheckInView";
+import { CheckInView, type FocusDebriefContext } from "./CheckInView";
 import { SettingsView } from "./SettingsView";
 import { DiagnosticsView } from "./DiagnosticsView";
 import { InactivityView } from "./InactivityView";
@@ -616,6 +619,24 @@ function TodayView({
   const isEligibleForCheckIn = status?.scheduler?.eligibility?.eligible ?? false;
   const activeSession = (sessions.data ?? []).find((s) => !s.endedAt);
 
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (!activeSession || activeSession.isPaused) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [activeSession]);
+
+  const activeElapsedSec = useMemo(() => {
+    if (!activeSession) return 0;
+    const base = activeSession.durationSeconds ?? 0;
+    if (activeSession.isPaused) return base;
+    const startMs = Date.parse(activeSession.lastResumedAt ?? activeSession.startedAt);
+    const segment = Number.isFinite(startMs)
+      ? Math.max(0, Math.floor((now - startMs) / 1000))
+      : 0;
+    return base + segment;
+  }, [activeSession, now]);
+
   // Plan workflow handlers (authoritative backend mutation)
   const handleSavePlan = async (
     updatedGoals: Array<{ id?: string; title: string; order: number }>,
@@ -694,6 +715,16 @@ function TodayView({
               }}
             >
               {activeSession.taskTitle || activeSession.notes || "Current Focus Session"}
+            </div>
+            <div
+              style={{
+                fontSize: 10,
+                color: "var(--text-muted)",
+                marginTop: 2,
+                fontFamily: "ui-monospace, monospace",
+              }}
+            >
+              {formatClock(activeElapsedSec)} · Target {activeSession.targetDurationMinutes ?? 25}m
             </div>
           </div>
           <button
@@ -1130,12 +1161,164 @@ function TodayView({
 // -------------------------------------------------------------
 // FOCUS VIEW (Single execution timer, exact presets, reflection)
 // -------------------------------------------------------------
+/**
+ * Custom task dropdown matching the popup design tokens. Replaces the native
+ * <select>, whose OS-rendered option list cannot be styled and breaks the
+ * popup's visual language. Same data + same selection behavior.
+ */
+function TaskDropdown({
+  tasks,
+  selectedId,
+  onSelect,
+}: {
+  tasks: Task[];
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const selected = tasks.find((t) => t.id === selectedId) ?? null;
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open ]);
+
+  return (
+    <div ref={rootRef} style={{ position: "relative", width: "100%" }}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label="Select target task"
+        style={{
+          width: "100%",
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          padding: "8px 10px",
+          background: "var(--bg-subtle)",
+          border: "1px solid var(--border-default)",
+          borderRadius: 8,
+          color: "var(--text-primary)",
+          fontSize: 11.5,
+          cursor: "pointer",
+          outline: "none",
+          textAlign: "left",
+        }}
+      >
+        <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {selected ? (
+            <>
+              {selected.title}{" "}
+              <span style={{ color: "var(--text-muted)", fontSize: 10.5 }}>
+                {selected.goalTitle ? `· ${selected.goalTitle} ` : ""}({selected.plannedDurationMinutes ?? 30}m)
+              </span>
+            </>
+          ) : (
+            <span style={{ color: "var(--text-muted)" }}>Choose a task…</span>
+          )}
+        </span>
+        <ChevronDown
+          size={14}
+          style={{
+            flexShrink: 0,
+            color: "var(--text-muted)",
+            transform: open ? "rotate(180deg)" : "none",
+            transition: "transform 120ms ease",
+          }}
+        />
+      </button>
+      {open && (
+        <div
+          role="listbox"
+          aria-label="Target tasks"
+          style={{
+            position: "absolute",
+            top: "calc(100% + 4px)",
+            left: 0,
+            right: 0,
+            zIndex: 50,
+            maxHeight: 188,
+            overflowY: "auto",
+            background: "var(--bg-surface-elevated)",
+            border: "1px solid var(--border-default)",
+            borderRadius: 8,
+            padding: 4,
+            boxShadow: "var(--shadow-overlay)",
+          }}
+        >
+          {tasks.map((t) => {
+            const isSelected = t.id === selectedId;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                role="option"
+                aria-selected={isSelected}
+                onClick={() => {
+                  onSelect(t.id);
+                  setOpen(false);
+                }}
+                style={{
+                  width: "100%",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "7px 8px",
+                  borderRadius: 6,
+                  border: 0,
+                  background: isSelected ? "var(--bg-active)" : "transparent",
+                  color: "var(--text-primary)",
+                  fontSize: 11.5,
+                  cursor: "pointer",
+                  textAlign: "left",
+                }}
+                onMouseEnter={(e) => {
+                  if (!isSelected) (e.currentTarget as HTMLButtonElement).style.background = "var(--bg-subtle)";
+                }}
+                onMouseLeave={(e) => {
+                  if (!isSelected) (e.currentTarget as HTMLButtonElement).style.background = "transparent";
+                }}
+              >
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {t.title}
+                  </span>
+                  <span style={{ display: "block", fontSize: 10, color: "var(--text-muted)", marginTop: 1 }}>
+                    {t.goalTitle ? `${t.goalTitle} · ` : ""}{t.plannedDurationMinutes ?? 30}m planned
+                  </span>
+                </span>
+                {isSelected && <Check size={13} style={{ flexShrink: 0, color: "var(--accent-primary)" }} />}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function FocusView({
   status,
   onStartReflect,
 }: {
   status?: ExtensionStatus;
-  onStartReflect: () => void;
+  onStartReflect: (ctx?: FocusDebriefContext) => void;
 }) {
   const queryClient = useQueryClient();
   const tasks = useQuery({
@@ -1186,7 +1369,10 @@ function FocusView({
       }
       return session;
     },
-    onSuccess: () => {
+    onSuccess: (session) => {
+      if (session && typeof chrome !== "undefined" && chrome.runtime?.sendMessage) {
+        chrome.runtime.sendMessage({ type: "session:started_local", session }).catch(() => {});
+      }
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });
       void queryClient.invalidateQueries({ queryKey: ["tasks"] });
     },
@@ -1197,7 +1383,10 @@ function FocusView({
       if (!activeSession) return;
       return apiClient.pauseSession(activeSession.id);
     },
-    onSuccess: () => {
+    onSuccess: (session) => {
+      if (session && typeof chrome !== "undefined" && chrome.runtime?.sendMessage) {
+        chrome.runtime.sendMessage({ type: "session:paused_local", session }).catch(() => {});
+      }
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });
     },
   });
@@ -1207,7 +1396,10 @@ function FocusView({
       if (!activeSession) return;
       return apiClient.resumeSession(activeSession.id);
     },
-    onSuccess: () => {
+    onSuccess: (session) => {
+      if (session && typeof chrome !== "undefined" && chrome.runtime?.sendMessage) {
+        chrome.runtime.sendMessage({ type: "session:resumed_local", session }).catch(() => {});
+      }
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });
     },
   });
@@ -1233,6 +1425,9 @@ function FocusView({
         }
       }
       await apiClient.finishSession(activeSession.id);
+      if (typeof chrome !== "undefined" && chrome.runtime?.sendMessage) {
+        chrome.runtime.sendMessage({ type: "session:ended_local" }).catch(() => {});
+      }
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });
       setShowEndDialog(false);
 
@@ -1251,7 +1446,12 @@ function FocusView({
       }
 
       if (openCheckIn) {
-        onStartReflect();
+        onStartReflect({
+          workSessionId: activeSession.id,
+          taskId: task?.id ?? null,
+          startedAt: activeSession.startedAt,
+          endedAt: new Date().toISOString(),
+        });
       }
     },
   });
@@ -1289,10 +1489,10 @@ function FocusView({
     if (activeSession.isPaused) {
       return base;
     }
-    const currentSegment = Math.max(
-      0,
-      Math.floor((now - Date.parse(activeSession.startedAt)) / 1000),
-    );
+    const startMs = Date.parse(activeSession.lastResumedAt ?? activeSession.startedAt);
+    const currentSegment = Number.isFinite(startMs)
+      ? Math.max(0, Math.floor((now - startMs) / 1000))
+      : 0;
     return base + currentSegment;
   }, [activeSession, now]);
 
@@ -1517,24 +1717,22 @@ function FocusView({
                       ? "var(--amber)"
                       : isOvertime
                         ? "#f59e0b"
-                        : "var(--success)",
+                        : "var(--text-primary)",
                     display: "inline-block",
                   }}
                 />
               )}
               {activeSession
                 ? activeSession.isPaused
-                  ? "Paused"
+                  ? `Paused · Target ${targetDurationMins}m`
                   : isOvertime
-                    ? "Overtime (Flow)"
-                    : "Time remaining"
+                    ? `Flow Overtime (+${formatClock(Math.abs(remainingSec))}) · Target ${targetDurationMins}m`
+                    : `Target ${targetDurationMins}m`
                 : "Duration"}
             </span>
             <strong>
               {activeSession
-                ? isOvertime
-                  ? `+${formatClock(Math.abs(remainingSec))}`
-                  : formatClock(remainingSec)
+                ? formatClock(elapsedSec)
                 : formatClock(targetDurationSec)}
             </strong>
           </div>
@@ -1637,35 +1835,11 @@ function FocusView({
               Select Target Task
             </label>
             {incompleteTasks.length > 0 ? (
-              <select
-                value={task?.id ?? ""}
-                onChange={(e) => setSelectedTaskId(e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "8px 10px",
-                  background: "var(--bg-subtle)",
-                  border: "1px solid var(--border-default)",
-                  borderRadius: 6,
-                  color: "var(--text-primary)",
-                  fontSize: 11.5,
-                  outline: "none",
-                  cursor: "pointer",
-                }}
-              >
-                {incompleteTasks.map((t) => (
-                  <option
-                    key={t.id}
-                    value={t.id}
-                    style={{
-                      background: "var(--bg-surface-elevated)",
-                      color: "var(--text-primary)",
-                    }}
-                  >
-                    {t.title} {t.goalTitle ? `· [${t.goalTitle}]` : ""} (
-                    {t.plannedDurationMinutes ?? 30}m)
-                  </option>
-                ))}
-              </select>
+              <TaskDropdown
+                tasks={incompleteTasks}
+                selectedId={task?.id ?? null}
+                onSelect={(id) => setSelectedTaskId(id)}
+              />
             ) : (
               <div
                 style={{
@@ -1699,26 +1873,48 @@ function FocusView({
             >
               Duration Preset
             </label>
-            <div style={{ display: "flex", gap: 5 }}>
-              {[25, 50].map((mins) => (
-                <button
-                  key={mins}
-                  type="button"
-                  onClick={() => setPreset(mins as 25 | 50)}
-                  className={`filter-toggle ${preset === mins ? "active" : ""}`}
-                  style={{ flex: 1, padding: "6px 2px" }}
-                >
-                  {mins}m
-                </button>
-              ))}
-              <button
-                type="button"
-                onClick={() => setPreset("custom")}
-                className={`filter-toggle ${preset === "custom" ? "active" : ""}`}
-                style={{ flex: 1, padding: "6px 2px" }}
-              >
-                Custom
-              </button>
+            <div
+              role="group"
+              aria-label="Duration preset"
+              style={{
+                display: "flex",
+                gap: 3,
+                padding: 3,
+                background: "var(--bg-subtle)",
+                border: "1px solid var(--border-subtle)",
+                borderRadius: 8,
+              }}
+            >
+              {(
+                [
+                  { id: 25, label: "25m" },
+                  { id: 50, label: "50m" },
+                  { id: "custom", label: "Custom" },
+                ] as const
+              ).map((option) => {
+                const isActive = preset === option.id;
+                return (
+                  <button
+                    key={String(option.id)}
+                    type="button"
+                    aria-pressed={isActive}
+                    onClick={() => setPreset(option.id)}
+                    style={{
+                      flex: 1,
+                      padding: "7px 4px",
+                      borderRadius: 6,
+                      border: `1px solid ${isActive ? "var(--border-strong)" : "transparent"}`,
+                      background: isActive ? "var(--bg-active)" : "transparent",
+                      color: isActive ? "var(--text-primary)" : "var(--text-secondary)",
+                      fontSize: 11.5,
+                      fontWeight: isActive ? 650 : 500,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
             </div>
 
             {preset === "custom" && (
@@ -1726,31 +1922,91 @@ function FocusView({
                 style={{
                   display: "flex",
                   alignItems: "center",
-                  gap: 6,
+                  justifyContent: "space-between",
+                  gap: 8,
                   marginTop: 8,
+                  padding: "8px 10px",
+                  background: "var(--bg-subtle)",
+                  border: "1px solid var(--border-subtle)",
+                  borderRadius: 8,
                 }}
               >
-                <span style={{ fontSize: 10.5, color: "var(--text-secondary)" }}>Duration:</span>
-                <input
-                  type="number"
-                  min={5}
-                  max={180}
-                  value={customMins}
-                  onChange={(e) =>
-                    setCustomMins(Math.max(5, Math.min(180, Number(e.target.value) || 25)))
-                  }
-                  style={{
-                    width: 50,
-                    padding: "3px 6px",
-                    borderRadius: 6,
-                    border: "1px solid var(--border-default)",
-                    background: "var(--bg-surface-elevated)",
-                    color: "var(--text-primary)",
-                    fontSize: 11,
-                    textAlign: "center",
-                  }}
-                />
-                <span style={{ fontSize: 10, color: "var(--text-muted)" }}>min (5–180)</span>
+                <span style={{ fontSize: 10.5, color: "var(--text-secondary)" }}>
+                  Custom length
+                </span>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <button
+                    type="button"
+                    aria-label="Decrease custom duration"
+                    onClick={() => setCustomMins((m) => Math.max(5, m - 5))}
+                    style={{
+                      width: 22,
+                      height: 22,
+                      display: "grid",
+                      placeItems: "center",
+                      borderRadius: 6,
+                      border: "1px solid var(--border-default)",
+                      background: "var(--bg-surface-elevated)",
+                      color: "var(--text-secondary)",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <Minus size={12} />
+                  </button>
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "baseline",
+                      gap: 2,
+                      minWidth: 52,
+                      justifyContent: "center",
+                      fontSize: 12.5,
+                      fontWeight: 650,
+                      fontVariantNumeric: "tabular-nums",
+                      color: "var(--text-primary)",
+                    }}
+                  >
+                    <input
+                      type="number"
+                      min={5}
+                      max={180}
+                      aria-label="Custom duration in minutes"
+                      value={customMins}
+                      onChange={(e) =>
+                        setCustomMins(Math.max(5, Math.min(180, Number(e.target.value) || 25)))
+                      }
+                      style={{
+                        width: 36,
+                        background: "transparent",
+                        border: 0,
+                        outline: "none",
+                        color: "inherit",
+                        font: "inherit",
+                        textAlign: "right",
+                      }}
+                    />
+                    <span>m</span>
+                  </span>
+                  <button
+                    type="button"
+                    aria-label="Increase custom duration"
+                    onClick={() => setCustomMins((m) => Math.min(180, m + 5))}
+                    style={{
+                      width: 22,
+                      height: 22,
+                      display: "grid",
+                      placeItems: "center",
+                      borderRadius: 6,
+                      border: "1px solid var(--border-default)",
+                      background: "var(--bg-surface-elevated)",
+                      color: "var(--text-secondary)",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <Plus size={12} />
+                  </button>
+                </div>
+                <span style={{ fontSize: 10, color: "var(--text-muted)" }}>5–180</span>
               </div>
             )}
           </div>
@@ -2308,6 +2564,7 @@ export function App() {
   const [tab, setTab] = useState<Tab>("today");
   const [moreSubView, setMoreSubView] = useState<MoreSubView>("menu");
   const [reflectionOverlay, setReflectionOverlay] = useState<"hourly" | "inactivity" | null>(null);
+  const [reflectContext, setReflectContext] = useState<FocusDebriefContext | null>(null);
 
   const isStandalone = useMemo(() => {
     try {
@@ -2504,14 +2761,17 @@ export function App() {
           currentTask={activeTask}
           patterns={patterns.data ?? []}
           isStandalone={isStandalone}
+          focusContext={reflectContext}
           onComplete={() => {
             void queryClient.invalidateQueries({ queryKey: ["extension-status"] });
             void queryClient.invalidateQueries({ queryKey: ["activity-summary"] });
             setReflectionOverlay(null);
+            setReflectContext(null);
             if (isStandalone) notifyCloseModal();
           }}
           onCancel={() => {
             setReflectionOverlay(null);
+            setReflectContext(null);
             if (isStandalone) notifyCloseModal();
           }}
           onSwitchToInactivity={() => setReflectionOverlay("inactivity")}
@@ -2538,7 +2798,8 @@ export function App() {
       ) : tab === "focus" ? (
         <FocusView
           status={status.data}
-          onStartReflect={() => {
+          onStartReflect={(ctx) => {
+            setReflectContext(ctx ?? null);
             setReflectionOverlay("hourly");
           }}
         />

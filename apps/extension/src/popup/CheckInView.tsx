@@ -75,6 +75,19 @@ function Step6Confirmation({
   );
 }
 
+/**
+ * Focus-debrief context: when the check-in follows a just-finished focus
+ * session, the debrief is linked to that exacte session + task and marked as
+ * a focus debrief (instead of a generic hourly check-in) so task surfaces
+ * can show it under the designated task only.
+ */
+export interface FocusDebriefContext {
+  workSessionId: string;
+  taskId: string | null;
+  startedAt?: string | null;
+  endedAt?: string | null;
+}
+
 interface CheckInViewProps {
   currentTask?: Task | null;
   patterns?: CheckInPatternCandidate[];
@@ -82,6 +95,7 @@ interface CheckInViewProps {
   onCancel: () => void;
   onSwitchToInactivity?: () => void;
   isStandalone?: boolean;
+  focusContext?: FocusDebriefContext | null;
 }
 
 const ASSESSMENTS = [
@@ -141,6 +155,7 @@ export function CheckInView({
   onCancel,
   onSwitchToInactivity,
   isStandalone,
+  focusContext = null,
 }: CheckInViewProps) {
   const notifyClose = () => {
     try {
@@ -216,9 +231,10 @@ export function CheckInView({
     const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
 
     const payload = {
-      windowStart: oneHourAgo.toISOString(),
-      windowEnd: now.toISOString(),
-      taskId: currentTask?.id ?? null,
+      windowStart: focusContext?.startedAt ?? oneHourAgo.toISOString(),
+      windowEnd: focusContext?.endedAt ?? now.toISOString(),
+      workSessionId: focusContext?.workSessionId ?? null,
+      taskId: focusContext ? focusContext.taskId : currentTask?.id ?? null,
       activityAssessment: assessment,
       alignment: isBreak ? null : (alignment ?? "yes"),
       reasons: isBreak ? [] : selectedReasons,
@@ -227,8 +243,8 @@ export function CheckInView({
       focus: focus ?? "focused",
       note: note.trim().slice(0, 500) || null,
       questionVersion: "v1",
-      source: "extension_hourly",
-      eventType: "PERIODIC",
+      source: focusContext ? "extension_focus_ended" : "extension_hourly",
+      eventType: focusContext ? "FOCUS_DEBRIEF" : "PERIODIC",
       deeperAnswers: Object.keys(deeperAnswers).length > 0 ? deeperAnswers : null,
     };
 
@@ -306,8 +322,8 @@ export function CheckInView({
       {/* STEP 1: Assessment */}
       {step === 1 && (
         <section className="reflect-card" style={{ padding: 14 }}>
-          <span className="section-kicker">HOURLY CHECK-IN</span>
-          <h2 style={{ fontSize: 15, margin: "6px 0 12px", color: "var(--text-primary)" }}>How did the last hour go?</h2>
+          <span className="section-kicker">{focusContext ? "FOCUS DEBRIEF" : "HOURLY CHECK-IN"}</span>
+          <h2 style={{ fontSize: 15, margin: "6px 0 12px", color: "var(--text-primary)" }}>{focusContext ? "How did this focus block go?" : "How did the last hour go?"}</h2>
           {currentTask && (
             <p style={{ margin: "0 0 12px", fontSize: 11, color: "var(--text-secondary)" }}>
               Target task: <strong style={{ color: "var(--text-primary)" }}>{currentTask.title}</strong>

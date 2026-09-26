@@ -8,6 +8,11 @@ interface ConfirmDiscardModalProps {
   onConfirm: () => void;
   onCancel: () => void;
   isPending?: boolean;
+  title?: string;
+  description?: string;
+  confirmLabel?: string;
+  pendingLabel?: string;
+  cancelLabel?: string;
 }
 
 export function ConfirmDiscardModal({
@@ -15,6 +20,11 @@ export function ConfirmDiscardModal({
   onConfirm,
   onCancel,
   isPending = false,
+  title = "Discard Focus Session?",
+  description = "This will cancel the active session and remove the elapsed time from your history and analytics. This action cannot be undone.",
+  confirmLabel = "Discard Session",
+  pendingLabel = "Discarding...",
+  cancelLabel = "Keep Working",
 }: ConfirmDiscardModalProps) {
   if (!isOpen) return null;
 
@@ -35,10 +45,10 @@ export function ConfirmDiscardModal({
               id="discard-modal-title"
               className="text-sm font-semibold text-text-primary"
             >
-              Discard Focus Session?
+              {title}
             </h3>
             <p className="mt-1 text-xs text-text-muted leading-relaxed">
-              This will cancel the active session and remove the elapsed time from your history and analytics. This action cannot be undone.
+              {description}
             </p>
           </div>
         </div>
@@ -50,7 +60,7 @@ export function ConfirmDiscardModal({
             disabled={isPending}
             className="px-3 py-1.5 rounded-md text-xs font-medium border border-border-subtle bg-bg-secondary text-text-primary hover:bg-bg-active hover:border-border-strong transition-colors disabled:opacity-50"
           >
-            Keep Working
+            {cancelLabel}
           </button>
           <button
             type="button"
@@ -59,7 +69,7 @@ export function ConfirmDiscardModal({
             className="px-3 py-1.5 rounded-md text-xs font-medium bg-red-500/15 border border-red-500/30 text-red-400 hover:bg-red-500/25 hover:border-red-500/40 hover:text-red-300 transition-colors disabled:opacity-50 flex items-center gap-1.5"
           >
             <Trash2 size={12} />
-            {isPending ? "Discarding..." : "Discard Session"}
+            {isPending ? pendingLabel : confirmLabel}
           </button>
         </div>
       </div>
