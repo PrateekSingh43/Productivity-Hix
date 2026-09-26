@@ -157,10 +157,10 @@ export function TodayView() {
       if (serverActiveSession.isPaused) {
         setElapsedSeconds(serverActiveSession.durationSeconds ?? 0);
       } else {
-        const segment = Math.max(
-          0,
-          Math.round((Date.now() - new Date(serverActiveSession.startedAt).getTime()) / 1000)
-        );
+        const startMs = Date.parse(serverActiveSession.lastResumedAt ?? serverActiveSession.startedAt);
+        const segment = Number.isFinite(startMs)
+          ? Math.max(0, Math.round((Date.now() - startMs) / 1000))
+          : 0;
         setElapsedSeconds((serverActiveSession.durationSeconds ?? 0) + segment);
       }
     } else if (serverActiveSession === null && sessionActive) {
@@ -201,6 +201,87 @@ export function TodayView() {
 
   // Next actionable task (first incomplete task)
   const nextUpTask = tasks.find((t) => t.status !== "done");
+
+  const incompleteCount = tasks.filter((t) => t.status !== "done").length;
+  const plannedMinutesTotal = tasks.reduce((sum, t) => sum + (t.plannedDurationMinutes ?? 0), 0);
+
+  // Shared Today task row (goal-grouped and independent lists render identically)
+  const renderTodayTaskRow = (task: Task) => {
+    const isDone = task.status === "done";
+    return (
+      <div
+        key={task.id}
+        className="group flex items-center justify-between px-5 py-3 hover:bg-bg-secondary/30 transition-colors"
+      >
+        <div className="flex items-center gap-3 min-w-0 flex-1">
+          <button
+            type="button"
+            onClick={() => handleToggleTask(task)}
+            aria-label={isDone ? `Mark incomplete: ${task.title}` : `Mark complete: ${task.title}`}
+            className="text-text-muted hover:text-text-primary transition-colors shrink-0 cursor-pointer"
+          >
+            {isDone ? (
+              <CheckCircle2 className="w-4 h-4 text-text-primary fill-text-primary/20" />
+            ) : (
+              <Circle className="w-4 h-4" />
+            )}
+          </button>
+          <span
+            onClick={() => setEditingTask(task)}
+            className={`text-sm truncate cursor-pointer transition-colors ${
+              isDone
+                ? "text-text-muted line-through opacity-70"
+                : "text-text-primary hover:text-text-secondary"
+            }`}
+            title="Click to view details"
+          >
+            {task.title}
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2.5 shrink-0 ml-3">
+          <div className={`flex items-center justify-end w-[60px] sm:w-[70px] ${isDone ? "opacity-60" : ""}`}>
+            {task.dueAt && (
+              <span className="inline-flex items-center gap-1 text-[11px] sm:text-xs text-text-muted font-mono whitespace-nowrap">
+                <Calendar size={11} />
+                {format(new Date(task.dueAt), "MMM d")}
+              </span>
+            )}
+          </div>
+          <div className={`flex items-center justify-end w-[35px] sm:w-[45px] ${isDone ? "opacity-60" : ""}`}>
+            {task.plannedDurationMinutes && (
+              <span className="text-[11px] sm:text-xs font-mono text-text-muted">
+                {task.plannedDurationMinutes}m
+              </span>
+            )}
+          </div>
+          <div className={`flex justify-end w-[55px] sm:w-[65px] ${isDone ? "opacity-60" : ""}`}>
+            <PriorityBadge priority={task.priority} />
+          </div>
+          <button
+            type="button"
+            onClick={() => setEditingTask(task)}
+            className="p-1.5 opacity-0 group-hover:opacity-100 hover:bg-bg-secondary text-text-muted hover:text-text-primary rounded transition-all cursor-pointer"
+            title="Edit task"
+          >
+            <Edit3 size={13} />
+          </button>
+          <div className="flex justify-end w-[65px] sm:w-[75px]">
+            {!sessionActive && !isDone && (
+              <button
+                type="button"
+                onClick={() => handleStartTaskFocus(task)}
+                className="inline-flex items-center gap-1 text-xs text-text-primary hover:text-text-secondary px-2.5 py-1 rounded bg-bg-secondary border border-border-subtle hover:border-border-hover cursor-pointer transition-colors"
+              >
+                <Play size={10} className="fill-current" />
+                <span>Focus</span>
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   const formatElapsed = (seconds: number) => {
     const s = Math.abs(seconds);
@@ -466,13 +547,21 @@ export function TodayView() {
             <div className="flex items-center gap-3 self-end sm:self-center shrink-0">
               <div className="text-right">
                 <span className={`text-[11px] font-mono block ${
-                  isPaused ? "text-amber-500" : (elapsedSeconds > ((serverActiveSession?.targetDurationMinutes ?? selectedTask?.plannedDurationMinutes ?? 25) * 60)) ? "text-amber-500 font-semibold" : "text-text-muted"
-                }`}>
-                  {isPaused
-                    ? "Paused"
+                  isPaused
+                    ? "text-amber-500"
                     : elapsedSeconds > ((serverActiveSession?.targetDurationMinutes ?? selectedTask?.plannedDurationMinutes ?? 25) * 60)
-                    ? "Overtime (Flow)"
-                    : `Target ${serverActiveSession?.targetDurationMinutes ?? selectedTask?.plannedDurationMinutes ?? 25}m`}
+                    ? "text-amber-400 font-semibold"
+                    : "text-text-muted"
+                }`}>
+                  {(() => {
+                    const targetSec = (serverActiveSession?.targetDurationMinutes ?? selectedTask?.plannedDurationMinutes ?? 25) * 60;
+                    const targetMins = serverActiveSession?.targetDurationMinutes ?? selectedTask?.plannedDurationMinutes ?? 25;
+                    if (isPaused) return `Paused · Target ${targetMins}m`;
+                    if (elapsedSeconds > targetSec) {
+                      return `Flow Overtime (+${formatElapsed(elapsedSeconds - targetSec)}) · Target ${targetMins}m`;
+                    }
+                    return `Target ${targetMins}m`;
+                  })()}
                 </span>
                 <span className={`text-2xl font-semibold font-mono tabular-nums ${
                   isPaused
@@ -481,14 +570,7 @@ export function TodayView() {
                     ? "text-amber-400"
                     : "text-text-primary"
                 }`}>
-                  {(() => {
-                    const targetSec = (serverActiveSession?.targetDurationMinutes ?? selectedTask?.plannedDurationMinutes ?? 25) * 60;
-                    const rem = targetSec - elapsedSeconds;
-                    if (rem < 0) {
-                      return `+${formatElapsed(Math.abs(rem))}`;
-                    }
-                    return formatElapsed(rem);
-                  })()}
+                  {formatElapsed(elapsedSeconds)}
                 </span>
               </div>
 
@@ -538,26 +620,43 @@ export function TodayView() {
         </Section>
       ) : nextUpTask ? (
         <Section>
-          <div className="rounded-xl border border-border-subtle bg-bg-secondary/40 px-5 py-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-            <div className="flex items-center gap-3 min-w-0">
-              <span className="text-xs font-medium text-text-muted shrink-0">
-                Next Up
-              </span>
-              <span className="text-sm font-medium text-text-primary truncate">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-text-muted mb-2.5">
+            Up next — start here
+          </p>
+          <div className="rounded-xl border border-border-default bg-bg-card px-5 sm:px-6 py-4 sm:py-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-xs">
+            <div className="min-w-0">
+              <p className="text-lg sm:text-xl font-semibold text-text-primary tracking-tight truncate">
                 {nextUpTask.title}
-              </span>
-              {nextUpTask.plannedDurationMinutes && (
-                <span className="text-xs text-text-muted font-mono shrink-0 hidden sm:inline">
-                  ({nextUpTask.plannedDurationMinutes}m)
-                </span>
-              )}
+              </p>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5 text-xs text-text-muted">
+                {nextUpTask.goalId && (
+                  <span className="inline-flex items-center gap-1">
+                    <Target size={11} />
+                    <span className="truncate max-w-[220px]">
+                      {goals.find((g) => g.id === nextUpTask.goalId)?.title ?? "Goal"}
+                    </span>
+                  </span>
+                )}
+                {nextUpTask.plannedDurationMinutes && (
+                  <span className="inline-flex items-center gap-1 font-mono">
+                    <Clock size={11} />
+                    <span>{nextUpTask.plannedDurationMinutes}m planned</span>
+                  </span>
+                )}
+                <PriorityBadge priority={nextUpTask.priority} />
+                {incompleteCount > 1 && (
+                  <span>
+                    {incompleteCount - 1} more after this
+                  </span>
+                )}
+              </div>
             </div>
             <button
               type="button"
               onClick={() => handleStartTaskFocus(nextUpTask)}
-              className="inline-flex items-center gap-1.5 text-xs font-medium bg-text-primary text-bg-default hover:opacity-90 px-3 py-1.5 rounded-md transition-opacity cursor-pointer shrink-0 shadow-xs"
+              className="inline-flex items-center gap-1.5 text-sm font-semibold bg-text-primary text-bg-default hover:opacity-90 px-4 py-2.5 rounded-lg transition-opacity cursor-pointer shrink-0 shadow-xs"
             >
-              <Play size={11} className="fill-current" />
+              <Play size={13} className="fill-current" />
               <span>Start Focus</span>
             </button>
           </div>
@@ -566,6 +665,14 @@ export function TodayView() {
 
       {/* 4. TODAY'S TASKS (Unified list with hairline dividers, zero card-in-card) */}
       <Section id="tasks-section">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-text-muted mb-2.5">
+          Today&apos;s workload
+          {incompleteCount > 0 && (
+            <span className="normal-case font-normal tracking-normal">
+              {" "}· {incompleteCount} open{plannedMinutesTotal > 0 ? ` · ~${plannedMinutesTotal}m planned` : ""}
+            </span>
+          )}
+        </p>
         <div className="flex items-center justify-between mb-3">
           <SectionHeader
             title="Today's Tasks"
@@ -672,82 +779,7 @@ export function TodayView() {
 
                   {/* Tasks under this goal */}
                   <div className="divide-y divide-border-subtle/40">
-                    {goalTasks.map((task) => {
-                      const isDone = task.status === "done";
-                      return (
-                        <div
-                          key={task.id}
-                          className="group flex items-center justify-between px-5 py-3 hover:bg-bg-secondary/30 transition-colors"
-                        >
-                          <div className="flex items-center gap-3 min-w-0 flex-1">
-                            <button
-                              type="button"
-                              onClick={() => handleToggleTask(task)}
-                              aria-label={isDone ? `Mark incomplete: ${task.title}` : `Mark complete: ${task.title}`}
-                              className="text-text-muted hover:text-text-primary transition-colors shrink-0 cursor-pointer"
-                            >
-                              {isDone ? (
-                                <CheckCircle2 className="w-4 h-4 text-text-primary fill-text-primary/20" />
-                              ) : (
-                                <Circle className="w-4 h-4" />
-                              )}
-                            </button>
-                            <span
-                              onClick={() => setEditingTask(task)}
-                              className={`text-sm truncate cursor-pointer transition-colors ${
-                                isDone
-                                  ? "text-text-muted line-through opacity-70"
-                                  : "text-text-primary hover:text-text-secondary"
-                              }`}
-                              title="Click to view details"
-                            >
-                              {task.title}
-                            </span>
-                          </div>
-
-                          <div className="flex items-center gap-2.5 shrink-0 ml-3">
-                            <div className={`flex items-center justify-end w-[60px] sm:w-[70px] ${isDone ? "opacity-60" : ""}`}>
-                              {task.dueAt && (
-                                <span className="inline-flex items-center gap-1 text-[11px] sm:text-xs text-text-muted font-mono whitespace-nowrap">
-                                  <Calendar size={11} />
-                                  {format(new Date(task.dueAt), "MMM d")}
-                                </span>
-                              )}
-                            </div>
-                            <div className={`flex items-center justify-end w-[35px] sm:w-[45px] ${isDone ? "opacity-60" : ""}`}>
-                              {task.plannedDurationMinutes && (
-                                <span className="text-[11px] sm:text-xs font-mono text-text-muted">
-                                  {task.plannedDurationMinutes}m
-                                </span>
-                              )}
-                            </div>
-                            <div className={`flex justify-end w-[55px] sm:w-[65px] ${isDone ? "opacity-60" : ""}`}>
-                              <PriorityBadge priority={task.priority} />
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => setEditingTask(task)}
-                              className="p-1.5 opacity-0 group-hover:opacity-100 hover:bg-bg-secondary text-text-muted hover:text-text-primary rounded transition-all cursor-pointer"
-                              title="Edit task"
-                            >
-                              <Edit3 size={13} />
-                            </button>
-                            <div className="flex justify-end w-[65px] sm:w-[75px]">
-                              {!sessionActive && !isDone && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleStartTaskFocus(task)}
-                                  className="inline-flex items-center gap-1 text-xs text-text-primary hover:text-text-secondary px-2.5 py-1 rounded bg-bg-secondary border border-border-subtle hover:border-border-hover cursor-pointer transition-colors"
-                                >
-                                  <Play size={10} className="fill-current" />
-                                  <span>Focus</span>
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
+                    {goalTasks.map((task) => renderTodayTaskRow(task))}
                   </div>
                 </div>
               );
@@ -775,82 +807,7 @@ export function TodayView() {
 
                   {/* Tasks list */}
                   <div className="divide-y divide-border-subtle/40">
-                    {indep.map((task) => {
-                      const isDone = task.status === "done";
-                      return (
-                        <div
-                          key={task.id}
-                          className="group flex items-center justify-between px-5 py-3 hover:bg-bg-secondary/30 transition-colors"
-                        >
-                          <div className="flex items-center gap-3 min-w-0 flex-1">
-                            <button
-                              type="button"
-                              onClick={() => handleToggleTask(task)}
-                              aria-label={isDone ? `Mark incomplete: ${task.title}` : `Mark complete: ${task.title}`}
-                              className="text-text-muted hover:text-text-primary transition-colors shrink-0 cursor-pointer"
-                            >
-                              {isDone ? (
-                                <CheckCircle2 className="w-4 h-4 text-text-primary fill-text-primary/20" />
-                              ) : (
-                                <Circle className="w-4 h-4" />
-                              )}
-                            </button>
-                            <span
-                              onClick={() => setEditingTask(task)}
-                              className={`text-sm truncate cursor-pointer transition-colors ${
-                                isDone
-                                  ? "text-text-muted line-through opacity-70"
-                                  : "text-text-primary hover:text-text-secondary"
-                              }`}
-                              title="Click to view details"
-                            >
-                              {task.title}
-                            </span>
-                          </div>
-
-                          <div className="flex items-center gap-2.5 shrink-0 ml-3">
-                            <div className={`flex items-center justify-end w-[60px] sm:w-[70px] ${isDone ? "opacity-60" : ""}`}>
-                              {task.dueAt && (
-                                <span className="inline-flex items-center gap-1 text-[11px] sm:text-xs text-text-muted font-mono whitespace-nowrap">
-                                  <Calendar size={11} />
-                                  {format(new Date(task.dueAt), "MMM d")}
-                                </span>
-                              )}
-                            </div>
-                            <div className={`flex items-center justify-end w-[35px] sm:w-[45px] ${isDone ? "opacity-60" : ""}`}>
-                              {task.plannedDurationMinutes && (
-                                <span className="text-[11px] sm:text-xs font-mono text-text-muted">
-                                  {task.plannedDurationMinutes}m
-                                </span>
-                              )}
-                            </div>
-                            <div className={`flex justify-end w-[55px] sm:w-[65px] ${isDone ? "opacity-60" : ""}`}>
-                              <PriorityBadge priority={task.priority} />
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => setEditingTask(task)}
-                              className="p-1.5 opacity-0 group-hover:opacity-100 hover:bg-bg-secondary text-text-muted hover:text-text-primary rounded transition-all cursor-pointer"
-                              title="Edit task"
-                            >
-                              <Edit3 size={13} />
-                            </button>
-                            <div className="flex justify-end w-[65px] sm:w-[75px]">
-                              {!sessionActive && !isDone && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleStartTaskFocus(task)}
-                                  className="inline-flex items-center gap-1 text-xs text-text-primary hover:text-text-secondary px-2.5 py-1 rounded bg-bg-secondary border border-border-subtle hover:border-border-hover cursor-pointer transition-colors"
-                                >
-                                  <Play size={10} className="fill-current" />
-                                  <span>Focus</span>
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
+                    {indep.map((task) => renderTodayTaskRow(task))}
                   </div>
                 </div>
               );
@@ -866,9 +823,12 @@ export function TodayView() {
 
       {/* 5. TODAY'S REALITY (Compact evidence summary ribbon) */}
       <Section>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-text-muted mb-2.5">
+          Today&apos;s reality
+        </p>
         <div className="flex items-center justify-between mb-3">
           <SectionHeader
-            title="Today's Reality"
+            title="What actually happened"
             description="Intention vs Observation evidence summary"
           />
           <Link
