@@ -127,12 +127,37 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
     dueDate: "",
   });
 
+  // Inline reflection composer state: late entry per session, or amendment
+  // of an existing debrief. Originals are always preserved server-side.
+  // NOTE (Rules of Hooks): the drawer stays mounted with task=null and
+  // returns early below, so every hook MUST live above that return.
+  const [composer, setComposer] = useState<
+    { kind: "create"; sessionId: string } | { kind: "amend"; checkInId: string } | null
+  >(null);
+
+  // SessionId -> debrief for sessions that already have one. Reads taskDetail
+  // directly (the `checkIns` variable is declared after the early return).
+  const debriefBySession = useMemo(() => {
+    const list = taskDetail?.checkIns ?? [];
+    const map = new Map<string, (typeof list)[number]>();
+    for (const ci of list) {
+      if (ci.workSessionId && !map.has(ci.workSessionId)) map.set(ci.workSessionId, ci);
+    }
+    return map;
+  }, [taskDetail]);
+
+  const amendTarget = useMemo(() => {
+    if (composer?.kind !== "amend") return null;
+    return (taskDetail?.checkIns ?? []).find((ci) => ci.id === composer.checkInId) ?? null;
+  }, [composer, taskDetail]);
+
   // Sync state ONLY when opening or switching to a different task
   useEffect(() => {
     if (!task) {
       setLastLoadedId(null);
       setIsSaved(false);
       setConfirmingDelete(null);
+      setComposer(null);
       return;
     }
     if (task.id !== lastLoadedId) {
@@ -157,6 +182,7 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
       setBaseline(initial);
       setLastLoadedId(task.id);
       setIsSaved(false);
+      setComposer(null);
     }
   }, [task, lastLoadedId]);
 
@@ -190,25 +216,7 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
   const activeSession = sessions.find((s) => !s.endedAt);
   const checkIns = taskDetail?.checkIns || [];
 
-  // Inline reflection composer state: late entry per session, or amendment
-  // of an existing debrief. Originals are always preserved server-side.
-  const [composer, setComposer] = useState<
-    { kind: "create"; sessionId: string } | { kind: "amend"; checkInId: string } | null
-  >(null);
 
-  // SessionId -> debrief for sessions that already have one.
-  const debriefBySession = useMemo(() => {
-    const map = new Map<string, (typeof checkIns)[number]>();
-    for (const ci of checkIns) {
-      if (ci.workSessionId && !map.has(ci.workSessionId)) map.set(ci.workSessionId, ci);
-    }
-    return map;
-  }, [checkIns]);
-
-  const amendTarget = useMemo(() => {
-    if (composer?.kind !== "amend") return null;
-    return checkIns.find((ci) => ci.id === composer.checkInId) ?? null;
-  }, [composer, checkIns]);
 
   const localToday = resolveProductiveDay(new Date());
   const createdDate = currentTask.createdAt
