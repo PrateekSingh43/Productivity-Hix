@@ -45,6 +45,24 @@ export type CheckIn = {
   productive: boolean | null;
   outcome: string | null;
   createdAt: string;
+  /** Number of preserved prior versions (0 = never amended). */
+  amendmentCount?: number;
+};
+
+/** One preserved pre-amendment snapshot of a reflection (oldest-first). */
+export type CheckInAmendment = {
+  id: string;
+  activityAssessment: string | null;
+  alignment: string | null;
+  reasons: string[];
+  state: string | null;
+  energy: string | null;
+  focus: string | null;
+  note: string | null;
+  blocker: string | null;
+  productive: boolean | null;
+  outcome: string | null;
+  createdAt: string;
 };
 
 export type CheckInPatternCandidate = {

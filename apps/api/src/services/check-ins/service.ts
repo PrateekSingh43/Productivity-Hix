@@ -1,5 +1,5 @@
-import type { CheckIn, CheckInPatternCandidate } from "@repo/types";
-import type { CheckInCreateInput } from "@repo/validation";
+import type { CheckIn, CheckInAmendment, CheckInPatternCandidate } from "@repo/types";
+import type { CheckInCreateInput, CheckInUpdateInput } from "@repo/validation";
 import { getDb } from "../../lib/prisma";
 
 const DEEPER_QUESTION_CATALOG: Record<
@@ -170,6 +170,97 @@ export async function createCheckIn(
 
   const created = await getDb().checkIn.create({ data });
   return serializeCheckIn(created);
+}
+
+/**
+ * Amends a reflection: snapshots the current content into the append-only
+ * check_in_amendments table, then updates the row in place so every existing
+ * read (drawer, analytics, patterns) keeps showing the latest words while the
+ * raw original stays inspectable. Amendment is best-effort atomic: snapshot
+ * first, then update; a snapshot failure aborts before anything changes.
+ */
+export async function amendCheckIn(
+  userId: string,
+  id: string,
+  input: CheckInUpdateInput,
+): Promise<CheckIn> {
+  const db = getDb();
+  const existing = await db.checkIn.findFirst({ where: { id, userId } });
+  if (!existing) {
+    const error = new Error("Check-in not found") as Error & { status?: number };
+    error.status = 404;
+    throw error;
+  }
+
+  const trim500 = (v: string | null | undefined) =>
+    v === undefined ? undefined : v === null ? null : v.trim().slice(0, 500);
+
+  await db.checkInAmendment.create({
+    data: {
+      userId,
+      checkInId: id,
+      activityAssessment: existing.activityAssessment,
+      alignment: existing.alignment,
+      reasons: existing.reasons,
+      state: existing.state,
+      energy: existing.energy,
+      focus: existing.focus,
+      note: existing.note,
+      blocker: existing.blocker,
+      productive: existing.productive,
+      outcome: existing.outcome,
+    },
+  });
+
+  const updated = await db.checkIn.update({
+    where: { id },
+    data: {
+      ...(input.activityAssessment !== undefined && { activityAssessment: input.activityAssessment || null }),
+      ...(input.alignment !== undefined && { alignment: input.alignment || null }),
+      ...(input.reasons !== undefined && { reasons: input.reasons }),
+      ...(input.state !== undefined && { state: input.state || null }),
+      ...(input.energy !== undefined && { energy: input.energy || null }),
+      ...(input.focus !== undefined && { focus: input.focus || null }),
+      ...(input.note !== undefined && { note: input.note ? input.note.trim().slice(0, 500) : null }),
+      ...(input.blocker !== undefined && { blocker: trim500(input.blocker) ?? null }),
+      ...(input.productive !== undefined && { productive: input.productive }),
+      ...(input.outcome !== undefined && { outcome: trim500(input.outcome) ?? null }),
+    },
+  });
+  return serializeCheckIn(updated);
+}
+
+/**
+ * Preserved pre-amendment snapshots for one reflection, oldest-first.
+ * Empty when never amended.
+ */
+export async function listCheckInAmendments(
+  userId: string,
+  checkInId: string,
+): Promise<CheckInAmendment[]> {
+  const checkIn = await getDb().checkIn.findFirst({
+    where: { id: checkInId, userId },
+    select: { id: true },
+  });
+  if (!checkIn) return [];
+  const rows = await getDb().checkInAmendment.findMany({
+    where: { userId, checkInId },
+    orderBy: { createdAt: "asc" },
+  });
+  return rows.map((r) => ({
+    id: r.id,
+    activityAssessment: r.activityAssessment,
+    alignment: r.alignment,
+    reasons: r.reasons ?? [],
+    state: r.state,
+    energy: r.energy,
+    focus: r.focus,
+    note: r.note,
+    blocker: r.blocker,
+    productive: r.productive,
+    outcome: r.outcome,
+    createdAt: r.createdAt.toISOString(),
+  }));
 }
 
 /**

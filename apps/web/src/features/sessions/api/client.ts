@@ -4,7 +4,9 @@ import type {
   CreateSessionInput,
   UpdateSessionInput,
   CheckIn,
+  CheckInAmendment,
   CreateCheckInInput,
+  AmendCheckInInput,
   SessionListFilters,
 } from "../types";
 
@@ -85,4 +87,15 @@ export function getCheckIns() {
 
 export function createCheckIn(input: CreateCheckInInput) {
   return apiFetch<CheckIn>("/api/check-ins", jsonBody(input));
+}
+
+export function amendCheckIn(id: string, input: AmendCheckInInput) {
+  return apiFetch<CheckIn>(`/api/check-ins/${id}`, {
+    ...jsonBody(input),
+    method: "PATCH",
+  });
+}
+
+export function getCheckInAmendments(id: string) {
+  return apiFetch<CheckInAmendment[]>(`/api/check-ins/${id}/amendments`);
 }

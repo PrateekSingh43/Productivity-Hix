@@ -26,6 +26,7 @@ model User {
   tasks               Task[]
   workSessions        WorkSession[]
   checkIns            CheckIn[]
+  checkInAmendments   CheckInAmendment[]
   taskScheduleHistory TaskScheduleHistory[]
   learningAssessments LearningAssessment[]
   activitySyncStates  ActivitySyncState[]
@@ -257,10 +258,42 @@ model CheckIn {
   user               User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   workSession        WorkSession? @relation(fields: [workSessionId], references: [id], onDelete: SetNull)
   task               Task?        @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  amendments         CheckInAmendment[]
 
   @@index([userId, createdAt])
   @@index([userId, windowStart])
   @@map("check_ins")
+}
+
+/// Append-only snapshots of reflection content before each amendment.
+///
+/// Root cause it addresses: reflections lived only in form state (lost when
+/// the extension popup closed) and had no update path at all, so a lost or
+/// hasty debrief could never be corrected. Corrections update the check-in
+/// row in place (so every existing read keeps showing the latest words)
+/// while each prior version is preserved here with its timestamp — raw
+/// originals stay trustworthy for AI synthesis, users can always revise.
+model CheckInAmendment {
+  id                 String   @id @default(cuid())
+  userId             String   @map("user_id")
+  checkInId          String   @map("check_in_id")
+  activityAssessment String?  @map("activity_assessment")
+  alignment          String?
+  reasons            String[] @default([])
+  state              String?
+  energy             String?
+  focus              String?
+  note               String?  @db.VarChar(500)
+  blocker            String?  @db.VarChar(500)
+  productive         Boolean?
+  outcome            String?  @db.VarChar(500)
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  checkIn CheckIn @relation(fields: [checkInId], references: [id], onDelete: Cascade)
+
+  @@index([checkInId, createdAt])
+  @@map("check_in_amendments")
 }
 
 model LearningAssessment {

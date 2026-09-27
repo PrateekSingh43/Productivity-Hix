@@ -34,6 +34,8 @@ export type TaskWithSessions = Task & {
   }>;
   checkIns?: Array<{
     id: string;
+    workSessionId?: string | null;
+    source?: string | null;
     activityAssessment?: string | null;
     alignment?: string | null;
     energy?: string | null;
@@ -42,6 +44,7 @@ export type TaskWithSessions = Task & {
     outcome?: string | null;
     blocker?: string | null;
     createdAt: string;
+    amendmentCount?: number;
   }>;
 };
 

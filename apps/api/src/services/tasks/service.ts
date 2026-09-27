@@ -151,6 +151,8 @@ export async function getTask(userId: string, id: string): Promise<TaskWithSessi
         },
         select: {
           id: true,
+          workSessionId: true,
+          source: true,
           activityAssessment: true,
           alignment: true,
           energy: true,
@@ -159,6 +161,7 @@ export async function getTask(userId: string, id: string): Promise<TaskWithSessi
           outcome: true,
           blocker: true,
           createdAt: true,
+          _count: { select: { amendments: true } },
         },
         orderBy: { createdAt: "desc" },
       },
@@ -194,6 +197,8 @@ export async function getTask(userId: string, id: string): Promise<TaskWithSessi
 
   const checkInList = ((task as any).checkIns || []).map((c: any) => ({
     id: c.id,
+    workSessionId: c.workSessionId ?? null,
+    source: c.source ?? null,
     activityAssessment: c.activityAssessment ?? null,
     alignment: c.alignment ?? null,
     energy: c.energy ?? null,
@@ -202,6 +207,7 @@ export async function getTask(userId: string, id: string): Promise<TaskWithSessi
     outcome: c.outcome ?? null,
     blocker: c.blocker ?? null,
     createdAt: c.createdAt.toISOString(),
+    amendmentCount: c._count?.amendments ?? 0,
   }));
 
   return {

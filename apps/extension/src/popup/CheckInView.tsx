@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect } from "react";
 import { CheckCircle2, ArrowLeft, ArrowRight, X, Sparkles } from "lucide-react";
 import type { Task, CheckInPatternCandidate } from "@repo/types";
 import { submitCheckIn } from "../api/client";
+import { useCheckInDraft } from "./use-checkin-draft";
 
 function Step6Confirmation({
   offlineQueued,
@@ -182,6 +183,54 @@ export function CheckInView({
   const [offlineQueued, setOfflineQueued] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Draft autosave: popup closes ("got cut") lose everything typed without
+  // this — the fields below live only in React state otherwise.
+  const draftContextKey = focusContext?.workSessionId
+    ? `focus:${focusContext.workSessionId}`
+    : `periodic:${new Date().toISOString().slice(0, 10)}`;
+  const { draft, clearDraft } = useCheckInDraft(draftContextKey, {
+    assessment,
+    alignment,
+    selectedReasons,
+    state,
+    energy,
+    focus,
+    note,
+    deeperAnswers,
+    step,
+  });
+  const [draftApplied, setDraftApplied] = useState(false);
+  const [draftNotice, setDraftNotice] = useState(false);
+  useEffect(() => {
+    if (!draft || draftApplied) return;
+    const f = draft.fields;
+    if (f.assessment !== undefined) setAssessment(f.assessment ?? null);
+    if (f.alignment !== undefined) setAlignment(f.alignment ?? null);
+    if (f.selectedReasons !== undefined) setSelectedReasons(f.selectedReasons ?? []);
+    if (f.state !== undefined) setState(f.state ?? null);
+    if (f.energy !== undefined) setEnergy(f.energy ?? null);
+    if (f.focus !== undefined) setFocus(f.focus ?? null);
+    if (f.note !== undefined) setNote(f.note ?? "");
+    if (f.deeperAnswers !== undefined) setDeeperAnswers(f.deeperAnswers ?? {});
+    if (typeof f.step === "number") setStep(f.step as 1 | 2 | 3 | 4 | 5 | 6);
+    setDraftApplied(true);
+    setDraftNotice(true);
+  }, [draft, draftApplied]);
+
+  const handleDiscardDraft = () => {
+    clearDraft();
+    setAssessment(null);
+    setAlignment(null);
+    setSelectedReasons([]);
+    setState(null);
+    setEnergy(null);
+    setFocus(null);
+    setNote("");
+    setDeeperAnswers({});
+    setStep(1);
+    setDraftNotice(false);
+  };
+
   const isBreak = assessment === "break";
   const shouldAskBlocker = !isBreak && (alignment === "partly" || alignment === "no" || assessment === "distracted");
 
@@ -251,6 +300,7 @@ export function CheckInView({
     try {
       const res = await submitCheckIn(payload);
       if (res.success) {
+        clearDraft();
         setOfflineQueued(Boolean(res.queuedOffline));
         setStep(6);
       } else {
@@ -316,6 +366,19 @@ export function CheckInView({
       {error && (
         <div style={{ padding: "8px 10px", background: "var(--danger-subtle)", border: "1px solid rgba(244,63,94,0.25)", borderRadius: 8, fontSize: 11, color: "var(--danger)" }}>
           {error}
+        </div>
+      )}
+
+      {draftNotice && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "8px 10px", background: "var(--bg-subtle)", border: "1px solid var(--border-default)", borderRadius: 8, fontSize: 11, color: "var(--text-secondary)" }}>
+          <span>Restored your unsent text from last time.</span>
+          <button
+            type="button"
+            onClick={handleDiscardDraft}
+            style={{ background: "transparent", border: 0, color: "var(--text-muted)", fontSize: 11, cursor: "pointer", textDecoration: "underline", padding: 0 }}
+          >
+            Discard
+          </button>
         </div>
       )}
 

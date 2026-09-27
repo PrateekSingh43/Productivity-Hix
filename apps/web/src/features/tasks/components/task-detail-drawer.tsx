@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { format } from "date-fns";
 import {
   X,
@@ -22,6 +22,8 @@ import {
   RotateCcw,
   MessageSquare,
   Zap,
+  Plus,
+  Pencil,
 } from "lucide-react";
 import Link from "next/link";
 import { resolveProductiveDay, type Task, type TaskPriority, type TaskStatus } from "@repo/types";
@@ -39,6 +41,10 @@ import {
 import { FocusReflectionModal } from "./focus-reflection-modal";
 import { ConfirmDiscardModal } from "./confirm-discard-modal";
 import { PlannedFocusPicker } from "./planned-focus-picker";
+import {
+  ReflectionAmendmentHistory,
+  SessionReflectionComposer,
+} from "./session-reflection-composer";
 
 interface TaskDetailDrawerProps {
   task: Task | null;
@@ -183,6 +189,26 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
   const sessions = taskDetail?.sessions || [];
   const activeSession = sessions.find((s) => !s.endedAt);
   const checkIns = taskDetail?.checkIns || [];
+
+  // Inline reflection composer state: late entry per session, or amendment
+  // of an existing debrief. Originals are always preserved server-side.
+  const [composer, setComposer] = useState<
+    { kind: "create"; sessionId: string } | { kind: "amend"; checkInId: string } | null
+  >(null);
+
+  // SessionId -> debrief for sessions that already have one.
+  const debriefBySession = useMemo(() => {
+    const map = new Map<string, (typeof checkIns)[number]>();
+    for (const ci of checkIns) {
+      if (ci.workSessionId && !map.has(ci.workSessionId)) map.set(ci.workSessionId, ci);
+    }
+    return map;
+  }, [checkIns]);
+
+  const amendTarget = useMemo(() => {
+    if (composer?.kind !== "amend") return null;
+    return checkIns.find((ci) => ci.id === composer.checkInId) ?? null;
+  }, [composer, checkIns]);
 
   const localToday = resolveProductiveDay(new Date());
   const createdDate = currentTask.createdAt
@@ -717,47 +743,78 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
                   const durationMins = session.durationSeconds
                     ? Math.round(session.durationSeconds / 60)
                     : null;
+                  const hasDebrief = debriefBySession.has(session.id);
+                  const isComposerOpen =
+                    composer?.kind === "create" && composer.sessionId === session.id;
 
                   return (
-                    <div
-                      key={session.id}
-                      className="group px-3.5 py-2.5 flex items-center justify-between text-xs hover:bg-bg-secondary/40 transition-colors"
-                    >
-                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                        <span className="text-[11px] font-mono text-text-muted shrink-0">
-                          #{sessions.length - idx}
-                        </span>
-                        <span className="text-text-primary font-medium shrink-0">
-                          {startText} – {endText}
-                        </span>
-                        {session.notes && (
-                          <span className="text-[11px] text-text-muted truncate max-w-[150px]">
-                            • {session.notes}
+                    <div key={session.id}>
+                      <div className="group px-3.5 py-2.5 flex items-center justify-between text-xs hover:bg-bg-secondary/40 transition-colors">
+                        <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                          <span className="text-[11px] font-mono text-text-muted shrink-0">
+                            #{sessions.length - idx}
                           </span>
-                        )}
+                          <span className="text-text-primary font-medium shrink-0">
+                            {startText} – {endText}
+                          </span>
+                          {session.notes && (
+                            <span className="text-[11px] text-text-muted truncate max-w-[150px]">
+                              • {session.notes}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-2.5 shrink-0">
+                          {isOngoing ? (
+                            <span className="text-[10px] font-semibold text-text-primary bg-bg-secondary border border-border-strong px-2 py-0.5 rounded">
+                              Active
+                            </span>
+                          ) : (
+                            <span className="font-mono text-xs text-text-muted">
+                              {durationMins !== null ? `${durationMins}m` : "0m"}
+                            </span>
+                          )}
+
+                          {!isOngoing && !hasDebrief && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setComposer(
+                                  isComposerOpen ? null : { kind: "create", sessionId: session.id }
+                                )
+                              }
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium text-text-muted hover:text-text-primary border border-transparent hover:border-border-subtle transition-all cursor-pointer"
+                              title="Add the reflection you missed for this session"
+                            >
+                              <Plus size={11} />
+                              <span>{isComposerOpen ? "Close" : "Add reflection"}</span>
+                            </button>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => setConfirmingDelete(session.id)}
+                            disabled={deleteSessionMutation.isPending}
+                            className="opacity-0 group-hover:opacity-100 p-1 rounded text-text-muted hover:text-rose-500 hover:bg-bg-secondary transition-all cursor-pointer"
+                            title="Delete session"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
                       </div>
 
-                      <div className="flex items-center gap-2.5 shrink-0">
-                        {isOngoing ? (
-                          <span className="text-[10px] font-semibold text-text-primary bg-bg-secondary border border-border-strong px-2 py-0.5 rounded">
-                            Active
-                          </span>
-                        ) : (
-                          <span className="font-mono text-xs text-text-muted">
-                            {durationMins !== null ? `${durationMins}m` : "0m"}
-                          </span>
-                        )}
-
-                        <button
-                          type="button"
-                          onClick={() => setConfirmingDelete(session.id)}
-                          disabled={deleteSessionMutation.isPending}
-                          className="opacity-0 group-hover:opacity-100 p-1 rounded text-text-muted hover:text-rose-500 hover:bg-bg-secondary transition-all cursor-pointer"
-                          title="Delete session"
-                        >
-                          <Trash2 size={12} />
-                        </button>
-                      </div>
+                      {isComposerOpen && (
+                        <div className="px-3.5 pb-3">
+                          <SessionReflectionComposer
+                            mode="create"
+                            sessionId={session.id}
+                            taskId={currentTask.id}
+                            taskTitle={currentTask.title}
+                            onDone={() => setComposer(null)}
+                            onCancel={() => setComposer(null)}
+                          />
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -904,48 +961,95 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
                 </div>
               ) : (
                 <div className="space-y-3 divide-y divide-border-subtle/40">
-                  {checkIns.map((ci) => (
-                    <div key={ci.id} className="pt-3 first:pt-0 space-y-2">
-                      <div className="flex items-center justify-between text-xs">
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono text-[11px] text-text-muted">
-                            {format(new Date(ci.createdAt), "MMM d, h:mm a")}
-                          </span>
-                          {ci.alignment && (
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-bg-secondary border border-border-subtle text-text-secondary">
-                              {ci.alignment}
+                  {checkIns.map((ci) => {
+                    const isLate = (ci.source ?? "").includes("late");
+                    const amendedCount = ci.amendmentCount ?? 0;
+                    const isEditing =
+                      composer?.kind === "amend" && composer.checkInId === ci.id;
+                    return (
+                      <div key={ci.id} className="pt-3 first:pt-0 space-y-2">
+                        <div className="flex items-center justify-between text-xs">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-[11px] text-text-muted">
+                              {format(new Date(ci.createdAt), "MMM d, h:mm a")}
                             </span>
-                          )}
+                            {ci.alignment && (
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-bg-secondary border border-border-subtle text-text-secondary">
+                                {ci.alignment}
+                              </span>
+                            )}
+                            {isLate && (
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-bg-secondary border border-dashed border-border-subtle text-text-muted">
+                                added later
+                              </span>
+                            )}
+                            {amendedCount > 0 && (
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400">
+                                edited
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {ci.energy && (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-mono text-text-muted bg-bg-secondary px-1.5 py-0.5 rounded border border-border-subtle">
+                                <Zap size={9} className="text-amber-500" />
+                                Energy: {ci.energy}
+                              </span>
+                            )}
+                            {ci.focus && (
+                              <span className="text-[10px] font-mono text-text-muted bg-bg-secondary px-1.5 py-0.5 rounded border border-border-subtle">
+                                Focus: {ci.focus}
+                              </span>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setComposer(
+                                  isEditing ? null : { kind: "amend", checkInId: ci.id }
+                                )
+                              }
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium text-text-muted hover:text-text-primary border border-transparent hover:border-border-subtle transition-all cursor-pointer"
+                              title="Revise this reflection (original is preserved)"
+                            >
+                              <Pencil size={11} />
+                              <span>{isEditing ? "Close" : "Edit"}</span>
+                            </button>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          {ci.energy && (
-                            <span className="inline-flex items-center gap-1 text-[10px] font-mono text-text-muted bg-bg-secondary px-1.5 py-0.5 rounded border border-border-subtle">
-                              <Zap size={9} className="text-amber-500" />
-                              Energy: {ci.energy}
-                            </span>
-                          )}
-                          {ci.focus && (
-                            <span className="text-[10px] font-mono text-text-muted bg-bg-secondary px-1.5 py-0.5 rounded border border-border-subtle">
-                              Focus: {ci.focus}
-                            </span>
-                          )}
-                        </div>
+
+                        {(ci.outcome || ci.note) && (
+                          <div className="text-xs text-text-primary bg-bg-secondary/50 rounded-lg p-2.5 border border-border-subtle leading-relaxed">
+                            {ci.outcome || ci.note}
+                          </div>
+                        )}
+
+                        {ci.blocker && (
+                          <div className="inline-flex items-center gap-1.5 text-[11px] text-rose-600 dark:text-rose-400 bg-rose-500/10 border border-rose-500/20 px-2 py-1 rounded-md">
+                            <AlertTriangle size={11} className="shrink-0" />
+                            <span>Blocker: {ci.blocker}</span>
+                          </div>
+                        )}
+
+                        {amendedCount > 0 && <ReflectionAmendmentHistory checkInId={ci.id} />}
+
+                        {isEditing && (
+                          <SessionReflectionComposer
+                            mode="amend"
+                            checkIn={{
+                              id: ci.id,
+                              activityAssessment: ci.activityAssessment,
+                              energy: ci.energy,
+                              outcome: ci.outcome,
+                              note: ci.note,
+                              amendmentCount: amendedCount,
+                            }}
+                            onDone={() => setComposer(null)}
+                            onCancel={() => setComposer(null)}
+                          />
+                        )}
                       </div>
-
-                      {(ci.outcome || ci.note) && (
-                        <div className="text-xs text-text-primary bg-bg-secondary/50 rounded-lg p-2.5 border border-border-subtle leading-relaxed">
-                          {ci.outcome || ci.note}
-                        </div>
-                      )}
-
-                      {ci.blocker && (
-                        <div className="inline-flex items-center gap-1.5 text-[11px] text-rose-600 dark:text-rose-400 bg-rose-500/10 border border-rose-500/20 px-2 py-1 rounded-md">
-                          <AlertTriangle size={11} className="shrink-0" />
-                          <span>Blocker: {ci.blocker}</span>
-                        </div>
-                      )}
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>

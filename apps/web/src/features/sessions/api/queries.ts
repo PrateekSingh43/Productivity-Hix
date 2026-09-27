@@ -1,7 +1,7 @@
 "use client";
 
 import { queryOptions, useQuery } from "@tanstack/react-query";
-import { getSessions, getActiveSession } from "./client";
+import { getSessions, getActiveSession, getCheckInAmendments } from "./client";
 import type { SessionListFilters } from "../types";
 
 export const sessionQueries = {
@@ -21,6 +21,14 @@ export const sessionQueries = {
       staleTime: 2_000,
       refetchInterval: 3_000,
     }),
+  checkIns: () => [...sessionQueries.all(), "check-ins"] as const,
+  amendments: (checkInId: string | null) =>
+    queryOptions({
+      queryKey: [...sessionQueries.checkIns(), checkInId, "amendments"] as const,
+      queryFn: () => (checkInId ? getCheckInAmendments(checkInId) : []),
+      enabled: Boolean(checkInId),
+      staleTime: 10_000,
+    }),
 };
 
 export function useSessionsList(filters?: SessionListFilters) {
@@ -29,4 +37,8 @@ export function useSessionsList(filters?: SessionListFilters) {
 
 export function useActiveSession() {
   return useQuery(sessionQueries.active());
+}
+
+export function useCheckInAmendments(checkInId: string | null) {
+  return useQuery(sessionQueries.amendments(checkInId));
 }

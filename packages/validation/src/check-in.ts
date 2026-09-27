@@ -54,3 +54,24 @@ export const checkInCreateSchema = z.object({
 });
 
 export type CheckInCreateInput = z.infer<typeof checkInCreateSchema>;
+
+/**
+ * Amendment payload: content fields only, all optional.
+ * Identity fields (workSessionId, taskId, source, eventType, window) are
+ * deliberately excluded — an amendment revises *what was said*, never which
+ * session it belongs to or when/where it was recorded.
+ */
+export const checkInUpdateSchema = z.object({
+  activityAssessment: activityAssessmentSchema.or(z.string()).nullable().optional(),
+  alignment: checkInAlignmentSchema.or(z.string()).nullable().optional(),
+  reasons: z.array(z.string().trim().min(1).max(100)).optional(),
+  state: emotionalStateSchema.or(z.string()).nullable().optional(),
+  energy: energyLevelSchema.or(z.string()).nullable().optional(),
+  focus: focusLevelSchema.or(z.string()).nullable().optional(),
+  note: z.string().trim().max(500, "Reflection note must be at most 500 characters").nullable().optional(),
+  blocker: z.string().trim().max(500, "Blocker must be at most 500 characters").nullable().optional(),
+  productive: z.boolean().nullable().optional(),
+  outcome: z.string().trim().max(500, "Outcome must be at most 500 characters").nullable().optional(),
+});
+
+export type CheckInUpdateInput = z.infer<typeof checkInUpdateSchema>;

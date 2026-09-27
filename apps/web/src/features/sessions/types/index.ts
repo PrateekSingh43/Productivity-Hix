@@ -1,6 +1,6 @@
-import type { WorkSession, CheckIn } from "@repo/types";
+import type { WorkSession, CheckIn, CheckInAmendment } from "@repo/types";
 
-export type { WorkSession, CheckIn };
+export type { WorkSession, CheckIn, CheckInAmendment };
 
 export interface CreateSessionInput {
   taskId?: string | null;
@@ -28,6 +28,19 @@ export interface CreateCheckInInput {
   focus?: string | null;
   note?: string | null;
   source?: string;
+}
+
+export interface AmendCheckInInput {
+  activityAssessment?: string | null;
+  alignment?: string | null;
+  reasons?: string[];
+  state?: string | null;
+  energy?: string | null;
+  focus?: string | null;
+  note?: string | null;
+  blocker?: string | null;
+  productive?: boolean | null;
+  outcome?: string | null;
 }
 
 export type SessionRangePreset = "today" | "7d" | "30d" | "90d" | "all";
