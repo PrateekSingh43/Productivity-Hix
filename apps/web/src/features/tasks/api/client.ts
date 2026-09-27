@@ -1,8 +1,13 @@
 import { apiFetch, jsonBody } from "@shared/api/client";
-import type { Task, TaskWithSessions, TaskObservedActivityItem, CreateTaskInput, UpdateTaskInput } from "../types";
+import type { Task, TaskWithSessions, TaskObservedActivityItem, CreateTaskInput, UpdateTaskInput, TaskFilters } from "../types";
 
-export function getTasks() {
-  return apiFetch<Task[]>("/api/tasks");
+export function getTasks(filters?: TaskFilters) {
+  const params = new URLSearchParams();
+  if (filters?.productiveDate) params.set("productiveDate", filters.productiveDate);
+  if (filters?.status) params.set("status", filters.status);
+  if (filters?.goalId) params.set("goalId", filters.goalId);
+  const suffix = params.size > 0 ? `?${params.toString()}` : "";
+  return apiFetch<Task[]>(`/api/tasks${suffix}`);
 }
 
 export function getTask(id: string) {

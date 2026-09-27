@@ -10,7 +10,7 @@ export const taskQueries = {
   list: (filters?: TaskFilters) =>
     queryOptions({
       queryKey: [...taskQueries.lists(), filters ?? {}] as const,
-      queryFn: getTasks,
+      queryFn: () => getTasks(filters),
       staleTime: 5_000,
       refetchInterval: 10_000,
     }),

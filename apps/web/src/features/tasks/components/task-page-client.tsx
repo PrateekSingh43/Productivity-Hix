@@ -28,6 +28,12 @@ import {
   isTodayTask,
   isUpcomingTask,
 } from "../lib/task-scopes";
+import {
+  buildHistoryGroups,
+  formatHistoryDayLabel,
+  historyEligibleTasks,
+  type HistoryFilter,
+} from "../lib/task-history";
 import { useTasksList } from "../api/queries";
 import { useSessionsList } from "@features/sessions";
 import { useTodayPlan } from "@features/today";
@@ -39,7 +45,6 @@ import { TaskDetailDrawer } from "./task-detail-drawer";
 import { PageContainer, PageHeader, Section, SectionHeader } from "@shared/components/layout";
 
 type FilterTab = "today" | "overdue" | "backlog" | "history";
-type HistoryFilter = "all" | "completed" | "missed";
 
 export function TaskPageClient() {
   const { data: tasks = [], isLoading: isLoadingTasks } = useTasksList();
@@ -143,62 +148,27 @@ export function TaskPageClient() {
     return Math.round(seconds / 60);
   }, [todayTasks]);
 
-  // 4. History groups grouped chronologically by date (newest first)
+  // 4. History / Logbook day groups (production semantics):
+  // finished work grouped by completion day, past-or-today scheduled work by
+  // its scheduled day; future upcoming + dateless backlog incompletes are
+  // excluded so they can never pollute the logbook. Newest day first.
+  const [visibleHistoryDays, setVisibleHistoryDays] = useState(14);
+  const historyEligible = useMemo(
+    () => historyEligibleTasks(tasks, todayDate),
+    [tasks, todayDate]
+  );
   const historyGroups = useMemo(() => {
-    const groupsMap = new Map<string, Task[]>();
-
-    for (const t of tasks) {
-      const d = t.productiveDate || (t.dueAt ? t.dueAt.slice(0, 10) : t.createdAt.slice(0, 10));
-      const list = groupsMap.get(d) ?? [];
-      list.push(t);
-      groupsMap.set(d, list);
-    }
-
-    const sortedDates = Array.from(groupsMap.keys()).sort((a, b) => b.localeCompare(a));
-
-    return sortedDates
-      .map((dateStr) => {
-        const rawList = groupsMap.get(dateStr) ?? [];
-        const completedCount = rawList.filter((t) => t.status === "done").length;
-        const totalCount = rawList.length;
-        const totalSeconds = rawList.reduce((sum, t) => sum + (t.actualDurationSeconds ?? 0), 0);
-        const actualMins = Math.round(totalSeconds / 60);
-
-        const filteredList = rawList.filter((t) => {
-          if (historyFilter === "completed") return t.status === "done";
-          if (historyFilter === "missed") return t.status !== "done" && t.status !== "cancelled";
-          return true;
-        });
-
-        let label = dateStr;
-        try {
-          if (dateStr === todayDate) {
-            label = `Today · ${format(new Date(), "EEEE, MMM d")}`;
-          } else {
-            const parsed = new Date(`${dateStr}T12:00:00`);
-            label = format(parsed, "EEEE, MMMM d, yyyy");
-          }
-        } catch {
-          label = dateStr;
-        }
-
-        return {
-          date: dateStr,
-          label,
-          isToday: dateStr === todayDate,
-          isPast: dateStr < todayDate,
-          tasks: filteredList,
-          totalCount,
-          completedCount,
-          actualMins,
-        };
-      })
-      .filter((g) => g.tasks.length > 0);
+    const groups = buildHistoryGroups(tasks, todayDate, historyFilter);
+    return groups.map((g) => ({ ...g, label: formatHistoryDayLabel(g.date, todayDate) }));
   }, [tasks, todayDate, historyFilter]);
+  const visibleHistoryGroups = useMemo(
+    () => historyGroups.slice(0, visibleHistoryDays),
+    [historyGroups, visibleHistoryDays]
+  );
 
-  const historyTotalTasksCount = tasks.length;
-  const historyCompletedTasksCount = tasks.filter((t) => t.status === "done").length;
-  const historyMissedTasksCount = tasks.filter(
+  const historyTotalTasksCount = historyEligible.length;
+  const historyCompletedTasksCount = historyEligible.filter((t) => t.status === "done").length;
+  const historyMissedTasksCount = historyEligible.filter(
     (t) => t.status !== "done" && t.status !== "cancelled"
   ).length;
 
@@ -394,7 +364,10 @@ export function TaskPageClient() {
           {/* VIEW 4: HISTORY / LOGBOOK */}
           <button
             type="button"
-            onClick={() => setFilterTab("history")}
+            onClick={() => {
+              setVisibleHistoryDays(14);
+              setFilterTab("history");
+            }}
             className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
               filterTab === "history"
                 ? "bg-bg-card text-text-primary border border-border-subtle/60 shadow-2xs font-semibold"
@@ -767,7 +740,10 @@ export function TaskPageClient() {
                 <div className="flex items-center gap-1 bg-bg-secondary p-1 rounded-lg border border-border-subtle self-start sm:self-auto">
                   <button
                     type="button"
-                    onClick={() => setHistoryFilter("all")}
+                    onClick={() => {
+                      setVisibleHistoryDays(14);
+                      setHistoryFilter("all");
+                    }}
                     className={`px-2.5 py-1 rounded text-xs font-medium transition-colors cursor-pointer ${
                       historyFilter === "all"
                         ? "bg-bg-card text-text-primary shadow-2xs"
@@ -778,7 +754,10 @@ export function TaskPageClient() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setHistoryFilter("completed")}
+                    onClick={() => {
+                      setVisibleHistoryDays(14);
+                      setHistoryFilter("completed");
+                    }}
                     className={`px-2.5 py-1 rounded text-xs font-medium transition-colors cursor-pointer ${
                       historyFilter === "completed"
                         ? "bg-bg-card text-text-primary shadow-2xs"
@@ -789,7 +768,10 @@ export function TaskPageClient() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setHistoryFilter("missed")}
+                    onClick={() => {
+                      setVisibleHistoryDays(14);
+                      setHistoryFilter("missed");
+                    }}
                     className={`px-2.5 py-1 rounded text-xs font-medium transition-colors cursor-pointer ${
                       historyFilter === "missed"
                         ? "bg-bg-card text-text-primary shadow-2xs"
@@ -812,7 +794,7 @@ export function TaskPageClient() {
                 </div>
               ) : (
                 <div className="space-y-5">
-                  {historyGroups.map((group) => {
+                  {visibleHistoryGroups.map((group) => {
                     const completionRate =
                       group.totalCount > 0
                         ? Math.round((group.completedCount / group.totalCount) * 100)
@@ -874,6 +856,19 @@ export function TaskPageClient() {
                       </div>
                     );
                   })}
+                  {historyGroups.length > visibleHistoryDays && (
+                    <div className="flex justify-center pt-1">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setVisibleHistoryDays((n) => n + 14)
+                        }
+                        className="px-4 py-2 rounded-lg bg-bg-secondary border border-border-subtle hover:border-border-hover text-xs font-medium text-text-primary transition-colors cursor-pointer"
+                      >
+                        Show Earlier Days ({historyGroups.length - visibleHistoryDays} remaining)
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </Section>
