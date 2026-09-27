@@ -1,6 +1,7 @@
 import {
   resolveProductiveDay,
   type Task,
+  type TaskScheduleMove,
   type TaskWithSessions,
   type TaskObservedActivityItem,
 } from "@repo/types";
@@ -419,8 +420,22 @@ export async function updateTask(
   },
 ) {
   const dataToUpdate: Record<string, unknown> = { ...input };
+  const db = getDb();
 
-  const updated = await getDb().task.update({
+  // Snapshot the previous scheduled day BEFORE mutating: rescheduling used to
+  // silently erase which day a task was planned for, making past-day history
+  // unrecoverable. Every genuine productiveDate change appends one row to the
+  // append-only task_schedule_history audit table (best-effort: an audit
+  // failure must never break the user's update).
+  const previous =
+    input.productiveDate !== undefined
+      ? await db.task.findFirst({
+          where: { id, userId },
+          select: { productiveDate: true },
+        })
+      : null;
+
+  const updated = await db.task.update({
     where: { id, userId },
     data: {
       ...dataToUpdate,
@@ -445,7 +460,60 @@ export async function updateTask(
     },
   });
 
+  const prevDate = previous?.productiveDate ?? null;
+  const nextDate = (input.productiveDate as string | null | undefined) ?? null;
+  if (previous && prevDate !== nextDate) {
+    try {
+      const audit = (db as unknown as Record<string, unknown>).taskScheduleHistory as
+        | { create: (args: unknown) => Promise<unknown> }
+        | undefined;
+      // Guarded for rolling deploys: a running server on a stale generated
+      // client has no taskScheduleHistory delegate yet; skip instead of crash.
+      if (audit) {
+        await audit.create({
+          data: { userId, taskId: id, fromDate: prevDate, toDate: nextDate },
+        });
+      }
+    } catch (error) {
+      console.warn("[tasks] schedule-history audit write failed (non-fatal)", error);
+    }
+  }
+
   return serializeTask(updated);
+}
+
+/**
+ * Append-only schedule moves for one task, oldest-first.
+ * Empty when the task was never rescheduled (or predates the audit table).
+ */
+export async function getTaskScheduleHistory(
+  userId: string,
+  taskId: string,
+): Promise<TaskScheduleMove[]> {
+  const task = await getDb().task.findFirst({
+    where: { id: taskId, userId },
+    select: { id: true },
+  });
+  if (!task) return [];
+
+  const db = getDb() as unknown as {
+    taskScheduleHistory?: {
+      findMany: (args: unknown) => Promise<
+        Array<{ id: string; fromDate: string | null; toDate: string | null; changedAt: Date }>
+      >;
+    };
+  };
+  if (!db.taskScheduleHistory) return [];
+  const rows = await db.taskScheduleHistory.findMany({
+    where: { userId, taskId },
+    orderBy: { changedAt: "asc" },
+  });
+  return rows.map((r) => ({
+    id: r.id,
+    fromDate: r.fromDate,
+    toDate: r.toDate,
+    changedAt: r.changedAt.toISOString(),
+  }));
 }
 
 export async function deleteTask(userId: string, id: string) {

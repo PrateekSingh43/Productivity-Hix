@@ -26,7 +26,7 @@ import {
 import Link from "next/link";
 import { resolveProductiveDay, type Task, type TaskPriority, type TaskStatus } from "@repo/types";
 import { dueDateKey } from "../lib/task-scopes";
-import { useTaskDetail, useTaskActivity } from "../api/queries";
+import { useTaskDetail, useTaskActivity, useTaskScheduleHistory } from "../api/queries";
 import { useTodayPlan } from "@features/today";
 import { useUpdateTaskMutation, useDeleteTaskMutation } from "../api/mutations";
 import {
@@ -81,6 +81,7 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
   const taskId = task?.id ?? null;
   const { data: taskDetail } = useTaskDetail(taskId);
   const { data: activitySummary = [] } = useTaskActivity(taskId);
+  const { data: scheduleHistory = [] } = useTaskScheduleHistory(taskId);
   const todayPlan = useTodayPlan();
   const goals = todayPlan.data?.goals ?? [];
 
@@ -838,6 +839,42 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
               )}
             </div>
           </div>
+
+          {/* SCHEDULE HISTORY (append-only reschedule audit) */}
+          {scheduleHistory.length > 0 && (
+            <div className="space-y-3 pt-1">
+              <div className="flex items-center gap-2">
+                <History size={13} className="text-text-muted" />
+                <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
+                  Schedule history
+                </h3>
+                <span className="text-xs font-mono text-text-muted bg-bg-secondary px-1.5 py-0.2 rounded border border-border-subtle">
+                  {scheduleHistory.length}
+                </span>
+              </div>
+
+              <div className="p-4 rounded-xl bg-bg-secondary/30 border border-border-subtle space-y-3">
+                <p className="text-xs text-text-muted leading-relaxed">
+                  Days this task was previously scheduled for. Rescheduling never erases this record.
+                </p>
+
+                <div className="space-y-2 divide-y divide-border-subtle/30">
+                  {[...scheduleHistory].reverse().map((move) => (
+                    <div key={move.id} className="pt-2 first:pt-0 flex items-center justify-between gap-2 text-xs">
+                      <span className="inline-flex items-center gap-1.5 font-mono text-text-secondary">
+                        <span>{move.fromDate ?? "unscheduled"}</span>
+                        <ArrowRight size={11} className="text-text-muted shrink-0" />
+                        <span className="font-semibold text-text-primary">{move.toDate ?? "unscheduled"}</span>
+                      </span>
+                      <span className="font-mono text-[11px] text-text-muted shrink-0">
+                        {format(new Date(move.changedAt), "MMM d, h:mm a")}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* FOCUS REFLECTIONS */}
           <div className="space-y-3 pt-1">

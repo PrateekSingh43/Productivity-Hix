@@ -26,6 +26,7 @@ model User {
   tasks               Task[]
   workSessions        WorkSession[]
   checkIns            CheckIn[]
+  taskScheduleHistory TaskScheduleHistory[]
   learningAssessments LearningAssessment[]
   activitySyncStates  ActivitySyncState[]
   normalizedActivity  NormalizedActivity[]
@@ -170,6 +171,7 @@ model Task {
   goal                   DailyGoal?    @relation(fields: [goalId], references: [id], onDelete: SetNull)
   sessions               WorkSession[]
   checkIns               CheckIn[]
+  scheduleHistory        TaskScheduleHistory[]
 
   // Phase 3A Inverse Relations
   activityContextLinks   ActivityContextLink[]
@@ -202,6 +204,30 @@ model WorkSession {
 
   @@index([userId, startedAt])
   @@map("work_sessions")
+}
+
+/// Append-only audit of productive-day (re)scheduling.
+///
+/// Root cause it addresses: rescheduling mutated `tasks.productive_date` in
+/// place, permanently erasing which day a task was originally scheduled for.
+/// Past-day task history (e.g. "what was planned Sept 24?") became
+/// unrecoverable the moment a task was rescheduled. Every productiveDate
+/// change now appends one row here, so schedule moves are inspectable forever
+/// without affecting the mutable scheduling field the Today/Overdue/Upcoming
+/// scopes partition on.
+model TaskScheduleHistory {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  taskId    String   @map("task_id")
+  fromDate  String?  @map("from_date")
+  toDate    String?  @map("to_date")
+  changedAt DateTime @default(now()) @map("changed_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([userId, taskId, changedAt])
+  @@map("task_schedule_history")
 }
 
 model CheckIn {

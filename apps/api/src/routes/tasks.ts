@@ -6,6 +6,7 @@ import {
   listTasks,
   getTask,
   getTaskObservedActivity,
+  getTaskScheduleHistory,
   updateTask,
   deleteTask,
 } from "../services/tasks/service";
@@ -43,6 +44,15 @@ tasksRouter.get("/:id/activity", async (request, response, next) => {
   try {
     const activities = await getTaskObservedActivity(userIdFrom(request), request.params.id);
     response.json(activities);
+  } catch (error) {
+    next(error);
+  }
+});
+
+tasksRouter.get("/:id/schedule-history", async (request, response, next) => {
+  try {
+    const history = await getTaskScheduleHistory(userIdFrom(request), request.params.id);
+    response.json(history);
   } catch (error) {
     next(error);
   }

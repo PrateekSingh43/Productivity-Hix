@@ -1,7 +1,7 @@
 "use client";
 
 import { queryOptions, useQuery } from "@tanstack/react-query";
-import { getTasks, getTask, getTaskObservedActivity } from "./client";
+import { getTasks, getTask, getTaskObservedActivity, getTaskScheduleHistory } from "./client";
 import type { TaskFilters } from "../types";
 
 export const taskQueries = {
@@ -30,6 +30,15 @@ export const taskQueries = {
       enabled: Boolean(id),
       staleTime: 10_000,
     }),
+  // Keyed under detail(id) so useUpdateTaskMutation's detail invalidation
+  // refreshes schedule moves right after a reschedule.
+  scheduleHistory: (id: string | null) =>
+    queryOptions({
+      queryKey: [...taskQueries.details(), id, "schedule-history"] as const,
+      queryFn: () => (id ? getTaskScheduleHistory(id) : []),
+      enabled: Boolean(id),
+      staleTime: 10_000,
+    }),
 };
 
 export function useTasksList(filters?: TaskFilters) {
@@ -42,4 +51,8 @@ export function useTaskDetail(taskId: string | null) {
 
 export function useTaskActivity(taskId: string | null) {
   return useQuery(taskQueries.activity(taskId));
+}
+
+export function useTaskScheduleHistory(taskId: string | null) {
+  return useQuery(taskQueries.scheduleHistory(taskId));
 }

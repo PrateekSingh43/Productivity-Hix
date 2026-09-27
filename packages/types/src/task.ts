@@ -52,3 +52,17 @@ export interface TaskObservedActivityItem {
   durationSeconds: number;
   percentage?: number;
 }
+
+/**
+ * One append-only record of a task's productive-day (re)scheduling.
+ *
+ * `fromDate`/`toDate` are YYYY-MM-DD productive-day keys (nullable: a task
+ * can move from/to an unscheduled state). `changedAt` is the ISO timestamp
+ * of the move. Returned newest-last; callers display newest-first.
+ */
+export interface TaskScheduleMove {
+  id: string;
+  fromDate: string | null;
+  toDate: string | null;
+  changedAt: string;
+}

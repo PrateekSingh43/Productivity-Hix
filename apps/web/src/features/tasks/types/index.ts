@@ -1,6 +1,6 @@
-import type { Task, TaskPriority, TaskStatus, TaskWithSessions, TaskObservedActivityItem } from "@repo/types";
+import type { Task, TaskPriority, TaskStatus, TaskWithSessions, TaskObservedActivityItem, TaskScheduleMove } from "@repo/types";
 
-export type { Task, TaskPriority, TaskStatus, TaskWithSessions, TaskObservedActivityItem };
+export type { Task, TaskPriority, TaskStatus, TaskWithSessions, TaskObservedActivityItem, TaskScheduleMove };
 
 export interface TaskFilters {
   status?: TaskStatus;
