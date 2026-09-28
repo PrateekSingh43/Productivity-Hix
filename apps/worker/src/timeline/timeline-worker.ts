@@ -211,8 +211,27 @@ export class TimelineWorker extends BaseWorker<TimelineMaterializationJobData, T
         watcher: row.watcher,
         start: clippedStart,
         end: clippedEnd,
-        application: typeof d.application === "string" ? d.application : typeof d.app === "string" ? d.app : "Unknown",
-        title: typeof d.windowTitle === "string" ? d.windowTitle : typeof d.title === "string" ? d.title : "",
+        // Browser-extension rows carry pageTitle/domain but no application or
+        // windowTitle field. Without these fallbacks (mirroring
+        // normalizeRawActivityEvents) every tab became application "Unknown"
+        // with an empty title — unattributed blobs and missed leisure
+        // classification (e.g. ~5h of chess.com invisible as leisure).
+        application:
+          typeof d.application === "string"
+            ? d.application
+            : typeof d.app === "string"
+              ? d.app
+              : row.source === "browser"
+                ? "Browser"
+                : "Unknown",
+        title:
+          typeof d.windowTitle === "string"
+            ? d.windowTitle
+            : typeof d.title === "string" && d.title
+              ? d.title
+              : typeof d.pageTitle === "string"
+                ? d.pageTitle
+                : "",
         domain: typeof d.domain === "string" ? d.domain : null,
         url: typeof d.url === "string" ? d.url : null,
         isAfk: row.watcher === "afk" && (d.status === "afk" || d.state === "afk"),

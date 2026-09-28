@@ -130,6 +130,21 @@ const TITLE_MEDIA_PATTERNS: RegExp[] = [
   /\b(watch\?v=|official video|trailer|highlights|match|episode)\b/i,
 ];
 
+/**
+ * Leisure/gaming signals matched against "app + title" (mirrors the
+ * LEISURE_PATTERNS used by the segment engine). Needed because desktop
+ * browser-window rows carry no domain — without this, hours of chess.com /
+ * YouTube inside Brave collapsed to "unknown" (Sept 26: ~3h of chess
+ * invisible as leisure). Checked after dev patterns, before generic media.
+ */
+const TITLE_LEISURE_GAMING_PATTERNS: RegExp[] = [
+  /chess\.com|lichess|play chess|steampowered|epic games|riot client/i,
+];
+
+const TITLE_LEISURE_MEDIA_PATTERNS: RegExp[] = [
+  /youtube|youtu\.be|netflix|twitch|reddit|instagram|facebook\.com|tiktok|twitter|(?:^|\.)x\.com|disneyplus|prime video|hotstar|pinterest/i,
+];
+
 function systemClassify(obs: ObservationFeatures): { modality: ActivityModality; confidence: number | null; evidence: ClassificationEvidence[] } {
   const evidence: ClassificationEvidence[] = [];
   if (obs.isAfk) {
@@ -150,9 +165,20 @@ function systemClassify(obs: ObservationFeatures): { modality: ActivityModality;
     }
   }
   const title = obs.title ?? "";
+  const appTitleHay = `${app} ${title}`;
   for (const re of TITLE_DEV_PATTERNS) {
     if (re.test(title)) {
       return { modality: "development", confidence: 0.5, evidence: [{ kind: "WINDOW_TITLE", reference: title.slice(0, 120) }] };
+    }
+  }
+  for (const re of TITLE_LEISURE_GAMING_PATTERNS) {
+    if (re.test(appTitleHay)) {
+      return { modality: "gaming", confidence: 0.6, evidence: [{ kind: "WINDOW_TITLE", reference: title.slice(0, 120) }] };
+    }
+  }
+  for (const re of TITLE_LEISURE_MEDIA_PATTERNS) {
+    if (re.test(appTitleHay)) {
+      return { modality: "media_consumption", confidence: 0.6, evidence: [{ kind: "WINDOW_TITLE", reference: title.slice(0, 120) }] };
     }
   }
   for (const re of TITLE_MEDIA_PATTERNS) {

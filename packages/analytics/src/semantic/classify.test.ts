@@ -34,6 +34,16 @@ test("system classifier: unknown browser tab yields unknown, never assumes readi
   assert.equal(r.modality, "unknown");
 });
 
+test("system classifier: desktop browser window on chess.com title (no domain) maps to gaming", () => {
+  const r = classifyObservation({ application: "brave.exe", domain: null, title: "Home - Chess.com - Brave" });
+  assert.equal(r.modality, "gaming");
+});
+
+test("system classifier: desktop browser window on youtube title (no domain) maps to media_consumption", () => {
+  const r = classifyObservation({ application: "brave.exe", domain: null, title: "FIDE Chess Olympiad Round 10 - YouTube - Brave" });
+  assert.equal(r.modality, "media_consumption");
+});
+
 test("AFK yields idle_away regardless of application", () => {
   const r = classifyObservation({ application: "Code.exe", title: "auth.ts", isAfk: true });
   assert.equal(r.modality, "idle_away");
