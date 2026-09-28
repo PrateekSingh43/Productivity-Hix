@@ -119,7 +119,7 @@ export const modalityConfig: Record<
     badge: "bg-rose-500/10 text-rose-400 border-rose-500/20",
   },
   gaming: {
-    label: "Gaming",
+    label: "Games",
     icon: Gamepad2,
     color: "text-fuchsia-400",
     dot: "bg-fuchsia-400",
@@ -127,7 +127,7 @@ export const modalityConfig: Record<
     badge: "bg-fuchsia-500/10 text-fuchsia-400 border-fuchsia-500/20",
   },
   idle_away: {
-    label: "Away (Idle)",
+    label: "Away",
     icon: Coffee,
     color: "text-zinc-400",
     dot: "bg-zinc-400",
@@ -143,7 +143,7 @@ export const modalityConfig: Record<
     badge: "bg-slate-500/10 text-slate-400 border-slate-500/20",
   },
   unknown: {
-    label: "Unknown",
+    label: "Unsorted",
     icon: HelpCircle,
     color: "text-zinc-400",
     dot: "bg-zinc-500",
@@ -478,7 +478,7 @@ export function TimelineView() {
     return () => window.removeEventListener("popstate", syncDate);
   }, []);
 
-  const [activeTab, setActiveTab] = useState<"timeline" | "rules">("timeline");
+  const [activeTab, setActiveTab] = useState<"timeline" | "breakdown" | "rules">("timeline");
   const [filterModality, setFilterModality] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [density, setDensity] = useState<"compact" | "comfortable">("comfortable");
@@ -611,31 +611,70 @@ export function TimelineView() {
     [blocks]
   );
 
-  // "Where the time went": top applications + window titles over ACTIVE
-  // blocks only (breaks own their card). Shares divide by the active total
-  // so rows stay comparable with the Active Time headline.
+  // "Covered" for the context strip: union of every block span including
+  // breaks (coverage), never a sum — old snapshots contain overlapping
+  // spans, and summing them once produced a 24h+ day.
+  const coveredMs = useMemo(() => {
+    const ivs = blocks
+      .map((b) => {
+        const s = new Date(b.startTime).getTime();
+        const e = new Date(b.endTime).getTime();
+        return { start: s, end: e };
+      })
+      .filter((iv) => Number.isFinite(iv.start) && Number.isFinite(iv.end) && iv.end > iv.start)
+      .sort((a, b) => a.start - b.start);
+    let total = 0;
+    let cur: { start: number; end: number } | null = null;
+    for (const iv of ivs) {
+      if (!cur || iv.start > cur.end) {
+        if (cur) total += cur.end - cur.start;
+        cur = { ...iv };
+      } else if (iv.end > cur.end) {
+        cur.end = iv.end;
+      }
+    }
+    if (cur) total += cur.end - cur.start;
+    return total;
+  }, [blocks]);
+
+  // Breakdown aggregations over ACTIVE blocks only (breaks excluded).
+  // Window titles are subordinate to their application: each app carries its
+  // top contexts for drill-down, never a peer list. Shares divide by the
+  // active total so rows stay comparable with the Active Time headline.
   const topLists = useMemo(() => {
     const active = blocks.filter((b) => !b.isAfkBlock);
     const denom = active.reduce((s, b) => s + (b.wallClockDurationMs || b.observedActiveDurationMs || 0), 0);
-    const byApp = new Map<string, { ms: number; mod: string }>();
-    const byTitle = new Map<string, { ms: number; mod: string; app: string }>();
+    const byApp = new Map<string, { ms: number; mod: string; contexts: Map<string, number> }>();
     for (const b of active) {
       const ms = b.wallClockDurationMs || b.observedActiveDurationMs || 0;
       if (ms <= 0) continue;
       const mod = b.modality.primary?.value ?? "unknown";
       const app = b.primaryApplication || "Activity";
-      byApp.set(app, { ms: (byApp.get(app)?.ms ?? 0) + ms, mod });
-      const title = (b.cleanTitle || "").trim() || app;
-      const prev = byTitle.get(title);
-      byTitle.set(title, { ms: (prev?.ms ?? 0) + ms, mod: prev?.mod ?? mod, app });
+      const entry = byApp.get(app) ?? { ms: 0, mod, contexts: new Map<string, number>() };
+      entry.ms += ms;
+      const title = (b.cleanTitle || "").trim();
+      if (title && title !== app) {
+        entry.contexts.set(title, (entry.contexts.get(title) ?? 0) + ms);
+      }
+      byApp.set(app, entry);
     }
-    const top = <T,>(m: Map<string, T & { ms: number }>) =>
-      [...m.entries()]
-        .map(([name, v]) => ({ name, ...v }))
-        .sort((a, b) => b.ms - a.ms)
-        .slice(0, 5);
-    return { apps: top(byApp), titles: top(byTitle), denom };
+    const apps = [...byApp.entries()]
+      .map(([name, v]) => ({
+        name,
+        ms: v.ms,
+        mod: v.mod,
+        contexts: [...v.contexts.entries()]
+          .map(([t, ms]) => ({ title: t, ms }))
+          .sort((a, b) => b.ms - a.ms)
+          .slice(0, 3),
+      }))
+      .sort((a, b) => b.ms - a.ms)
+      .slice(0, 8);
+    return { apps, denom };
   }, [blocks]);
+
+  // Expanded application for context drill-down (Breakdown tab).
+  const [expandedApp, setExpandedApp] = useState<string | null>(null);
 
   // Keyboard navigation listener (Linear principle #1: Keyboard-first)
   useEffect(() => {
@@ -758,7 +797,7 @@ export function TimelineView() {
           { label: "Home", href: "/" },
           { label: "Timeline" },
         ]}
-        dateContext={activeTab === "timeline" ? formatDateLong(selectedDate) : undefined}
+        dateContext={activeTab !== "rules" ? formatDateLong(selectedDate) : undefined}
         actions={
           <div className="flex items-center gap-2">
             {activeTab === "timeline" && isToday && (
@@ -768,7 +807,7 @@ export function TimelineView() {
               </span>
             )}
 
-            {activeTab === "timeline" && (
+            {activeTab !== "rules" && (
               <>
                 {/* Date Controls */}
                 <div className="inline-flex items-center rounded-lg border border-border-default bg-bg-card p-0.5 shadow-2xs">
@@ -866,6 +905,18 @@ export function TimelineView() {
           </button>
 
           <button
+            onClick={() => setActiveTab("breakdown")}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${
+              activeTab === "breakdown"
+                ? "bg-bg-secondary text-text-primary shadow-2xs border border-border-default font-semibold"
+                : "text-text-muted hover:text-text-primary border border-transparent"
+            }`}
+          >
+            <Layers className="w-3.5 h-3.5 text-accent-default" />
+            <span>Breakdown</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab("rules")}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${
               activeTab === "rules"
@@ -887,6 +938,116 @@ export function TimelineView() {
             refetch();
           }}
         />
+      )}
+
+      {/* RENDER VIEW: BREAKDOWN (aggregation, not chronology) */}
+      {activeTab === "breakdown" && (
+        <div className="space-y-6">
+          <Section>
+            <SectionHeader
+              title="Categories"
+              description="What kind of work the active time was"
+            />
+            <div className="rounded-xl border border-border-subtle bg-bg-card divide-y divide-border-subtle overflow-hidden">
+              {(
+                [
+                  { label: "Coding", ms: (summary?.developmentMs ?? 0) || (summary?.focusedMs ?? 0), mod: "development" },
+                  {
+                    label: "Reading",
+                    ms: ((summary?.readingResearchMs ?? 0) + (summary?.writingDocumentationMs ?? 0)) || (summary?.browserMs ?? 0),
+                    mod: "reading_research",
+                  },
+                  {
+                    label: "Calls & chat",
+                    ms: (summary?.communicationModalityMs ?? 0) || (summary?.communicationMs ?? 0),
+                    mod: "communication",
+                  },
+                  {
+                    label: "Media & games",
+                    ms:
+                      ((summary?.mediaConsumptionMs ?? 0) + (summary?.gamingMs ?? 0) + (summary?.administrationMs ?? 0)) ||
+                      (summary?.leisureMs ?? 0),
+                    mod: "media_consumption",
+                  },
+                ] as const
+              ).map((row) => {
+                const config = modalityConfig[row.mod] ?? modalityConfig.unknown!;
+                return (
+                  <div key={row.label} className="px-4 py-2.5 flex items-center justify-between gap-3 text-xs">
+                    <span className="inline-flex items-center gap-2 min-w-0">
+                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${config.dot}`} />
+                      <span className="text-text-primary font-medium">{row.label}</span>
+                    </span>
+                    <span className="font-mono text-text-secondary shrink-0">
+                      {formatDuration(row.ms / 1000)}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </Section>
+
+          <Section>
+            <SectionHeader
+              title="Applications"
+              description="Where the active time went — expand an app for its window titles"
+            />
+            {topLists.apps.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-border-subtle bg-bg-card p-8 text-center text-xs text-text-muted">
+                Nothing recorded for this day yet.
+              </div>
+            ) : (
+              <div className="rounded-xl border border-border-subtle bg-bg-card divide-y divide-border-subtle overflow-hidden">
+                {topLists.apps.map((app) => {
+                  const config = modalityConfig[app.mod] ?? modalityConfig.unknown!;
+                  const pct = Math.max(2, Math.min(100, topLists.denom > 0 ? (app.ms / topLists.denom) * 100 : 0));
+                  const open = expandedApp === app.name;
+                  return (
+                    <div key={app.name}>
+                      <button
+                        type="button"
+                        onClick={() => setExpandedApp(open ? null : app.name)}
+                        className="w-full px-4 py-2.5 flex items-center gap-3 text-xs hover:bg-bg-secondary/40 transition-colors cursor-pointer"
+                      >
+                        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${config.dot}`} />
+                        <span className="text-text-primary font-medium truncate flex-1 text-left" title={app.name}>
+                          {app.name}
+                        </span>
+                        <span className="font-mono text-text-secondary shrink-0">
+                          {formatDuration(app.ms / 1000)}
+                        </span>
+                        <span className="w-24 h-1 rounded-full bg-bg-secondary overflow-hidden shrink-0 hidden sm:block">
+                          <span className={`block h-full rounded-full ${config.bar}`} style={{ width: `${pct}%` }} />
+                        </span>
+                        <ChevronDown
+                          className={`w-3.5 h-3.5 text-text-tertiary shrink-0 transition-transform ${open ? "rotate-180" : ""}`}
+                        />
+                      </button>
+                      {open && (
+                        <div className="px-4 pb-3 pl-9 space-y-1.5">
+                          {app.contexts.length === 0 ? (
+                            <p className="text-[11px] text-text-muted">No window titles recorded.</p>
+                          ) : (
+                            app.contexts.map((ctx) => (
+                              <div key={ctx.title} className="flex items-baseline justify-between gap-2 text-[11px]">
+                                <span className="text-text-secondary truncate" title={ctx.title}>
+                                  {ctx.title}
+                                </span>
+                                <span className="font-mono text-text-muted shrink-0">
+                                  {formatDuration(ctx.ms / 1000)}
+                                </span>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </Section>
+        </div>
       )}
 
       {/* RENDER VIEW: TIMELINE */}
@@ -933,102 +1094,13 @@ export function TimelineView() {
             </div>
           )}
 
-          {/* 3. Workload Metric Ribbon (Unified with Linear design: restrained colors, mono numbers) */}
-          <div className="rounded-xl border border-border-subtle bg-bg-card grid grid-cols-2 md:grid-cols-5 divide-y md:divide-y-0 md:divide-x divide-border-subtle overflow-hidden">
-            {/* Active Time (breaks excluded; was "Total Tracked" which counted AFK) */}
-            <div className="p-4 flex flex-col justify-between space-y-1">
-              <div className="flex items-center justify-between text-xs text-text-muted">
-                <span>Active Time</span>
-                <Clock className="w-3.5 h-3.5 text-text-muted" />
-              </div>
-              <p className="text-xl sm:text-2xl font-bold font-mono tracking-tight text-text-primary">
-                {summary ? formatDuration(summary.totalTrackedMs / 1000) : "0m"}
-              </p>
-              <span className="text-xs text-text-muted font-mono">
-                {blocks.length} {data?.blocks && data.blocks.length > 0 ? "semantic blocks" : "activity segments"}
-              </span>
-            </div>
-
-            {/* Development */}
-            <div className="p-4 flex flex-col justify-between space-y-1">
-              <div className="flex items-center justify-between text-xs text-text-muted">
-                <span>Development</span>
-                <Code className="w-3.5 h-3.5 text-accent-default" />
-              </div>
-              <p className="text-xl sm:text-2xl font-bold font-mono tracking-tight text-text-primary">
-                {summary
-                  ? formatDuration(((summary.developmentMs ?? 0) || (summary.focusedMs ?? 0)) / 1000)
-                  : "0m"}
-              </p>
-              <span className="text-xs text-text-muted font-mono">
-                Coding, Debugging &amp; Review
-              </span>
-            </div>
-
-            {/* Reading & Docs */}
-            <div className="p-4 flex flex-col justify-between space-y-1">
-              <div className="flex items-center justify-between text-xs text-text-muted">
-                <span>Reading &amp; Docs</span>
-                <Globe className="w-3.5 h-3.5 text-sky-400" />
-              </div>
-              <p className="text-xl sm:text-2xl font-bold font-mono tracking-tight text-text-primary">
-                {summary
-                  ? formatDuration(
-                      (((summary.readingResearchMs ?? 0) + (summary.writingDocumentationMs ?? 0)) ||
-                        (summary.browserMs ?? 0)) /
-                        1000
-                    )
-                  : "0m"}
-              </p>
-              <span className="text-xs text-text-muted font-mono">
-                Docs, Specs &amp; Research
-              </span>
-            </div>
-
-            {/* Comms & Media */}
-            <div className="p-4 flex flex-col justify-between space-y-1">
-              <div className="flex items-center justify-between text-xs text-text-muted">
-                <span>Comms &amp; Media</span>
-                <MessageSquare className="w-3.5 h-3.5 text-purple-400" />
-              </div>
-              <p className="text-xl sm:text-2xl font-bold font-mono tracking-tight text-text-primary">
-                {summary
-                  ? formatDuration(
-                      (((summary.communicationModalityMs ?? 0) +
-                        (summary.mediaConsumptionMs ?? 0) +
-                        (summary.gamingMs ?? 0) +
-                        (summary.administrationMs ?? 0)) ||
-                        ((summary.communicationMs ?? 0) + (summary.leisureMs ?? 0))) /
-                        1000
-                    )
-                  : "0m"}
-              </p>
-              <span className="text-xs text-text-muted font-mono">
-                Chat, Media, Games &amp; Admin
-              </span>
-            </div>
-
-            {/* Breaks & Away (peer metric, never inside Active Time) */}
-            <div className="p-4 flex flex-col justify-between space-y-1">
-              <div className="flex items-center justify-between text-xs text-text-muted">
-                <span>Breaks &amp; Away</span>
-                <Coffee className="w-3.5 h-3.5 text-amber-400" />
-              </div>
-              <p className="text-xl sm:text-2xl font-bold font-mono tracking-tight text-text-primary">
-                {summary ? formatDuration((summary.breakMs ?? 0) / 1000) : "0m"}
-              </p>
-              <span className="text-xs text-text-muted font-mono">
-                {(() => {
-                  const rest = blocks.filter((b) => b.isAfkBlock);
-                  if (rest.length === 0) return "No breaks recorded";
-                  const longest = Math.max(
-                    ...rest.map((b) => b.wallClockDurationMs || b.observedActiveDurationMs || 0)
-                  );
-                  return `${rest.length} break${rest.length === 1 ? "" : "s"} · longest ${formatDuration(longest / 1000)}`;
-                })()}
-              </span>
-            </div>
-          </div>
+          {/* 3. Day context strip (orientation, not analysis: coverage · active · away · blocks) */}
+          <p className="text-xs font-mono text-text-muted">
+            Covered {formatDuration(coveredMs / 1000)} · Active{" "}
+            {summary ? formatDuration(summary.totalTrackedMs / 1000) : "0m"} · Away{" "}
+            {summary ? formatDuration((summary.breakMs ?? 0) / 1000) : "0m"} · {blocks.length}{" "}
+            {data?.blocks && data.blocks.length > 0 ? "blocks" : "segments"}
+          </p>
 
           {/* 4. Daily Flow Visualization Stream */}
           {blocks.length > 0 && totalSemanticTrackedMs > 0 && (
@@ -1107,55 +1179,7 @@ export function TimelineView() {
             </Section>
           )}
 
-          {/* 5. Where The Time Went (Top Applications & Window Titles) */}
-          {topLists.denom > 0 && (
-            <Section>
-              <SectionHeader
-                title="Where the time went"
-                description="Top applications and window titles over active time (breaks excluded)"
-              />
-              <div className="rounded-xl border border-border-subtle bg-bg-card p-4 grid gap-5 sm:grid-cols-2">
-                {(
-                  [
-                    { heading: "Top Applications", rows: topLists.apps },
-                    { heading: "Top Window Titles", rows: topLists.titles },
-                  ] as const
-                ).map((group) => (
-                  <div key={group.heading} className="space-y-2 min-w-0">
-                    <h4 className="text-[11px] font-semibold uppercase tracking-wider text-text-muted">
-                      {group.heading}
-                    </h4>
-                    <div className="space-y-1.5">
-                      {group.rows.map((row) => {
-                        const config = modalityConfig[row.mod] ?? modalityConfig.unknown!;
-                        const pct = Math.max(2, Math.min(100, (row.ms / topLists.denom) * 100));
-                        return (
-                          <div key={row.name} className="space-y-0.5">
-                            <div className="flex items-baseline justify-between gap-2 text-xs">
-                              <span className="inline-flex items-center gap-1.5 min-w-0">
-                                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${config.dot}`} />
-                                <span className="text-text-primary font-medium truncate" title={row.name}>
-                                  {row.name}
-                                </span>
-                              </span>
-                              <span className="font-mono text-text-secondary shrink-0">
-                                {formatDuration(row.ms / 1000)}
-                              </span>
-                            </div>
-                            <div className="h-1 rounded-full bg-bg-secondary overflow-hidden">
-                              <div className={`h-full rounded-full ${config.bar}`} style={{ width: `${pct}%` }} />
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </Section>
-          )}
-
-          {/* 6. Chronological Block Feed */}
+          {/* 5. Chronological Block Feed */}
           <Section>
             <SectionHeader
               title="Activity Timeline"
@@ -1400,72 +1424,88 @@ export function TimelineView() {
                               {/* 4-Cell Metadata Strip */}
                               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-3 rounded-lg bg-bg-card border border-border-subtle">
                                 <div>
-                                  <span className="text-[10px] text-text-tertiary uppercase">Wall-Clock</span>
+                                  <span className="text-[10px] text-text-tertiary uppercase">Elapsed</span>
                                   <p className="font-semibold text-text-primary mt-0.5">
                                     {formatDuration(block.wallClockDurationMs / 1000)}
                                   </p>
                                 </div>
                                 <div>
-                                  <span className="text-[10px] text-text-tertiary uppercase">Active Engagement</span>
+                                  <span className="text-[10px] text-text-tertiary uppercase">Active</span>
                                   <p className="font-semibold text-accent-default mt-0.5">
                                     {formatDuration(block.observedActiveDurationMs / 1000)}
                                   </p>
                                 </div>
                                 <div>
-                                  <span className="text-[10px] text-text-tertiary uppercase">Idle / Paused</span>
+                                  <span className="text-[10px] text-text-tertiary uppercase">Paused</span>
                                   <p className="font-semibold text-amber-400 mt-0.5">
                                     {formatDuration(block.pausedDurationMs / 1000)}
                                   </p>
                                 </div>
                                 <div>
-                                  <span className="text-[10px] text-text-tertiary uppercase">Raw Observations</span>
+                                  <span className="text-[10px] text-text-tertiary uppercase">Signals</span>
                                   <p className="font-semibold text-text-secondary mt-0.5">
-                                    {block.rawEventCount} events ({block.sourceChannel})
+                                    {block.rawEventCount} signal{block.rawEventCount === 1 ? "" : "s"} ·{" "}
+                                    {block.sourceChannel === "DESKTOP_WINDOW"
+                                      ? "this computer"
+                                      : block.sourceChannel === "BROWSER_TAB"
+                                        ? "browser tab"
+                                        : "computer + browser"}
                                   </p>
                                 </div>
                               </div>
 
                               {/* Semantic Claims & Inferences Strip */}
                               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                                {/* Classification */}
+                                {/* Classification (human words, never raw enum codes) */}
                                 <div className="p-3 rounded-lg bg-bg-card border border-border-subtle space-y-1">
-                                  <span className="text-[10px] text-text-tertiary uppercase">Classification</span>
+                                  <span className="text-[10px] text-text-tertiary uppercase">What this was</span>
                                   <p className="font-semibold text-text-primary capitalize">
-                                    {block.activityType ? block.activityType.replace(/_/g, " ") : "Unknown"}
+                                    {(modalityConfig[primaryMod]?.label ?? primaryMod.replace(/_/g, " ")) || "Unsorted"}
                                   </p>
                                   <span className="text-[11px] text-text-tertiary">
-                                    Modality: <span className="text-text-secondary">{primaryMod}</span>
+                                    Seen as:{" "}
+                                    <span className="text-text-secondary">
+                                      {block.activityType === "application"
+                                        ? "App use"
+                                        : block.activityType === "browser"
+                                          ? "Web page"
+                                          : block.activityType
+                                            ? block.activityType.replace(/_/g, " ")
+                                            : "Unsorted"}
+                                    </span>
                                   </span>
                                 </div>
 
                                 {/* Intent Association */}
                                 <div className="p-3 rounded-lg bg-bg-card border border-border-subtle space-y-1">
-                                  <span className="text-[10px] text-text-tertiary uppercase">Intent Alignment</span>
+                                  <span className="text-[10px] text-text-tertiary uppercase">Task link</span>
                                   <p className="font-semibold text-text-primary">
-                                    {block.intentLink?.intentionRelationship ?? "UNLINKED"}
+                                    {block.intentLink?.intentionRelationship === "UNLINKED" ||
+                                    !block.intentLink?.intentionRelationship
+                                      ? "Not linked to a task"
+                                      : block.intentLink.intentionRelationship.replace(/_/g, " ").toLowerCase()}
                                   </p>
-                                  <span className="text-[11px] text-text-tertiary">
-                                    Scope: <span className="text-text-secondary">{block.intentLink?.targetScope ?? "None"}</span>
-                                  </span>
+                                  {block.intentLink?.targetScope && block.intentLink.targetScope !== "None" && (
+                                    <span className="text-[11px] text-text-tertiary">
+                                      Scope: <span className="text-text-secondary">{block.intentLink.targetScope}</span>
+                                    </span>
+                                  )}
                                 </div>
 
-                                {/* Attention Evidence */}
-                                <div className="p-3 rounded-lg bg-bg-card border border-border-subtle space-y-1">
-                                  <span className="text-[10px] text-text-tertiary uppercase">Attention Evidence</span>
-                                  <p className="font-semibold text-text-primary">
-                                    {block.attention?.focusEvidenceState ?? "UNKNOWN"}
-                                  </p>
-                                  <span className="text-[11px] text-text-tertiary">
-                                    Track: <span className="text-text-secondary">{block.track}</span>
-                                  </span>
-                                </div>
+                                {/* Attention Evidence (hidden until assessed — unknowns stay out of the UI) */}
+                                {block.attention?.focusEvidenceState &&
+                                  block.attention.focusEvidenceState !== "UNKNOWN" && (
+                                    <div className="p-3 rounded-lg bg-bg-card border border-border-subtle space-y-1">
+                                      <span className="text-[10px] text-text-tertiary uppercase">Attention</span>
+                                      <p className="font-semibold text-text-primary">
+                                        {block.attention.focusEvidenceState.replace(/_/g, " ").toLowerCase()}
+                                      </p>
+                                    </div>
+                                  )}
                               </div>
 
-                              {/* Technical Provenance Footer */}
+                              {/* Actions Footer (provenance stays in the API for debugging, not the UI) */}
                               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-border-subtle text-[11px] text-text-tertiary">
-                                <span className="truncate max-w-lg">
-                                  Fingerprint: <span className="text-text-secondary">{block.observationSetFingerprint}</span>
-                                </span>
                                 <div className="flex items-center gap-3">
                                   <button
                                     onClick={() => {
