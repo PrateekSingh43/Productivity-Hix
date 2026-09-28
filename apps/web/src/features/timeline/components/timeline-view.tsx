@@ -908,17 +908,7 @@ export function TimelineView() {
             {/* Active Time (breaks excluded; was "Total Tracked" which counted AFK) */}
             <div className="p-4 flex flex-col justify-between space-y-1">
               <div className="flex items-center justify-between text-xs text-text-muted">
-                <span className="inline-flex items-center gap-1.5">
-                  Active Time
-                  {data?.stale && (
-                    <span
-                      className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 uppercase tracking-wider"
-                      title="Background materialization is behind — these numbers were computed live and are provisional"
-                    >
-                      Updating…
-                    </span>
-                  )}
-                </span>
+                <span>Active Time</span>
                 <Clock className="w-3.5 h-3.5 text-text-muted" />
               </div>
               <p className="text-xl sm:text-2xl font-bold font-mono tracking-tight text-text-primary">
