@@ -904,7 +904,7 @@ export function TimelineView() {
           )}
 
           {/* 3. Workload Metric Ribbon (Unified with Linear design: restrained colors, mono numbers) */}
-          <div className="rounded-xl border border-border-subtle bg-bg-card grid grid-cols-2 md:grid-cols-4 divide-y md:divide-y-0 md:divide-x divide-border-subtle overflow-hidden">
+          <div className="rounded-xl border border-border-subtle bg-bg-card grid grid-cols-2 md:grid-cols-5 divide-y md:divide-y-0 md:divide-x divide-border-subtle overflow-hidden">
             {/* Active Time (breaks excluded; was "Total Tracked" which counted AFK) */}
             <div className="p-4 flex flex-col justify-between space-y-1">
               <div className="flex items-center justify-between text-xs text-text-muted">
@@ -978,6 +978,27 @@ export function TimelineView() {
               </p>
               <span className="text-xs text-text-muted font-mono">
                 Chat, Media, Games &amp; Admin
+              </span>
+            </div>
+
+            {/* Breaks & Away (peer metric, never inside Active Time) */}
+            <div className="p-4 flex flex-col justify-between space-y-1">
+              <div className="flex items-center justify-between text-xs text-text-muted">
+                <span>Breaks &amp; Away</span>
+                <Coffee className="w-3.5 h-3.5 text-amber-400" />
+              </div>
+              <p className="text-xl sm:text-2xl font-bold font-mono tracking-tight text-text-primary">
+                {summary ? formatDuration((summary.breakMs ?? 0) / 1000) : "0m"}
+              </p>
+              <span className="text-xs text-text-muted font-mono">
+                {(() => {
+                  const rest = blocks.filter((b) => b.isAfkBlock);
+                  if (rest.length === 0) return "No breaks recorded";
+                  const longest = Math.max(
+                    ...rest.map((b) => b.wallClockDurationMs || b.observedActiveDurationMs || 0)
+                  );
+                  return `${rest.length} break${rest.length === 1 ? "" : "s"} · longest ${formatDuration(longest / 1000)}`;
+                })()}
               </span>
             </div>
           </div>
