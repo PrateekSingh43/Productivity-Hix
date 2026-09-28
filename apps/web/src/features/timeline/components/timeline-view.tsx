@@ -916,9 +916,6 @@ export function TimelineView() {
               </p>
               <span className="text-xs text-text-muted font-mono">
                 {blocks.length} {data?.blocks && data.blocks.length > 0 ? "semantic blocks" : "activity segments"}
-                {summary && summary.breakMs > 0 && (
-                  <> · {formatDuration(summary.breakMs / 1000)} breaks</>
-                )}
               </span>
             </div>
 
