@@ -120,11 +120,17 @@ export interface AnalyticsDiagnostics {
 
 export type RecordingHistory = NonNullable<AnalyticsDiagnostics["recordingHistory"]>;
 
+export interface AnalysisBlocked {
+  reason: "worker-offline" | "request-failed";
+  requestedAt: string;
+}
+
 export interface AnalyticsResponse {
   state: AnalyticsState;
   window?: AnalyticsPeriod;
   diagnostics?: AnalyticsDiagnostics;
   observationCount?: number;
+  analysisBlocked?: AnalysisBlocked | null;
 }
 
 export interface PatternsResponse extends AnalyticsResponse {

@@ -8,7 +8,7 @@ import { resetTestDb, setTestDb } from "../../lib/prisma";
 import { activityInRange } from "../activity/service";
 import { listCheckIns } from "../check-ins/service";
 import { assembleEvidence, overlaps, timelineFromBlocks } from "./evidence";
-import { resolveWindow, runInsightPipeline, runPatternPipeline } from "./service";
+import { getPersistedPatterns, resolveWindow, runInsightPipeline, runPatternPipeline } from "./service";
 
 const userId = "user-patterns";
 const window = resolveWindow("2026-09-01", "2026-09-15");
@@ -471,5 +471,67 @@ describe("Patterns and Insights orchestration contracts", () => {
     const result = await runPatternPipeline(userId, window);
     expect(result.diagnostics.perDetector.find((item) => item.identity === "extended_continuous_activity")?.reason)
       .toContain("No closed task-linked sessions");
+  });
+});
+
+describe("NO_RUN blocked-analysis signal", () => {
+  function noRunDb(options: {
+    request?: { status: string; occurredAt: Date } | null;
+    terminalAt?: Date | null;
+  }) {
+    setTestDb({
+      userPreference: { findUnique: async () => ({ timezone: "UTC", dayBoundary: "00:00" }) },
+      normalizedActivity: { findMany: async () => [] },
+      patternAnalysisRun: {
+        findFirst: async (args: { where?: { status?: unknown } }) => {
+          // No RUNNING row ever; terminal rows only when terminalAt is set.
+          if (args?.where && typeof args.where === "object" && "status" in args.where &&
+            args.where.status !== null && typeof args.where.status === "object" &&
+            "in" in (args.where.status as Record<string, unknown>)) {
+            return options.terminalAt ? { id: "run-1", computedAt: options.terminalAt } : null;
+          }
+          return null;
+        },
+      },
+      patternFinding: { findMany: async () => [] },
+      outboxEvent: {
+        findFirst: async () => options.request
+          ? { status: options.request.status, occurredAt: options.request.occurredAt }
+          : null,
+      },
+    } as never);
+  }
+
+  it("reports worker-offline when a request sits unclaimed past the stall window", async () => {
+    noRunDb({ request: { status: "PENDING", occurredAt: new Date(Date.now() - 10 * 60_000) } });
+    const result = await getPersistedPatterns(userId, window);
+    expect(result.state).toBe("NO_RUN");
+    expect(result.analysisBlocked).toEqual({
+      reason: "worker-offline",
+      requestedAt: expect.any(String),
+    });
+  });
+
+  it("reports request-failed when the latest request dead-lettered with no newer run", async () => {
+    noRunDb({ request: { status: "DEAD_LETTER", occurredAt: new Date("2026-09-26T12:00:00Z") } });
+    const result = await getPersistedPatterns(userId, window);
+    expect(result.state).toBe("NO_RUN");
+    expect(result.analysisBlocked?.reason).toBe("request-failed");
+  });
+
+  it("stays silent when a terminal run supersedes the dead-lettered request", async () => {
+    noRunDb({
+      request: { status: "DEAD_LETTER", occurredAt: new Date("2026-09-26T12:00:00Z") },
+      terminalAt: new Date("2026-09-27T12:00:00Z"),
+    });
+    const result = await getPersistedPatterns(userId, window);
+    expect(result.analysisBlocked).toBeNull();
+  });
+
+  it("stays silent with no requests and reports nothing blocked", async () => {
+    noRunDb({});
+    const result = await getPersistedPatterns(userId, window);
+    expect(result.state).toBe("NO_RUN");
+    expect(result.analysisBlocked).toBeNull();
   });
 });

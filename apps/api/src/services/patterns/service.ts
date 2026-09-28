@@ -152,11 +152,60 @@ export interface PatternReadiness {
   patterns: "found" | "none" | "unknown";
 }
 
+export interface AnalysisBlocked {
+  reason: "worker-offline" | "request-failed";
+  requestedAt: string;
+}
+
 export interface PersistedPatternsResponse extends PatternsResponse {
   runStatus: PatternRunStatus;
   runId: string | null;
   computedAt: string | null;
   readiness: PatternReadiness;
+  /**
+   * Set only on NO_RUN when the user asked for analysis and it never
+   * produced a run: either the request sits unclaimed (no worker daemon is
+   * consuming the queue) or it dead-lettered. Without this, "Run analysis"
+   * is a silent no-op and failures are invisible.
+   */
+  analysisBlocked?: AnalysisBlocked | null;
+}
+
+/** A request sitting longer than this with no RUNNING row means no worker is consuming the queue. */
+const STALLED_REQUEST_MS = 120_000;
+
+async function blockedAnalysis(userId: string): Promise<AnalysisBlocked | null> {
+  const db = getDb() as unknown as {
+    outboxEvent?: {
+      findFirst: (args: unknown) => Promise<{ status: string; occurredAt: Date } | null>;
+    };
+    patternAnalysisRun?: {
+      findFirst: (args: unknown) => Promise<{ computedAt: Date | null } | null>;
+    };
+  };
+  if (typeof db.outboxEvent?.findFirst !== "function") return null;
+  const request = await db.outboxEvent.findFirst({
+    where: { aggregateId: userId, eventType: "pattern.analysis.requested" },
+    orderBy: { occurredAt: "desc" },
+    select: { status: true, occurredAt: true },
+  });
+  if (!request) return null;
+  // A newer terminal run supersedes the request (it was honored after all).
+  const terminal = typeof db.patternAnalysisRun?.findFirst === "function"
+    ? await db.patternAnalysisRun.findFirst({
+      where: { userId, status: { in: ["COMPLETED", "FAILED"] } },
+      orderBy: { computedAt: "desc" },
+      select: { computedAt: true },
+    })
+    : null;
+  if (terminal?.computedAt && terminal.computedAt.getTime() > request.occurredAt.getTime()) return null;
+  if (request.status === "DEAD_LETTER") {
+    return { reason: "request-failed", requestedAt: request.occurredAt.toISOString() };
+  }
+  if (request.status === "PENDING" && Date.now() - request.occurredAt.getTime() > STALLED_REQUEST_MS) {
+    return { reason: "worker-offline", requestedAt: request.occurredAt.toISOString() };
+  }
+  return null;
 }
 
 export async function requestPatternAnalysis(
@@ -290,6 +339,7 @@ export async function getPersistedPatterns(userId: string, window: AnalyticalWin
     state: "NO_RUN", runStatus: "NO_RUN", runId: null, computedAt: null,
     window, patterns: [], diagnostics: emptyDiagnostics(),
     readiness: { activity, evidence: "unknown", analysis: "never", patterns: "unknown" },
+    analysisBlocked: await blockedAnalysis(userId),
   };
 }
 

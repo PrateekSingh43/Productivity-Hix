@@ -92,15 +92,30 @@ export function AnalyticsState({
   if (data.state === "ok" && !noInsight) return null;
 
   if (data.state === "NO_RUN") {
+    const blocked = data.analysisBlocked;
     return (
       <div role="status" className="space-y-3 rounded-xl border border-border-subtle bg-bg-card p-6 sm:p-8">
-        <h2 className="text-base font-medium text-text-primary">Pattern analysis hasn&apos;t run for this period.</h2>
+        <h2 className="text-base font-medium text-text-primary">
+          {blocked?.reason === "request-failed"
+            ? "The last analysis attempt failed."
+            : blocked?.reason === "worker-offline"
+              ? "Analysis requested — waiting for the background worker."
+              : "Pattern analysis hasn't run for this period."}
+        </h2>
         <p className="text-sm text-text-secondary">
-          Your activity is being recorded. Pattern analysis will become meaningful once enough comparable evidence
-          exists. Running it now establishes the current baseline.
+          {blocked?.reason === "request-failed"
+            ? "Your recorded activity is safe. The attempt failed before producing results — retry the analysis."
+            : blocked?.reason === "worker-offline"
+              ? "Your request hasn't been picked up yet, so there is nothing to show. Your activity keeps recording safely; findings will compute once the worker runs. You can leave and come back."
+              : "Your activity is being recorded. Pattern analysis will become meaningful once enough comparable evidence exists. Running it now establishes the current baseline."}
         </p>
         {onRunAnalysis && (
-          <RunButton onRunAnalysis={onRunAnalysis} disabled={isWorking} spinning={isWorking} label={isWorking ? "Starting…" : "Run analysis"} />
+          <RunButton
+            onRunAnalysis={onRunAnalysis}
+            disabled={isWorking}
+            spinning={isWorking}
+            label={isWorking ? "Starting…" : blocked?.reason === "request-failed" ? "Retry analysis" : "Run analysis"}
+          />
         )}
       </div>
     );
