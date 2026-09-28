@@ -1,4 +1,4 @@
-import type { Task } from "@repo/types";
+import type { Task, WorkSession } from "@repo/types";
 import { resolveProductiveDay } from "@repo/types";
 import { dueDateKey, effectiveScheduleKey } from "./task-scopes";
 
@@ -84,15 +84,20 @@ export function compareHistoryTasksDesc(a: Task, b: Task): number {
  * - Computes per-day totals from the UNFILTERED day list so the
  *   `x / y completed` badge stays truthful while the rendered list obeys the
  *   active sub-filter (empty-after-filter groups are dropped).
+ * - `actualMins` attributes task-linked sessions by OCCURRENCE day, never
+ *   cumulative task totals (same root-cause fix as the Today ribbon).
  *
  * @param tasks Full task list from the query cache.
  * @param todayDate Current productive day (YYYY-MM-DD).
  * @param filter Active sub-filter pill.
+ * @param sessions Work sessions for day attribution (task-linked ones only
+ *   feed per-day recorded minutes; unlinked focus lives in Sessions view).
  */
 export function buildHistoryGroups(
   tasks: Task[],
   todayDate: string,
   filter: HistoryFilter,
+  sessions: Pick<WorkSession, "startedAt" | "durationSeconds" | "taskId">[] = [],
 ): HistoryGroup[] {
   const groupsMap = new Map<string, Task[]>();
 
@@ -111,7 +116,9 @@ export function buildHistoryGroups(
     const rawList = groupsMap.get(dateStr) ?? [];
     const completedCount = rawList.filter((t) => t.status === "done").length;
     const totalCount = rawList.length;
-    const totalSeconds = rawList.reduce((sum, t) => sum + (t.actualDurationSeconds ?? 0), 0);
+    const dayTaskIds = new Set(rawList.map((t) => t.id));
+    const daySessions = sessions.filter((s) => s.taskId && dayTaskIds.has(s.taskId));
+    const totalSeconds = sumSessionSecondsForDay(daySessions, dateStr);
 
     const filteredList = rawList
       .filter((t) => matchesHistoryFilter(t, filter))
@@ -140,6 +147,49 @@ export function buildHistoryGroups(
  */
 export function historyEligibleTasks(tasks: Task[], todayDate: string): Task[] {
   return tasks.filter((t) => historyDayKey(t, todayDate) !== null);
+}
+
+/**
+ * Productive day a focus session belongs to, from its start timestamp.
+ * Timezone/boundary aware — never a raw UTC slice.
+ */
+export function sessionDayKey(startedAt: string): string | null {
+  try {
+    return resolveProductiveDay(startedAt);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Focus seconds recorded on one productive day.
+ *
+ * ROOT-CAUSE FIX: day-level focus numbers ("Actual Focus Today", per-day
+ * "recorded") must attribute each session to the day it OCCURRED. Summing
+ * cumulative per-task totals instead inflated "today" with sessions from
+ * earlier days (e.g. Sept 12/25 sessions counted into Sept 28's total).
+ * Per-task cumulative `actualDurationSeconds` stays the source for per-task
+ * "total invested" displays — only day buckets use this.
+ *
+ * A session counts wholly toward its start day (midnight-spanning sessions
+ * are not split — matches the Sessions view grouping). Active (unended)
+ * sessions count their banked durationSeconds so far.
+ *
+ * @param sessions Work sessions (linked or not — pass a pre-filtered list
+ *   to scope, e.g. only sessions of the day's task group).
+ * @param day YYYY-MM-DD productive day.
+ */
+export function sumSessionSecondsForDay(
+  sessions: Pick<WorkSession, "startedAt" | "durationSeconds">[],
+  day: string,
+): number {
+  let total = 0;
+  for (const s of sessions) {
+    if (!s.startedAt) continue;
+    if (sessionDayKey(s.startedAt) !== day) continue;
+    total += Math.max(0, s.durationSeconds ?? 0);
+  }
+  return total;
 }
 
 /**

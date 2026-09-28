@@ -32,6 +32,7 @@ import {
   buildHistoryGroups,
   formatHistoryDayLabel,
   historyEligibleTasks,
+  sumSessionSecondsForDay,
   type HistoryFilter,
 } from "../lib/task-history";
 import { useTasksList } from "../api/queries";
@@ -142,11 +143,14 @@ export function TaskPageClient() {
     return todayTodos.reduce((acc, t) => acc + (t.plannedDurationMinutes || 0), 0);
   }, [todayTodos]);
 
-  // Actual time recorded for today's tasks
+  // Actual focus recorded TODAY (session-occurrence day, all sessions).
+  // Must NOT sum cumulative per-task totals: those include sessions from
+  // earlier days and inflated this ribbon (e.g. Sept 12/25 focus counted
+  // into Sept 28). Per-task cumulative stays correct as "total invested".
   const todayActualMinutes = useMemo(() => {
-    const seconds = todayTasks.reduce((acc, t) => acc + (t.actualDurationSeconds || 0), 0);
+    const seconds = sumSessionSecondsForDay(sessions, todayDate);
     return Math.round(seconds / 60);
-  }, [todayTasks]);
+  }, [sessions, todayDate]);
 
   // 4. History / Logbook day groups (production semantics):
   // finished work grouped by completion day, past-or-today scheduled work by
@@ -158,9 +162,9 @@ export function TaskPageClient() {
     [tasks, todayDate]
   );
   const historyGroups = useMemo(() => {
-    const groups = buildHistoryGroups(tasks, todayDate, historyFilter);
+    const groups = buildHistoryGroups(tasks, todayDate, historyFilter, sessions);
     return groups.map((g) => ({ ...g, label: formatHistoryDayLabel(g.date, todayDate) }));
-  }, [tasks, todayDate, historyFilter]);
+  }, [tasks, todayDate, historyFilter, sessions]);
   const visibleHistoryGroups = useMemo(
     () => historyGroups.slice(0, visibleHistoryDays),
     [historyGroups, visibleHistoryDays]
