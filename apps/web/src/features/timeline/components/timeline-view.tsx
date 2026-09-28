@@ -34,6 +34,17 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { useTimeline } from "../api/queries";
 import { syncBrowserTimezone } from "@features/settings/lib/timezone-sync";
+import {
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+} from "recharts";
 import { evidenceDate } from "@features/analytics";
 import { createActivityOverride } from "@features/settings";
 import type { TimelineBlock } from "@repo/types";
@@ -576,7 +587,6 @@ export function TimelineView() {
   }, [data?.blocks, data?.segments]);
 
   const summary = data?.summary;
-  const currentActivity = data?.currentActivity;
 
   // Filter semantic blocks (by modality and search query)
   const filteredBlocks = useMemo(() => {
@@ -675,6 +685,48 @@ export function TimelineView() {
 
   // Expanded application for context drill-down (Breakdown tab).
   const [expandedApp, setExpandedApp] = useState<string | null>(null);
+
+  // Category donut slices (mirrors the Breakdown Categories rows).
+  const categorySlices = useMemo(() => {
+    const rows = [
+      { label: "Coding", ms: (summary?.developmentMs ?? 0) || (summary?.focusedMs ?? 0), color: "#10b981" },
+      {
+        label: "Reading",
+        ms: ((summary?.readingResearchMs ?? 0) + (summary?.writingDocumentationMs ?? 0)) || (summary?.browserMs ?? 0),
+        color: "#38bdf8",
+      },
+      {
+        label: "Calls & chat",
+        ms: (summary?.communicationModalityMs ?? 0) || (summary?.communicationMs ?? 0),
+        color: "#a78bfa",
+      },
+      {
+        label: "Media & games",
+        ms:
+          ((summary?.mediaConsumptionMs ?? 0) + (summary?.gamingMs ?? 0) + (summary?.administrationMs ?? 0)) ||
+          (summary?.leisureMs ?? 0),
+        color: "#fb7185",
+      },
+      { label: "Away", ms: summary?.breakMs ?? 0, color: "#52525b" },
+    ];
+    return rows.filter((r) => r.ms > 0);
+  }, [summary]);
+
+  // Hourly rhythm: active vs away minutes per wall-clock hour (ActivityWatch-style histogram).
+  const hourlyBuckets = useMemo(() => {
+    const buckets = Array.from({ length: 24 }, (_, h) => ({ h, active: 0, away: 0 }));
+    for (const b of blocks) {
+      const ms = b.wallClockDurationMs || b.observedActiveDurationMs || 0;
+      if (ms <= 0) continue;
+      const start = new Date(b.startTime).getTime();
+      if (!Number.isFinite(start)) continue;
+      const hour = new Date(start).getHours();
+      const mins = Math.round(ms / 60000);
+      if (b.isAfkBlock) buckets[hour]!.away += mins;
+      else buckets[hour]!.active += mins;
+    }
+    return buckets;
+  }, [blocks]);
 
   // Keyboard navigation listener (Linear principle #1: Keyboard-first)
   useEffect(() => {
@@ -948,42 +1000,94 @@ export function TimelineView() {
               title="Categories"
               description="What kind of work the active time was"
             />
-            <div className="rounded-xl border border-border-subtle bg-bg-card divide-y divide-border-subtle overflow-hidden">
-              {(
-                [
-                  { label: "Coding", ms: (summary?.developmentMs ?? 0) || (summary?.focusedMs ?? 0), mod: "development" },
-                  {
-                    label: "Reading",
-                    ms: ((summary?.readingResearchMs ?? 0) + (summary?.writingDocumentationMs ?? 0)) || (summary?.browserMs ?? 0),
-                    mod: "reading_research",
-                  },
-                  {
-                    label: "Calls & chat",
-                    ms: (summary?.communicationModalityMs ?? 0) || (summary?.communicationMs ?? 0),
-                    mod: "communication",
-                  },
-                  {
-                    label: "Media & games",
-                    ms:
-                      ((summary?.mediaConsumptionMs ?? 0) + (summary?.gamingMs ?? 0) + (summary?.administrationMs ?? 0)) ||
-                      (summary?.leisureMs ?? 0),
-                    mod: "media_consumption",
-                  },
-                ] as const
-              ).map((row) => {
-                const config = modalityConfig[row.mod] ?? modalityConfig.unknown!;
-                return (
-                  <div key={row.label} className="px-4 py-2.5 flex items-center justify-between gap-3 text-xs">
+            <div className="rounded-xl border border-border-subtle bg-bg-card p-4 grid gap-5 sm:grid-cols-2 items-center">
+              <div style={{ width: "100%", height: 190 }}>
+                <ResponsiveContainer>
+                  <PieChart>
+                    <Pie
+                      data={categorySlices}
+                      dataKey="ms"
+                      nameKey="label"
+                      innerRadius={52}
+                      outerRadius={78}
+                      paddingAngle={2}
+                      strokeWidth={0}
+                    >
+                      {categorySlices.map((s) => (
+                        <Cell key={s.label} fill={s.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      contentStyle={{
+                        background: "var(--bg-card)",
+                        border: "1px solid var(--border-subtle)",
+                        borderRadius: 8,
+                        fontSize: 12,
+                      }}
+                      formatter={(value) => [formatDuration((Number(value) || 0) / 1000), ""]}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="space-y-1.5">
+                {categorySlices.map((row) => (
+                  <div key={row.label} className="flex items-center justify-between gap-3 text-xs">
                     <span className="inline-flex items-center gap-2 min-w-0">
-                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${config.dot}`} />
+                      <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: row.color }} />
                       <span className="text-text-primary font-medium">{row.label}</span>
                     </span>
                     <span className="font-mono text-text-secondary shrink-0">
                       {formatDuration(row.ms / 1000)}
                     </span>
                   </div>
-                );
-              })}
+                ))}
+                {categorySlices.length === 0 && (
+                  <p className="text-xs text-text-muted">Nothing recorded for this day yet.</p>
+                )}
+              </div>
+            </div>
+          </Section>
+
+          <Section>
+            <SectionHeader
+              title="Day rhythm"
+              description="Active vs away minutes per hour, like ActivityWatch"
+            />
+            <div className="rounded-xl border border-border-subtle bg-bg-card p-4">
+              <div style={{ width: "100%", height: 170 }}>
+                <ResponsiveContainer>
+                  <BarChart data={hourlyBuckets} margin={{ top: 4, right: 4, bottom: 0, left: -28 }}>
+                    <XAxis
+                      dataKey="h"
+                      tickFormatter={(h) => (Number(h) % 3 === 0 ? `${h}h` : "")}
+                      tick={{ fontSize: 10, fill: "var(--text-tertiary)" }}
+                      axisLine={false}
+                      tickLine={false}
+                      interval={0}
+                    />
+                    <YAxis
+                      tick={{ fontSize: 10, fill: "var(--text-tertiary)" }}
+                      axisLine={false}
+                      tickLine={false}
+                    />
+                    <Tooltip
+                      contentStyle={{
+                        background: "var(--bg-card)",
+                        border: "1px solid var(--border-subtle)",
+                        borderRadius: 8,
+                        fontSize: 12,
+                      }}
+                      formatter={(value, name) => [
+                        `${Number(value) || 0}m`,
+                        name === "active" ? "Active" : "Away",
+                      ]}
+                      labelFormatter={(h) => `${h}:00 – ${Number(h) + 1}:00`}
+                    />
+                    <Bar dataKey="active" stackId="t" fill="#10b981" radius={[2, 2, 0, 0]} />
+                    <Bar dataKey="away" stackId="t" fill="#52525b" radius={[2, 2, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
             </div>
           </Section>
 
@@ -1053,47 +1157,6 @@ export function TimelineView() {
       {/* RENDER VIEW: TIMELINE */}
       {activeTab === "timeline" && (
         <div className="space-y-6">
-          {/* 2. Live Activity Strip (When Active Today) */}
-          {isToday && currentActivity && (
-            <div className="flex items-center justify-between px-3.5 py-2.5 rounded-xl border border-border-subtle bg-bg-card/70 backdrop-blur-xs text-xs">
-              <div className="flex items-center gap-2.5 truncate">
-                <span className="relative flex h-2 w-2 shrink-0">
-                  {currentActivity.isActive && (
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                  )}
-                  <span
-                    className={`relative inline-flex rounded-full h-2 w-2 ${
-                      currentActivity.isActive ? "bg-emerald-400" : "bg-amber-400"
-                    }`}
-                  />
-                </span>
-
-                <span className="font-semibold text-text-primary truncate">
-                  {currentActivity.application || "Idle"}
-                </span>
-
-                {currentActivity.title && currentActivity.title !== currentActivity.application && (
-                  <>
-                    <span className="text-text-tertiary">&bull;</span>
-                    <span className="text-text-secondary truncate max-w-md">
-                      {currentActivity.title}
-                    </span>
-                  </>
-                )}
-              </div>
-
-              {currentActivity.runningForSeconds !== null && (
-                <div className="shrink-0 flex items-center gap-1.5 text-text-tertiary font-mono text-[11px]">
-                  <Clock className="w-3 h-3 text-accent-default" />
-                  <span>Running:</span>
-                  <span className="text-text-primary font-medium">
-                    {formatDuration(currentActivity.runningForSeconds)}
-                  </span>
-                </div>
-              )}
-            </div>
-          )}
-
           {/* 3. Day context strip (orientation, not analysis: coverage · active · away · blocks) */}
           <p className="text-xs font-mono text-text-muted">
             Covered {formatDuration(coveredMs / 1000)} · Active{" "}
@@ -1101,6 +1164,92 @@ export function TimelineView() {
             {summary ? formatDuration((summary.breakMs ?? 0) / 1000) : "0m"} · {blocks.length}{" "}
             {data?.blocks && data.blocks.length > 0 ? "blocks" : "segments"}
           </p>
+
+          {/* 3b. Metric cards (glanceable KPIs; breaks excluded from Active Time) */}
+          <div className="rounded-xl border border-border-subtle bg-bg-card grid grid-cols-2 md:grid-cols-5 divide-y md:divide-y-0 md:divide-x divide-border-subtle overflow-hidden">
+            <div className="p-4 flex flex-col justify-between space-y-1">
+              <div className="flex items-center justify-between text-xs text-text-muted">
+                <span>Active Time</span>
+                <Clock className="w-3.5 h-3.5 text-text-muted" />
+              </div>
+              <p className="text-xl sm:text-2xl font-bold font-mono tracking-tight text-text-primary">
+                {summary ? formatDuration(summary.totalTrackedMs / 1000) : "0m"}
+              </p>
+              <span className="text-xs text-text-muted font-mono">
+                {blocks.length} {data?.blocks && data.blocks.length > 0 ? "blocks" : "segments"}
+              </span>
+            </div>
+
+            <div className="p-4 flex flex-col justify-between space-y-1">
+              <div className="flex items-center justify-between text-xs text-text-muted">
+                <span>Development</span>
+                <Code className="w-3.5 h-3.5 text-accent-default" />
+              </div>
+              <p className="text-xl sm:text-2xl font-bold font-mono tracking-tight text-text-primary">
+                {summary
+                  ? formatDuration(((summary.developmentMs ?? 0) || (summary.focusedMs ?? 0)) / 1000)
+                  : "0m"}
+              </p>
+              <span className="text-xs text-text-muted font-mono">Coding, Debugging &amp; Review</span>
+            </div>
+
+            <div className="p-4 flex flex-col justify-between space-y-1">
+              <div className="flex items-center justify-between text-xs text-text-muted">
+                <span>Reading &amp; Docs</span>
+                <Globe className="w-3.5 h-3.5 text-sky-400" />
+              </div>
+              <p className="text-xl sm:text-2xl font-bold font-mono tracking-tight text-text-primary">
+                {summary
+                  ? formatDuration(
+                      (((summary.readingResearchMs ?? 0) + (summary.writingDocumentationMs ?? 0)) ||
+                        (summary.browserMs ?? 0)) /
+                        1000
+                    )
+                  : "0m"}
+              </p>
+              <span className="text-xs text-text-muted font-mono">Docs, Specs &amp; Research</span>
+            </div>
+
+            <div className="p-4 flex flex-col justify-between space-y-1">
+              <div className="flex items-center justify-between text-xs text-text-muted">
+                <span>Comms &amp; Media</span>
+                <MessageSquare className="w-3.5 h-3.5 text-purple-400" />
+              </div>
+              <p className="text-xl sm:text-2xl font-bold font-mono tracking-tight text-text-primary">
+                {summary
+                  ? formatDuration(
+                      (((summary.communicationModalityMs ?? 0) +
+                        (summary.mediaConsumptionMs ?? 0) +
+                        (summary.gamingMs ?? 0) +
+                        (summary.administrationMs ?? 0)) ||
+                        ((summary.communicationMs ?? 0) + (summary.leisureMs ?? 0))) /
+                        1000
+                    )
+                  : "0m"}
+              </p>
+              <span className="text-xs text-text-muted font-mono">Chat, Media, Games &amp; Admin</span>
+            </div>
+
+            <div className="p-4 flex flex-col justify-between space-y-1">
+              <div className="flex items-center justify-between text-xs text-text-muted">
+                <span>Breaks &amp; Away</span>
+                <Coffee className="w-3.5 h-3.5 text-amber-400" />
+              </div>
+              <p className="text-xl sm:text-2xl font-bold font-mono tracking-tight text-text-primary">
+                {summary ? formatDuration((summary.breakMs ?? 0) / 1000) : "0m"}
+              </p>
+              <span className="text-xs text-text-muted font-mono">
+                {(() => {
+                  const rest = blocks.filter((b) => b.isAfkBlock);
+                  if (rest.length === 0) return "No breaks recorded";
+                  const longest = Math.max(
+                    ...rest.map((b) => b.wallClockDurationMs || b.observedActiveDurationMs || 0)
+                  );
+                  return `${rest.length} break${rest.length === 1 ? "" : "s"} · longest ${formatDuration(longest / 1000)}`;
+                })()}
+              </span>
+            </div>
+          </div>
 
           {/* 4. Daily Flow Visualization Stream */}
           {blocks.length > 0 && totalSemanticTrackedMs > 0 && (
