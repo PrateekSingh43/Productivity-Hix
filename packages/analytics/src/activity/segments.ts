@@ -815,8 +815,12 @@ export function aggregateActivitySegments(
 
 /**
  * Computes summary metrics from the consolidated timeline segments.
- * Guaranteed mathematical invariant:
- * focusedMs + browserMs + breakMs + communicationMs + generalMs === totalTrackedMs
+ * Guaranteed mathematical invariant (ActivityWatch headline semantics):
+ *   totalTrackedMs = focusedMs + browserMs + leisureMs + communicationMs + generalMs
+ * i.e. ACTIVE time only. breakMs is reported alongside but never inside the
+ * total — counting away-from-keyboard time as tracked work is what once
+ * inflated a single day past 24 hours. (Input segments are non-overlapping
+ * by construction, so no union step is needed here.)
  */
 export function computeTimelineSummary(segments: TimelineSegment[]): TimelineSummary {
   let totalTrackedMs = 0;
@@ -828,11 +832,14 @@ export function computeTimelineSummary(segments: TimelineSegment[]): TimelineSum
   let generalMs = 0;
 
   for (const s of segments) {
+    if (s.category === "break") {
+      breakMs += s.durationMs;
+      continue;
+    }
     totalTrackedMs += s.durationMs;
     if (s.category === "focused") focusedMs += s.durationMs;
     else if (s.category === "browser") browserMs += s.durationMs;
     else if (s.category === "leisure") leisureMs += s.durationMs;
-    else if (s.category === "break") breakMs += s.durationMs;
     else if (s.category === "communication") communicationMs += s.durationMs;
     else generalMs += s.durationMs;
   }

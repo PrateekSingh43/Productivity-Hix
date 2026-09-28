@@ -24,7 +24,7 @@ import {
 import {
   materializeTemporalBlocks,
   resolveBlockSemantics,
-  computeTimelineSummary,
+  unionIntervals,
   type BlockEngineInput,
 } from "@repo/analytics";
 import { getDb, type Prisma } from "@repo/db";
@@ -261,7 +261,9 @@ export class TimelineWorker extends BaseWorker<TimelineMaterializationJobData, T
     // 6. Materialize temporal blocks using pure deterministic engine
     const materializedBlocks = materializeTemporalBlocks(inputs, {
       maxGapMs: 120_000,
-      minBreakMs: 60_000,
+      // 180s idle threshold matches ActivityWatch (AFK after 3min idle) and
+      // the blueprint's micro-pause tier (<3min stays inside the work block).
+      minBreakMs: 180_000,
       transientThresholdMs: 15_000,
       maxBreakMs: 2 * 60 * 60 * 1000,
     });
@@ -323,27 +325,44 @@ export class TimelineWorker extends BaseWorker<TimelineMaterializationJobData, T
       };
     });
 
-    // 8. Assemble summary
-    let totalTrackedMs = 0;
+    // 8. Assemble summary.
+    // Corrected invariant (was: sum of every block wall clock, which counted
+    // overnight AFK and double-counted concurrent desktop+browser streams —
+    // Sept 23 summed to 24.14h for one day):
+    //   totalTrackedMs = union of NON-AFK block spans (active time only,
+    //     ActivityWatch headline semantics: active window minus AFK).
+    //   breakMs is reported alongside, never inside the total.
+    // Category buckets keep wall-clock attribution (concurrent modalities can
+    // overlap, so buckets may sum above the unioned total — that is expected).
     let focusedMs = 0;
     let breakMs = 0;
     let browserMs = 0;
     let leisureMs = 0;
     let communicationMs = 0;
     let generalMs = 0;
+    const activeSpans: Array<{ start: number; end: number }> = [];
 
     for (const b of formattedBlocks) {
       const dur = b.wallClockDurationMs || b.observedActiveDurationMs;
-      totalTrackedMs += dur;
       const mod = b.modality.primary?.value;
+      if (mod === "idle_away" || b.isAfkBlock) {
+        breakMs += dur;
+        continue;
+      }
+      const start = new Date(b.startTime).getTime();
+      const end = new Date(b.endTime).getTime();
+      if (!Number.isNaN(start) && !Number.isNaN(end) && end > start) {
+        activeSpans.push({ start, end });
+      }
       if (mod === "development") focusedMs += dur;
-      else if (mod === "idle_away" || b.isAfkBlock) breakMs += dur;
       else if (mod === "media_consumption" || mod === "gaming") leisureMs += dur;
       else if (mod === "communication") communicationMs += dur;
       else generalMs += dur;
 
       if (b.sourceChannel === "BROWSER_TAB") browserMs += dur;
     }
+
+    const totalTrackedMs = unionIntervals(activeSpans).reduce((s, iv) => s + (iv.end - iv.start), 0);
 
     const summary: TimelineSummary = {
       totalTrackedMs,

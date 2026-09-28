@@ -168,6 +168,7 @@ export async function getTimelineForDay(
       totalDurationMs: 0,
       summary: emptySummary,
       currentActivity: null,
+      stale: false,
       segments: [],
       blocks: [],
     };
@@ -178,7 +179,9 @@ export async function getTimelineForDay(
   // Do not conflate quietHours with sleep detection.
   const segments = aggregateActivitySegments(rawRows, {
     maxGapMs: 120_000,
-    minBreakMs: 60_000,
+    // 180s idle threshold matches ActivityWatch (AFK after 3min idle) and
+    // the blueprint's micro-pause tier (<3min stays inside the work block).
+    minBreakMs: 180_000,
     transientThresholdMs: 15_000,
     maxBreakMs: 2 * 60 * 60 * 1000, // 2 hours: extended absence must never accumulate as active work break
   });
@@ -221,7 +224,22 @@ export async function getTimelineForDay(
       })
     : null;
 
-  if (dayState?.activeSnapshot && dayState.activeSnapshot.status === "COMPLETE") {
+  // Stale-aware snapshot serving (was: any COMPLETE snapshot won, even when
+  // STALE and hundreds of revisions behind — e.g. Sept 24 served a 58-second
+  // snapshot while ~4h of newer telemetry sat in the database, because the
+  // worker daemon had not re-materialized). A snapshot is authoritative ONLY
+  // when the day is READY and fully caught up; otherwise the live-computed
+  // segments above (same request, no extra work) are served flagged stale.
+  // Worker ownership is respected: the handler never materializes, it only
+  // reads fresher raw observations that are already in hand.
+  const snapshotFresh =
+    dayState?.activeSnapshot &&
+    dayState.activeSnapshot.status === "COMPLETE" &&
+    dayState.status === "READY" &&
+    (dayState.materializedObservationRevision ?? 0) >= (dayState.currentObservationRevision ?? 0) &&
+    (dayState.materializedRuleRevision ?? 0) >= (dayState.currentRuleRevision ?? 0);
+
+  if (snapshotFresh && dayState?.activeSnapshot) {
     const snap = dayState.activeSnapshot;
     const blocks = (snap.blocksJson ?? []) as unknown as TimelineBlockPayload[];
     const summary = (snap.summary ?? {}) as unknown as TimelineSummary;
@@ -232,6 +250,7 @@ export async function getTimelineForDay(
       totalDurationMs: summary.totalTrackedMs || 0,
       summary,
       currentActivity,
+      stale: false,
       segments: [],
       blocks,
     };
@@ -363,6 +382,8 @@ export async function getTimelineForDay(
     totalDurationMs: summary.totalTrackedMs,
     summary: enrichedSummary,
     currentActivity,
+    // Live-computed because no fresh snapshot exists (see above): provisional.
+    stale: true,
     segments,
     blocks,
   };

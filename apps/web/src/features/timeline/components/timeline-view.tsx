@@ -905,10 +905,20 @@ export function TimelineView() {
 
           {/* 3. Workload Metric Ribbon (Unified with Linear design: restrained colors, mono numbers) */}
           <div className="rounded-xl border border-border-subtle bg-bg-card grid grid-cols-2 md:grid-cols-4 divide-y md:divide-y-0 md:divide-x divide-border-subtle overflow-hidden">
-            {/* Total Tracked */}
+            {/* Active Time (breaks excluded; was "Total Tracked" which counted AFK) */}
             <div className="p-4 flex flex-col justify-between space-y-1">
               <div className="flex items-center justify-between text-xs text-text-muted">
-                <span>Total Tracked</span>
+                <span className="inline-flex items-center gap-1.5">
+                  Active Time
+                  {data?.stale && (
+                    <span
+                      className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 uppercase tracking-wider"
+                      title="Background materialization is behind — these numbers were computed live and are provisional"
+                    >
+                      Updating…
+                    </span>
+                  )}
+                </span>
                 <Clock className="w-3.5 h-3.5 text-text-muted" />
               </div>
               <p className="text-xl sm:text-2xl font-bold font-mono tracking-tight text-text-primary">
@@ -916,6 +926,9 @@ export function TimelineView() {
               </p>
               <span className="text-xs text-text-muted font-mono">
                 {blocks.length} {data?.blocks && data.blocks.length > 0 ? "semantic blocks" : "activity segments"}
+                {summary && summary.breakMs > 0 && (
+                  <> · {formatDuration(summary.breakMs / 1000)} breaks</>
+                )}
               </span>
             </div>
 

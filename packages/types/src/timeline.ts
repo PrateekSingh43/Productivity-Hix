@@ -76,6 +76,13 @@ export interface TimelineResponse {
   totalDurationMs: number;
   summary: TimelineSummary;
   currentActivity: CurrentActivityState | null;
+  /**
+   * True when the served numbers were computed live because the durable
+   * snapshot is missing, STALE, or behind the latest observations (e.g. the
+   * background worker has not materialized yet). The UI should present this
+   * as provisional ("Updating…"), never as final truth.
+   */
+  stale?: boolean;
   segments: TimelineSegment[];
   /** Phase 3B semantic blocks (observation-backed TemporalActivityBlock projections). */
   blocks?: TimelineBlock[];

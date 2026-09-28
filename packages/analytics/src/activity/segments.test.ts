@@ -262,15 +262,16 @@ test("AFK break strictly inside an ongoing active window splits the window into 
   assert.equal(segments[2]!.category, "browser");
   assert.equal(segments[2]!.durationSeconds, 660);
 
-  // Invariant verification: Total duration must exactly equal elapsed wall-clock time
+  // Invariant verification: total is ACTIVE time only (breaks excluded,
+  // ActivityWatch headline semantics) — no double counting or overlap.
   const summary = computeTimelineSummary(segments);
-  assert.equal(summary.totalTrackedMs, 1020_000);
+  assert.equal(summary.totalTrackedMs, 720_000); // active only, not 1020s wall
   assert.equal(summary.browserMs, 720_000); // 60s + 660s = 720s
-  assert.equal(summary.breakMs, 300_000);   // 300s
+  assert.equal(summary.breakMs, 300_000);   // 300s, reported alongside the total
   assert.equal(
-    summary.browserMs + summary.breakMs,
+    summary.browserMs,
     summary.totalTrackedMs,
-    "Categories must sum exactly to totalTrackedMs without any double counting or overlap",
+    "Active categories must sum exactly to totalTrackedMs without any double counting or overlap",
   );
 });
 

@@ -53,6 +53,22 @@ test("AFK >= minBreakMs carves the block: wall clock conserved across split", ()
   assert.equal(totalWall, 60 * MS_MIN, "wall clock conserved across AFK carve");
 });
 
+test("AFK beyond maxBreakMs is machine absence: carved around, never a break block", () => {
+  const blocks = materializeTemporalBlocks(
+    [
+      input({ activityId: "w1", start: 0, end: 30 * MS_MIN, isAfk: false }),
+      // 11.5h overnight AFK overlapping the work window
+      input({ activityId: "a1", start: 10 * MS_MIN, end: 10 * MS_MIN + 11.5 * 60 * MS_MIN, isAfk: true, watcher: "afk", application: "afk" }),
+      input({ activityId: "w2", start: 12 * 60 * MS_MIN, end: 12 * 60 * MS_MIN + 30 * MS_MIN, isAfk: false }),
+    ],
+    { maxBreakMs: 2 * 60 * 60 * 1000 },
+  );
+  const afk = blocks.filter((b) => b.isAfkBlock);
+  assert.equal(afk.length, 0, "overnight absence must not become a break block");
+  const work = blocks.filter((b) => !b.isAfkBlock);
+  assert.ok(work.length >= 2, "work on both sides of the absence survives");
+});
+
 test("contributions stay inside block bounds and interval unioning prevents double counting", () => {
   const blocks = materializeTemporalBlocks([
     input({ activityId: "a1", start: 0, end: 10 * MS_MIN }),

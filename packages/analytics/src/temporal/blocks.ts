@@ -83,7 +83,7 @@ export function materializeTemporalBlocks(
 
   if (working.length === 0) return [];
 
-  const carved = splitEventsAroundAfk(working);
+  const carved = splitEventsAroundAfk(working, opts.maxBreakMs);
   const usable = carved.filter((iv) => iv.end > iv.start);
   const asEvents: WorkingEvent[] = usable.map((iv) => ({
     id: iv.sourceEvent.id,
@@ -104,10 +104,16 @@ interface WorkingInterval {
   sourceEvent: WorkingEvent;
 }
 
-function splitEventsAroundAfk(events: WorkingEvent[]): WorkingInterval[] {
+function splitEventsAroundAfk(events: WorkingEvent[], maxBreakMs: number): WorkingInterval[] {
   const afkEvents = events.filter((ev) => ev.isAfk).sort((a, b) => a.start - b.start);
   const workEvents = events.filter((ev) => !ev.isAfk);
   const intervals: WorkingInterval[] = [];
+
+  // Absence beyond maxBreakMs is machine-unavailable (sleep/offline), NOT a
+  // work break: work is still carved around it (AFK precedence holds), but
+  // no break interval is emitted and nothing is counted for it.
+  const isAbsence = (ev: WorkingEvent) => ev.end - ev.start > maxBreakMs;
+  const breakAfks = afkEvents.filter((ev) => !isAbsence(ev));
 
   for (const work of workEvents) {
     let cursor = work.start;
@@ -129,7 +135,7 @@ function splitEventsAroundAfk(events: WorkingEvent[]): WorkingInterval[] {
     }
   }
 
-  for (const afk of afkEvents) {
+  for (const afk of breakAfks) {
     intervals.push({ start: afk.start, end: afk.end, isAfk: true, sourceEvent: afk });
   }
 
