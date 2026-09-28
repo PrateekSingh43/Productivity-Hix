@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTimeline } from "../api/queries";
+import { syncBrowserTimezone } from "@features/settings/lib/timezone-sync";
 import { evidenceDate } from "@features/analytics";
 import { createActivityOverride } from "@features/settings";
 import type { TimelineBlock } from "@repo/types";
@@ -471,6 +472,9 @@ export function TimelineView() {
     };
     syncDate();
     window.addEventListener("popstate", syncDate);
+    // Persist the browser timezone once so day boundaries (ingest, worker,
+    // reads) match the user's real days. Silent: no UI surface.
+    void syncBrowserTimezone();
     return () => window.removeEventListener("popstate", syncDate);
   }, []);
 
@@ -606,6 +610,32 @@ export function TimelineView() {
     () => blocks.reduce((acc, b) => acc + (b.wallClockDurationMs || b.observedActiveDurationMs), 0),
     [blocks]
   );
+
+  // "Where the time went": top applications + window titles over ACTIVE
+  // blocks only (breaks own their card). Shares divide by the active total
+  // so rows stay comparable with the Active Time headline.
+  const topLists = useMemo(() => {
+    const active = blocks.filter((b) => !b.isAfkBlock);
+    const denom = active.reduce((s, b) => s + (b.wallClockDurationMs || b.observedActiveDurationMs || 0), 0);
+    const byApp = new Map<string, { ms: number; mod: string }>();
+    const byTitle = new Map<string, { ms: number; mod: string; app: string }>();
+    for (const b of active) {
+      const ms = b.wallClockDurationMs || b.observedActiveDurationMs || 0;
+      if (ms <= 0) continue;
+      const mod = b.modality.primary?.value ?? "unknown";
+      const app = b.primaryApplication || "Activity";
+      byApp.set(app, { ms: (byApp.get(app)?.ms ?? 0) + ms, mod });
+      const title = (b.cleanTitle || "").trim() || app;
+      const prev = byTitle.get(title);
+      byTitle.set(title, { ms: (prev?.ms ?? 0) + ms, mod: prev?.mod ?? mod, app });
+    }
+    const top = <T,>(m: Map<string, T & { ms: number }>) =>
+      [...m.entries()]
+        .map(([name, v]) => ({ name, ...v }))
+        .sort((a, b) => b.ms - a.ms)
+        .slice(0, 5);
+    return { apps: top(byApp), titles: top(byTitle), denom };
+  }, [blocks]);
 
   // Keyboard navigation listener (Linear principle #1: Keyboard-first)
   useEffect(() => {
@@ -1077,7 +1107,55 @@ export function TimelineView() {
             </Section>
           )}
 
-          {/* 5. Chronological Block Feed */}
+          {/* 5. Where The Time Went (Top Applications & Window Titles) */}
+          {topLists.denom > 0 && (
+            <Section>
+              <SectionHeader
+                title="Where the time went"
+                description="Top applications and window titles over active time (breaks excluded)"
+              />
+              <div className="rounded-xl border border-border-subtle bg-bg-card p-4 grid gap-5 sm:grid-cols-2">
+                {(
+                  [
+                    { heading: "Top Applications", rows: topLists.apps },
+                    { heading: "Top Window Titles", rows: topLists.titles },
+                  ] as const
+                ).map((group) => (
+                  <div key={group.heading} className="space-y-2 min-w-0">
+                    <h4 className="text-[11px] font-semibold uppercase tracking-wider text-text-muted">
+                      {group.heading}
+                    </h4>
+                    <div className="space-y-1.5">
+                      {group.rows.map((row) => {
+                        const config = modalityConfig[row.mod] ?? modalityConfig.unknown!;
+                        const pct = Math.max(2, Math.min(100, (row.ms / topLists.denom) * 100));
+                        return (
+                          <div key={row.name} className="space-y-0.5">
+                            <div className="flex items-baseline justify-between gap-2 text-xs">
+                              <span className="inline-flex items-center gap-1.5 min-w-0">
+                                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${config.dot}`} />
+                                <span className="text-text-primary font-medium truncate" title={row.name}>
+                                  {row.name}
+                                </span>
+                              </span>
+                              <span className="font-mono text-text-secondary shrink-0">
+                                {formatDuration(row.ms / 1000)}
+                              </span>
+                            </div>
+                            <div className="h-1 rounded-full bg-bg-secondary overflow-hidden">
+                              <div className={`h-full rounded-full ${config.bar}`} style={{ width: `${pct}%` }} />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Section>
+          )}
+
+          {/* 6. Chronological Block Feed */}
           <Section>
             <SectionHeader
               title="Activity Timeline"
