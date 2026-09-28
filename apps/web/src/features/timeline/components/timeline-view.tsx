@@ -47,6 +47,7 @@ import {
 } from "recharts";
 import { evidenceDate } from "@features/analytics";
 import { createActivityOverride } from "@features/settings";
+import { cleanWindowTitle } from "@repo/analytics";
 import type { TimelineBlock } from "@repo/types";
 import type { Variants } from "framer-motion";
 
@@ -621,32 +622,6 @@ export function TimelineView() {
     [blocks]
   );
 
-  // "Covered" for the context strip: union of every block span including
-  // breaks (coverage), never a sum — old snapshots contain overlapping
-  // spans, and summing them once produced a 24h+ day.
-  const coveredMs = useMemo(() => {
-    const ivs = blocks
-      .map((b) => {
-        const s = new Date(b.startTime).getTime();
-        const e = new Date(b.endTime).getTime();
-        return { start: s, end: e };
-      })
-      .filter((iv) => Number.isFinite(iv.start) && Number.isFinite(iv.end) && iv.end > iv.start)
-      .sort((a, b) => a.start - b.start);
-    let total = 0;
-    let cur: { start: number; end: number } | null = null;
-    for (const iv of ivs) {
-      if (!cur || iv.start > cur.end) {
-        if (cur) total += cur.end - cur.start;
-        cur = { ...iv };
-      } else if (iv.end > cur.end) {
-        cur.end = iv.end;
-      }
-    }
-    if (cur) total += cur.end - cur.start;
-    return total;
-  }, [blocks]);
-
   // Breakdown aggregations over ACTIVE blocks only (breaks excluded).
   // Window titles are subordinate to their application: each app carries its
   // top contexts for drill-down, never a peer list. Shares divide by the
@@ -654,17 +629,28 @@ export function TimelineView() {
   const topLists = useMemo(() => {
     const active = blocks.filter((b) => !b.isAfkBlock);
     const denom = active.reduce((s, b) => s + (b.wallClockDurationMs || b.observedActiveDurationMs || 0), 0);
-    const byApp = new Map<string, { ms: number; mod: string; contexts: Map<string, number> }>();
+    const byApp = new Map<string, { ms: number; mod: string; contexts: Map<string, { title: string; ms: number }> }>();
     for (const b of active) {
       const ms = b.wallClockDurationMs || b.observedActiveDurationMs || 0;
       if (ms <= 0) continue;
       const mod = b.modality.primary?.value ?? "unknown";
       const app = b.primaryApplication || "Activity";
-      const entry = byApp.get(app) ?? { ms: 0, mod, contexts: new Map<string, number>() };
+      const entry = byApp.get(app) ?? {
+        ms: 0,
+        mod,
+        contexts: new Map<string, { title: string; ms: number }>(),
+      };
       entry.ms += ms;
-      const title = (b.cleanTitle || "").trim();
-      if (title && title !== app) {
-        entry.contexts.set(title, (entry.contexts.get(title) ?? 0) + ms);
+      // Normalize titles before grouping: the same page arrives in variants
+      // ("X - Brave" vs "X", case/whitespace differences across desktop and
+      // tab streams). Without this the same context repeats as separate rows.
+      const cleaned = cleanWindowTitle(b.cleanTitle || "", app).replace(/\s+/g, " ").trim();
+      if (cleaned && cleaned.toLowerCase() !== app.toLowerCase()) {
+        const key = cleaned.toLowerCase();
+        entry.contexts.set(key, {
+          title: entry.contexts.get(key)?.title ?? cleaned,
+          ms: (entry.contexts.get(key)?.ms ?? 0) + ms,
+        });
       }
       byApp.set(app, entry);
     }
@@ -673,8 +659,7 @@ export function TimelineView() {
         name,
         ms: v.ms,
         mod: v.mod,
-        contexts: [...v.contexts.entries()]
-          .map(([t, ms]) => ({ title: t, ms }))
+        contexts: [...v.contexts.values()]
           .sort((a, b) => b.ms - a.ms)
           .slice(0, 3),
       }))
@@ -929,16 +914,9 @@ export function TimelineView() {
               className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-text-primary bg-bg-card border border-border-default hover:bg-bg-secondary hover:border-border-strong transition-all cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5 text-accent-default" />
-              <span className="hidden sm:inline">Add Rule</span>
+              <span className="hidden sm:inline">Add Category</span>
             </button>
 
-            <button
-              onClick={() => setIsShortcutsHelpOpen(true)}
-              title="Keyboard Shortcuts (Press ?)"
-              className="p-1.5 rounded-lg text-text-secondary hover:text-text-primary bg-bg-card border border-border-default hover:bg-bg-secondary transition-all cursor-pointer"
-            >
-              <Keyboard className="w-3.5 h-3.5" />
-            </button>
           </div>
         }
       >
@@ -1157,14 +1135,6 @@ export function TimelineView() {
       {/* RENDER VIEW: TIMELINE */}
       {activeTab === "timeline" && (
         <div className="space-y-6">
-          {/* 3. Day context strip (orientation, not analysis: coverage · active · away · blocks) */}
-          <p className="text-xs font-mono text-text-muted">
-            Covered {formatDuration(coveredMs / 1000)} · Active{" "}
-            {summary ? formatDuration(summary.totalTrackedMs / 1000) : "0m"} · Away{" "}
-            {summary ? formatDuration((summary.breakMs ?? 0) / 1000) : "0m"} · {blocks.length}{" "}
-            {data?.blocks && data.blocks.length > 0 ? "blocks" : "segments"}
-          </p>
-
           {/* 3b. Metric cards (glanceable KPIs; breaks excluded from Active Time) */}
           <div className="rounded-xl border border-border-subtle bg-bg-card grid grid-cols-2 md:grid-cols-5 divide-y md:divide-y-0 md:divide-x divide-border-subtle overflow-hidden">
             <div className="p-4 flex flex-col justify-between space-y-1">
