@@ -55,6 +55,24 @@ export function generatePatternCopy(input: {
       supportingLine: `On comparable planned tasks, corroborated work began ${direction} than planned; a changed plan or start is not a judgment about the work.`,
     };
   }
+  if (input.detectorIdentity === "start_friction") {
+    return {
+      headline: "Recorded work often began later than planned",
+      supportingLine: "Across comparable planned tasks, first recorded work began later than the planned start; a moved start is not a judgment about the work.",
+    };
+  }
+  if (input.detectorIdentity === "escape_hatch") {
+    return {
+      headline: "Friction near task starts often co-occurs with escape-context activity",
+      supportingLine: "After recorded friction near task starts, escape-context activity often appears within minutes; these records do not describe why either occurs.",
+    };
+  }
+  if (input.detectorIdentity === "planned_vs_actual") {
+    return {
+      headline: "Recorded task durations often exceeded the plan",
+      supportingLine: "Across comparable completed tasks, recorded durations ran longer than planned; an overrun is not a judgment about the work.",
+    };
+  }
   return {
     headline: "Comparable work records considered together",
     supportingLine: "These records describe comparable occasions, not attention or the value of the work.",

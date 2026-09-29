@@ -23,6 +23,13 @@ import {
   countDistinctCalendarDays,
   evaluateContextSwitchingEpisode,
   evaluateContextSwitchingPattern,
+  evaluateEscapeHatchEpisode,
+  evaluateEscapeHatchPattern,
+  evaluatePlannedActualEpisode,
+  evaluatePlannedActualPattern,
+  evaluateStartFrictionPattern,
+  calculateStartLatency,
+  resolveFirstWorkStart,
   evaluateTaskFragmentationEpisode,
   evaluateTaskFragmentationPattern,
   initializeProvisionalReliability,
@@ -37,7 +44,17 @@ import {
   type ContextSwitchingPatternMetrics,
   type ContinuousActivityMetrics,
   type DetectorIdentity,
+  type EscapeHatchConfig,
+  type EscapeHatchEpisodeInput,
+  type EscapeHatchEpisodeMetrics,
+  type EscapeHatchPatternMetrics,
   type PatternPromotionInput,
+  type PlannedActualConfig,
+  type PlannedActualEpisodeInput,
+  type PlannedActualEpisodeMetrics,
+  type PlannedActualPatternMetrics,
+  type StartFrictionConfig,
+  type StartFrictionPatternMetrics,
   type TaskExecutionFragmentationMetrics,
   type OutcomeInput,
 } from "../index";
@@ -201,6 +218,75 @@ export const goldenHoursConfig: GoldenHoursConfig = {
 export const goldenHoursThresholds = {
   minimumComparableOccasions: 5, minimumDistinctDays: 3, minimumCoverageRatio: 0.85, maximumUnknownFraction: 0.2,
   minimumBaselineOccasions: 5, minimumBaselineDays: 3, minimumAbsoluteContrast: 0.5,
+};
+
+/**
+ * Start-friction configuration (D6 product policy, mirrors the D1 minima:
+ * 5 occasions / 3 days, directional share >= 2/3). An onset counts as friction
+ * only beyond a 5-minute on-time tolerance, so trivial seconds-late starts
+ * never qualify.
+ */
+export const startFrictionConfig: StartFrictionConfig = {
+  onTimeToleranceSeconds: 300, minimumQualifyingTaskInstances: 5, minimumDistinctCalendarDays: 3,
+  minimumPatternCoverageRatio: 0.8, frictionShareThreshold: 2 / 3,
+  detectorVersion: "1.0.0", configurationVersion: PATTERN_CONFIG_VERSION,
+};
+
+/**
+ * Primary-eligibility thresholds for D6 (mirrors the detector gates; the
+ * contrast floor equals the on-time tolerance so promotion never admits a
+ * within-tolerance median).
+ */
+export const startFrictionThresholds = {
+  minimumComparableOccasions: 5, minimumDistinctDays: 3, minimumCoverageRatio: 0.8, maximumUnknownFraction: 0.2,
+  minimumBaselineOccasions: 1, minimumBaselineDays: 1, minimumAbsoluteContrast: 300,
+};
+
+/**
+ * Escape-hatch configuration (D7 product policy, mirrors the D1 minima:
+ * 5 occasions / 3 days, escape share >= 2/3). Friction is a stall shortly
+ * after recorded work begins (gap > 10m within 30m of the task start, or an
+ * INDETERMINATE block); escape is listed escape-context activity within 5m
+ * after. Co-occurrence only — never causal.
+ */
+export const escapeHatchConfig: EscapeHatchConfig = {
+  frictionGapThresholdSeconds: 600, frictionLookbackSeconds: 1800, escapeAfterSeconds: 300,
+  minimumQualifyingTaskStarts: 5, minimumDistinctCalendarDays: 3, escapeShareThreshold: 2 / 3,
+  minimumPatternCoverageRatio: 0.5, maximumUnknownFraction: 0.2,
+  detectorVersion: "1.0.0", configurationVersion: PATTERN_CONFIG_VERSION,
+};
+
+/**
+ * Primary-eligibility thresholds for D7 (mirrors the detector gates; the
+ * contrast floor sits below the escape-share gate so promotion never admits
+ * a below-gate share).
+ */
+export const escapeHatchThresholds = {
+  minimumComparableOccasions: 5, minimumDistinctDays: 3, minimumCoverageRatio: 0.5, maximumUnknownFraction: 0.2,
+  minimumBaselineOccasions: 1, minimumBaselineDays: 1, minimumAbsoluteContrast: 0.5,
+};
+
+/**
+ * Planned-vs-actual configuration (D8 product policy: >= 5 completions /
+ * >= 3 days, overrun share >= 2/3). Overrun means a bias ratio at or above
+ * 1.2x; only completed tasks with a positive plan and recorded session time
+ * qualify.
+ */
+export const plannedActualConfig: PlannedActualConfig = {
+  minimumQualifyingCompletedTasks: 5, minimumDistinctCalendarDays: 3,
+  overrunRatioThreshold: 1.2, overrunShareThreshold: 2 / 3,
+  minimumPatternCoverageRatio: 0.8, maximumUnknownFraction: 0.2,
+  detectorVersion: "1.0.0", configurationVersion: PATTERN_CONFIG_VERSION,
+};
+
+/**
+ * Primary-eligibility thresholds for D8 (mirrors the detector gates; the
+ * contrast floor equals the overrun excess so promotion never admits a
+ * within-plan median).
+ */
+export const plannedActualThresholds = {
+  minimumComparableOccasions: 5, minimumDistinctDays: 3, minimumCoverageRatio: 0.8, maximumUnknownFraction: 0.2,
+  minimumBaselineOccasions: 1, minimumBaselineDays: 1, minimumAbsoluteContrast: 0.2,
 };
 
 // ---------------------------------------------------------------------------
@@ -550,6 +636,301 @@ function goldenHoursCandidate(
   };
 }
 
+/**
+ * Builds a primary promotion candidate from a DETECTED D6 output.
+ *
+ * Purpose: route primary-eligible start-friction findings through
+ * promotePattern with the catalog entry. Below-gate output returns null and
+ * promotes nothing.
+ *
+ * Contrast units: median first-work latency in seconds (positive when
+ * recorded work begins later than planned); direction is always "increased"
+ * because DETECTED requires a beyond-tolerance late median. The reference is
+ * the declared intention (authoritative plannedStart), so no own-history
+ * baseline applies. Evidence refs are bounded to the analytical window:
+ * tasks whose [plannedStart, actualStart] span escapes the window are
+ * excluded rather than clipped into misleading bounds.
+ *
+ * Edge cases: returns null for non-DETECTED output, non-positive medians,
+ * and empty in-window evidence. Session onsets stay uncorroborated
+ * declarations; the claim never assigns a reason for the delay.
+ */
+function startFrictionCandidate(
+  data: PatternPipelineInput,
+  instances: TaskScheduleInstance[],
+  d6: BehavioralPatternOutput<StartFrictionPatternMetrics>,
+): PatternPromotionInput | null {
+  if (d6.executionStatus !== "DETECTED") return null;
+  const medianLatency = d6.metrics.medianLatencySeconds;
+  if (medianLatency === null || !Number.isFinite(medianLatency) || medianLatency <= 0) return null;
+  const entry = getDetectorCatalogEntry("start_friction");
+  const windowStartMs = Date.parse(data.window.start);
+  const windowEndMs = Date.parse(data.window.end);
+  const observed = instances.flatMap((instance) => {
+    const actualStart = resolveFirstWorkStart(instance);
+    const latency = calculateStartLatency(
+      instance.taskId, instance.plannedStart, actualStart,
+      startFrictionConfig.onTimeToleranceSeconds, instance.plannedCapturedAt ?? null,
+    );
+    if (latency.status !== "OBSERVED" || latency.actualStart === null || latency.plannedStart === null) {
+      return [];
+    }
+    const plannedMs = Date.parse(latency.plannedStart);
+    const actualMs = Date.parse(latency.actualStart);
+    if (!(plannedMs >= windowStartMs && actualMs <= windowEndMs && plannedMs < actualMs)) return [];
+    return [{ instance, latency }];
+  });
+  if (!observed.length) return null;
+  const days = (items: typeof observed) => countDistinctCalendarDays(
+    items.map((item) => item.latency.plannedStart!),
+    data.timezone,
+  );
+  const evidenceRefs: PatternEvidenceRef[] = observed.map(({ instance, latency }) => ({
+    occasionId: instance.taskId,
+    date: resolveProductiveDay(latency.plannedStart!, { timezone: data.timezone }),
+    window: { start: latency.plannedStart!, end: latency.actualStart! },
+    blockIds: [],
+    sessionIds: instance.sessions
+      .filter((session) => session.startedAt === latency.actualStart)
+      .map((session) => session.id)
+      .sort(),
+    taskIds: [instance.taskId],
+    reportIds: data.reports.filter((report) => report.windowStart && report.windowEnd && overlaps(
+      report.windowStart, report.windowEnd,
+      { start: latency.plannedStart!, end: latency.actualStart! },
+    )).map((report) => report.id).sort(),
+  })).filter((ref) => ref.sessionIds.length > 0);
+  if (!evidenceRefs.length) return null;
+  const totalObservedHours = observed.reduce((sum, { instance }) => sum + instance.sessions.reduce((inner, session) => {
+    if (typeof session.durationSeconds === "number" && session.durationSeconds > 0) return inner + session.durationSeconds;
+    if (session.startedAt && session.endedAt) {
+      const dur = (Date.parse(session.endedAt) - Date.parse(session.startedAt)) / 1000;
+      return inner + (dur > 0 ? dur : 0);
+    }
+    return inner;
+  }, 0), 0) / 3600;
+  const resultId = stableId(data.userId, "D6", data.window);
+  const medianMinutes = Math.round(medianLatency / 60);
+  const caveats = [
+    "Prototype thresholds are configurable product policy, not calibrated confidence.",
+    "Session onsets are uncorroborated declarations; a recorded start does not prove work began at that moment.",
+    "Comparison is limited to planned tasks with an authoritative planned start and a recorded onset; identical measurement rules apply to every occasion.",
+  ];
+  return {
+    metadata: { evaluationId: resultId, patternId: resultId, detectorVersion: PATTERN_ENGINE_VERSION, configurationVersion: PATTERN_CONFIG_VERSION, generatedAt: data.window.end },
+    userId: data.userId, detectorIdentity: "start_friction", patternType: "start_friction", role: "primary", resultId,
+    taxonomy: "execution_friction", level: "PATTERN", attributionMode: "TASK_LINKED",
+    executionStatus: "DETECTED",
+    temporalWindow: { ...data.window, scale: "14_DAY" },
+    sample: { qualifyingEpisodes: evidenceRefs.length, qualifyingDays: days(observed), totalObservedHours, meanCoverageRatio: 1.0 },
+    baseline: { strategy: "NONE", comparedMetric: "latencySeconds", baselineValue: null, currentValue: medianLatency, deltaRatio: null, comparisonStatus: "NOT_APPLICABLE" },
+    metrics: { ...d6.metrics },
+    reliability: initializeProvisionalReliability({ qualifyingDayCount: days(observed), qualifyingEpisodeCount: evidenceRefs.length,
+      meanTelemetryCoverageRatio: 1.0, baselineMaturityDays: 0, hasCorroboratingSelfReport: false }),
+    evidenceReferences: { contributingSessionIds: [...new Set(evidenceRefs.flatMap((ref) => ref.sessionIds))].sort(),
+      contributingTaskIds: [...new Set(evidenceRefs.flatMap((ref) => ref.taskIds))].sort(),
+      sampleBoundingWindows: evidenceRefs.map((ref) => ref.window) },
+    epistemicCaveats: caveats, caveats,
+    claim: `Recorded work began later than planned on ${d6.metrics.frictionTaskCount} of ${d6.metrics.observedTaskCount} comparable planned tasks; the median delay was ${medianMinutes} minutes.`,
+    claimLevel: "recurrence", repertoireCategory: "friction",
+    comparison: { referenceKind: "declared-intention", window: data.baselineWindow, comparabilityNote: "Planned tasks with an authoritative planned start and a recorded onset; identical onset measurement in every occasion." },
+    eligibility: { required: { ...startFrictionThresholds }, observed: {},
+      excluded: instances.filter((instance) => !evidenceRefs.some((ref) => ref.occasionId === instance.taskId))
+        .map((instance) => ({ occasionId: instance.taskId, reason: !instance.plannedStart ? "NO_PLANNED_START" : "NOT_OBSERVED_OR_OUT_OF_WINDOW" })) },
+    contributingResults: [{ detectorIdentity: "start_friction", resultId, metricsUsed: ["latencySeconds"], role: "primary" }],
+    evidenceRefs,
+    qualification: {
+      validity: { windowsClipped: true, planSnapshots: true },
+      context: { kind: "commitment", key: "planned-start", description: "Authoritative planned starts compared with first recorded work per task." },
+      contrast: { size: medianLatency, direction: "increased" },
+      unknownFraction: 0, baselineSample: { comparableOccasions: 0, distinctDays: 0 }, userQuestion: entry.userQuestions[0]!,
+    },
+  };
+}
+
+/**
+ * Builds a primary promotion candidate from a DETECTED D7 output.
+ *
+ * Purpose: route primary-eligible escape-hatch findings through
+ * promotePattern with the catalog entry. Below-gate output returns null and
+ * promotes nothing.
+ *
+ * Contrast units: escape share (escaped friction occasions / friction
+ * occasions), a fraction in (0, 1]; direction is always "increased" because
+ * DETECTED requires a share above the gate. The reference is the declared
+ * task onset itself. Copy stays co-occurrence-only: the claim uses "often
+ * co-occurs" phrasing and must pass isNonCausalClaim.
+ *
+ * Edge cases: returns null for non-DETECTED output, non-finite shares, and
+ * empty evidence. Only friction-observed onsets divide the share;
+ * starts without observed friction are excluded, never counted as negatives.
+ */
+function escapeHatchCandidate(
+  data: PatternPipelineInput,
+  episodes: import("@repo/types").EpisodeMeasurementOutput<EscapeHatchEpisodeMetrics>[],
+  d7: BehavioralPatternOutput<EscapeHatchPatternMetrics>,
+): PatternPromotionInput | null {
+  if (d7.executionStatus !== "DETECTED") return null;
+  const share = d7.metrics.escapeShare;
+  if (share === null || !Number.isFinite(share) || share <= 0) return null;
+  const entry = getDetectorCatalogEntry("escape_hatch");
+  const qualified = episodes.filter((episode) => episode.executionStatus === "QUALIFIED");
+  const windowStartMs = Date.parse(data.window.start);
+  const windowEndMs = Date.parse(data.window.end);
+  const evidenceRefs: PatternEvidenceRef[] = [];
+  for (const episode of qualified) {
+    const taskStartMs = Date.parse(episode.metrics.taskStart);
+    if (!(taskStartMs >= windowStartMs && taskStartMs < windowEndMs)) continue;
+    const endMs = Math.min(
+      Date.parse(episode.metrics.escapeAt ?? episode.metrics.frictionEnd ?? episode.metrics.taskStart),
+      windowEndMs,
+    );
+    if (!(endMs > taskStartMs)) continue;
+    evidenceRefs.push({
+      occasionId: episode.metrics.sessionId,
+      date: resolveProductiveDay(episode.metrics.taskStart, { timezone: data.timezone }),
+      window: { start: episode.metrics.taskStart, end: new Date(endMs).toISOString() },
+      blockIds: [],
+      sessionIds: [episode.metrics.sessionId],
+      taskIds: [episode.metrics.taskId],
+      reportIds: [],
+    });
+  }
+  if (!evidenceRefs.length) return null;
+  const days = new Set(evidenceRefs.map((ref) => ref.date)).size;
+  const taskIds = [...new Set(evidenceRefs.flatMap((ref) => ref.taskIds))].sort();
+  const totalObservedHours = qualified.reduce((sum, episode) => sum + episode.activeDurationSeconds, 0) / 3600;
+  const totalSpan = qualified.reduce((sum, episode) => sum + episode.metrics.assessmentSpanSeconds, 0);
+  const totalUnknown = qualified.reduce((sum, episode) => sum + episode.metrics.assessmentUnknownSeconds, 0);
+  const unknownFraction = totalSpan > 0 ? totalUnknown / totalSpan : 1;
+  const resultId = stableId(data.userId, "D7", data.window);
+  const caveats = [
+    "Prototype thresholds are configurable product policy, not calibrated confidence.",
+    "Friction describes recorded gaps near task starts, not the reason work stalled.",
+    "Escape-context activity is identified from an explicit domain list; unknown or missing domains are excluded, never guessed.",
+  ];
+  return {
+    metadata: { evaluationId: resultId, patternId: resultId, detectorVersion: PATTERN_ENGINE_VERSION, configurationVersion: PATTERN_CONFIG_VERSION, generatedAt: data.window.end },
+    userId: data.userId, detectorIdentity: "escape_hatch", patternType: "escape_hatch", role: "primary", resultId,
+    taxonomy: "execution_friction", level: "PATTERN", attributionMode: "TASK_LINKED",
+    executionStatus: "DETECTED",
+    temporalWindow: { ...data.window, scale: "14_DAY" },
+    sample: { qualifyingEpisodes: evidenceRefs.length, qualifyingDays: days, totalObservedHours, meanCoverageRatio: d7.sample.meanCoverageRatio },
+    baseline: { strategy: "NONE", comparedMetric: "escapeShare", baselineValue: null, currentValue: share, deltaRatio: null, comparisonStatus: "NOT_APPLICABLE" },
+    metrics: { ...d7.metrics },
+    reliability: initializeProvisionalReliability({ qualifyingDayCount: days, qualifyingEpisodeCount: evidenceRefs.length,
+      meanTelemetryCoverageRatio: d7.sample.meanCoverageRatio, baselineMaturityDays: 0, hasCorroboratingSelfReport: false }),
+    evidenceReferences: { contributingSessionIds: [...new Set(evidenceRefs.flatMap((ref) => ref.sessionIds))].sort(),
+      contributingTaskIds: taskIds, sampleBoundingWindows: evidenceRefs.map((ref) => ref.window) },
+    epistemicCaveats: caveats, caveats,
+    claim: `Friction near recorded task starts often co-occurs with escape-context activity within minutes (${d7.metrics.escapedStarts} of ${d7.metrics.qualifyingStarts} friction occasions); these records do not describe why either occurs.`,
+    claimLevel: "co-occurrence", repertoireCategory: "mismatch",
+    comparison: { referenceKind: "declared-intention", window: data.baselineWindow, comparabilityNote: "Recorded task onsets with observed friction near the start; identical friction and escape measurement in every occasion." },
+    eligibility: { required: { ...escapeHatchThresholds }, observed: {},
+      excluded: episodes.filter((episode) => !evidenceRefs.some((ref) => ref.occasionId === episode.metrics.sessionId))
+        .map((episode) => ({ occasionId: episode.metrics.sessionId, reason: episode.executionStatus })) },
+    contributingResults: [{ detectorIdentity: "escape_hatch", resultId, metricsUsed: ["escapeShare"], role: "primary" }],
+    evidenceRefs,
+    qualification: {
+      validity: { windowsClipped: true, taskLinkagePreserved: true },
+      context: { kind: "task", key: taskIds.length ? taskIds.map((id) => `task:${id}`).join(" ") : "task:unlinked", description: "Recorded task onsets with observed friction near the start." },
+      contrast: { size: share, direction: "increased" },
+      unknownFraction, baselineSample: { comparableOccasions: 0, distinctDays: 0 }, userQuestion: entry.userQuestions[0]!,
+    },
+  };
+}
+
+/**
+ * Builds a primary promotion candidate from a DETECTED D8 output.
+ *
+ * Purpose: route primary-eligible planned-vs-actual findings through
+ * promotePattern with the catalog entry. Below-gate output returns null and
+ * promotes nothing.
+ *
+ * Contrast units: median bias excess (medianBiasRatio - 1), positive when
+ * actuals run longer than planned; direction is always "increased" because
+ * DETECTED requires a median at or above the overrun ratio. The reference is
+ * the declared plan (plannedDurationMinutes). Only completed tasks with a
+ * positive plan and recorded session time divide the bias.
+ *
+ * Edge cases: returns null for non-DETECTED output, non-finite medians, and
+ * empty in-window evidence. Tasks whose [firstSessionStart, completedAt]
+ * span escapes the analytical window are excluded rather than clipped.
+ */
+function plannedActualCandidate(
+  data: PatternPipelineInput,
+  inputs: PlannedActualEpisodeInput[],
+  episodes: import("@repo/types").EpisodeMeasurementOutput<PlannedActualEpisodeMetrics>[],
+  d8: BehavioralPatternOutput<PlannedActualPatternMetrics>,
+): PatternPromotionInput | null {
+  if (d8.executionStatus !== "DETECTED") return null;
+  const medianBias = d8.metrics.medianBiasRatio;
+  if (medianBias === null || !Number.isFinite(medianBias) || medianBias < 1) return null;
+  const entry = getDetectorCatalogEntry("planned_vs_actual");
+  const windowStartMs = Date.parse(data.window.start);
+  const windowEndMs = Date.parse(data.window.end);
+  const byTask = new Map(episodes.map((episode) => [episode.metrics.taskId, episode]));
+  const evidenceRefs: PatternEvidenceRef[] = [];
+  for (const input of inputs) {
+    const episode = byTask.get(input.taskId);
+    if (!episode || episode.executionStatus !== "QUALIFIED") continue;
+    const starts = input.sessions
+      .map((session) => Date.parse(session.startedAt))
+      .filter((ms) => Number.isFinite(ms));
+    if (!starts.length || !episode.metrics.completedAt) continue;
+    const firstStartMs = Math.min(...starts);
+    const completedMs = Date.parse(episode.metrics.completedAt);
+    if (!(firstStartMs >= windowStartMs && completedMs <= windowEndMs && firstStartMs < completedMs)) continue;
+    evidenceRefs.push({
+      occasionId: input.taskId,
+      date: resolveProductiveDay(episode.metrics.completedAt, { timezone: data.timezone }),
+      window: { start: new Date(firstStartMs).toISOString(), end: episode.metrics.completedAt },
+      blockIds: [],
+      sessionIds: input.sessions.map((session) => session.id).sort(),
+      taskIds: [input.taskId],
+      reportIds: [],
+    });
+  }
+  if (!evidenceRefs.length) return null;
+  const days = new Set(evidenceRefs.map((ref) => ref.date)).size;
+  const taskIds = [...new Set(evidenceRefs.flatMap((ref) => ref.taskIds))].sort();
+  const resultId = stableId(data.userId, "D8", data.window);
+  const caveats = [
+    "Prototype thresholds are configurable product policy, not calibrated confidence.",
+    "Actuals sum recorded session time only; unrecorded work is not observed work.",
+    "Comparison is limited to completed tasks with a positive planned duration and recorded session time.",
+  ];
+  return {
+    metadata: { evaluationId: resultId, patternId: resultId, detectorVersion: PATTERN_ENGINE_VERSION, configurationVersion: PATTERN_CONFIG_VERSION, generatedAt: data.window.end },
+    userId: data.userId, detectorIdentity: "planned_vs_actual", patternType: "planned_vs_actual", role: "primary", resultId,
+    taxonomy: "schedule_fidelity", level: "PATTERN", attributionMode: "TASK_LINKED",
+    executionStatus: "DETECTED",
+    temporalWindow: { ...data.window, scale: "14_DAY" },
+    sample: { qualifyingEpisodes: evidenceRefs.length, qualifyingDays: days, totalObservedHours: d8.sample.totalObservedHours, meanCoverageRatio: 1.0 },
+    baseline: { strategy: "NONE", comparedMetric: "biasRatio", baselineValue: null, currentValue: medianBias, deltaRatio: null, comparisonStatus: "NOT_APPLICABLE" },
+    metrics: { ...d8.metrics },
+    reliability: initializeProvisionalReliability({ qualifyingDayCount: days, qualifyingEpisodeCount: evidenceRefs.length,
+      meanTelemetryCoverageRatio: 1.0, baselineMaturityDays: 0, hasCorroboratingSelfReport: false }),
+    evidenceReferences: { contributingSessionIds: [...new Set(evidenceRefs.flatMap((ref) => ref.sessionIds))].sort(),
+      contributingTaskIds: taskIds, sampleBoundingWindows: evidenceRefs.map((ref) => ref.window) },
+    epistemicCaveats: caveats, caveats,
+    claim: `Completed tasks often ran longer than planned (${d8.metrics.overrunTaskCount} of ${d8.metrics.qualifyingTaskCount} comparable completions); the median ratio of actual to planned duration was ${medianBias.toFixed(2)}x.`,
+    claimLevel: "recurrence", repertoireCategory: "mismatch",
+    comparison: { referenceKind: "declared-intention", window: data.baselineWindow, comparabilityNote: "Completed tasks with a positive planned duration and recorded session time; identical duration measurement in every occasion." },
+    eligibility: { required: { ...plannedActualThresholds }, observed: {},
+      excluded: inputs.filter((input) => !evidenceRefs.some((ref) => ref.occasionId === input.taskId))
+        .map((input) => ({ occasionId: input.taskId, reason: byTask.get(input.taskId)?.executionStatus ?? "NOT_EVALUATED" })) },
+    contributingResults: [{ detectorIdentity: "planned_vs_actual", resultId, metricsUsed: ["biasRatio"], role: "primary" }],
+    evidenceRefs,
+    qualification: {
+      validity: { windowsClipped: true, taskLifecycleBounded: true },
+      context: { kind: "task", key: taskIds.length ? taskIds.map((id) => `task:${id}`).join(" ") : "task:unlinked", description: "Completed tasks with a planned duration and recorded session time." },
+      contrast: { size: medianBias - 1, direction: "increased" },
+      unknownFraction: 0, baselineSample: { comparableOccasions: 0, distinctDays: 0 }, userQuestion: entry.userQuestions[0]!,
+    },
+  };
+}
+
 export function evaluatePatterns(data: PatternPipelineInput): PatternPipelineResult {
   const current = sessionEpisodes(data, data.timeline);
   const historical = sessionEpisodes(data, data.baseline);
@@ -634,6 +1015,108 @@ export function evaluatePatterns(data: PatternPipelineInput): PatternPipelineRes
           : d5.executionStatus === "INSUFFICIENT_BASELINE_DATA"
             ? "More earlier comparable work is needed for this comparison."
             : "More days with both the morning and afternoon windows observed are needed for this comparison."));
+  // D6 input contract: same authoritative schedule instances as D4
+  // (plannedStart passed through verbatim, never inferred). The reference is
+  // the declared intention itself, so no baseline maturity gate applies.
+  const d6 = evaluateStartFrictionPattern(
+    patternContext(data.userId, data.timezone, data.timeline, "start_friction", data.window.end),
+    stableId("D6", data.window), stableId("D6-pattern", data.window),
+    scheduleInstances, startFrictionConfig,
+  );
+  const d6Candidate = startFrictionCandidate(data, scheduleInstances, d6);
+  if (d6Candidate) {
+    const promoted = promotePattern(d6Candidate, configureDetectorCatalogEntry("start_friction", startFrictionThresholds), data.window);
+    if (promoted.promoted) patterns.push(promoted.pattern);
+  }
+  if (d6.executionStatus === "NO_PATTERN") qualifiedEvaluation = true;
+  diagnostics.push(diagnostic("start_friction", d6,
+    d6.executionStatus === "DETECTED"
+      ? "Recorded work recurrently began later than planned across comparable planned tasks."
+      : d6.executionStatus === "NO_PATTERN"
+        ? "No recurrent start delay was found across comparable planned tasks."
+        : "More planned tasks with recorded onsets are needed for this comparison."));
+  // D7 input contract: closed task-linked sessions as recorded onsets, with
+  // the full current-window evidence blocks as the friction/escape surface.
+  // Only friction-observed onsets divide the escape share.
+  const escapeInputs: EscapeHatchEpisodeInput[] = current
+    .filter((item) => item.session.taskId)
+    .map((item) => ({
+      taskId: item.session.taskId!,
+      session: {
+        id: item.session.id,
+        startedAt: item.session.startedAt,
+        endedAt: item.session.endedAt ?? null,
+        durationSeconds: item.session.durationSeconds ?? null,
+      },
+      blocks: data.timeline.blocks,
+    }));
+  const escapeEpisodes = escapeInputs.map((input, index) => evaluateEscapeHatchEpisode(
+    episodeContext(data.userId, data.timezone, data.timeline, "escape_hatch", input.session.id, input.taskId, data.window.end),
+    stableId("D7", input.session.id, String(index)), input, escapeHatchConfig,
+  ));
+  const d7 = evaluateEscapeHatchPattern(
+    patternContext(data.userId, data.timezone, data.timeline, "escape_hatch", data.window.end),
+    stableId("D7", data.window), stableId("D7-pattern", data.window),
+    escapeEpisodes, escapeHatchConfig,
+  );
+  const d7Candidate = escapeHatchCandidate(data, escapeEpisodes, d7);
+  if (d7Candidate) {
+    const promoted = promotePattern(d7Candidate, configureDetectorCatalogEntry("escape_hatch", escapeHatchThresholds), data.window);
+    if (promoted.promoted) patterns.push(promoted.pattern);
+  }
+  if (d7.executionStatus === "NO_PATTERN") qualifiedEvaluation = true;
+  diagnostics.push(diagnostic("escape_hatch", d7,
+    d7.executionStatus === "DETECTED"
+      ? "Friction near recorded task starts often co-occurs with escape-context activity within minutes."
+      : d7.executionStatus === "NO_PATTERN"
+        ? "No recurrent escape-context activity was found after friction near task starts."
+        : d7.executionStatus === "INDETERMINATE_COVERAGE"
+          ? "Some periods do not have enough recorded activity or telemetry coverage to compare."
+          : "More task onsets with observed friction are needed for this comparison."));
+  // D8 input contract: completed tasks (completedAt set) with a planned
+  // duration; actuals sum in-window recorded session time per task. Only
+  // finished work with a positive plan and recorded time qualifies.
+  const windowStartMs = Date.parse(data.window.start);
+  const windowEndMs = Date.parse(data.window.end);
+  const plannedInputs: PlannedActualEpisodeInput[] = data.tasks
+    .filter((task) => task.completedAt !== null)
+    .map((task) => ({
+      taskId: task.id,
+      completedAt: task.completedAt,
+      plannedDurationMinutes: typeof task.plannedDurationMinutes === "number" ? task.plannedDurationMinutes : null,
+      sessions: data.sessions
+        .filter((session) => session.taskId === task.id && session.endedAt &&
+          Number.isFinite(Date.parse(session.startedAt)) &&
+          Date.parse(session.startedAt) >= windowStartMs && Date.parse(session.startedAt) < windowEndMs)
+        .map((session) => ({
+          id: session.id,
+          startedAt: session.startedAt,
+          endedAt: session.endedAt ?? null,
+          durationSeconds: session.durationSeconds ?? null,
+        })),
+    }));
+  const plannedEpisodes = plannedInputs.map((input, index) => evaluatePlannedActualEpisode(
+    episodeContext(data.userId, data.timezone, data.timeline, "planned_vs_actual",
+      input.sessions.map((session) => session.id).sort()[0] ?? input.taskId, input.taskId, data.window.end),
+    stableId("D8", input.taskId, String(index)), input, plannedActualConfig,
+  ));
+  const d8 = evaluatePlannedActualPattern(
+    patternContext(data.userId, data.timezone, data.timeline, "planned_vs_actual", data.window.end),
+    stableId("D8", data.window), stableId("D8-pattern", data.window),
+    plannedEpisodes, plannedActualConfig,
+  );
+  const d8Candidate = plannedActualCandidate(data, plannedInputs, plannedEpisodes, d8);
+  if (d8Candidate) {
+    const promoted = promotePattern(d8Candidate, configureDetectorCatalogEntry("planned_vs_actual", plannedActualThresholds), data.window);
+    if (promoted.promoted) patterns.push(promoted.pattern);
+  }
+  if (d8.executionStatus === "NO_PATTERN") qualifiedEvaluation = true;
+  diagnostics.push(diagnostic("planned_vs_actual", d8,
+    d8.executionStatus === "DETECTED"
+      ? "Completed tasks recurrently ran longer than planned across comparable completions."
+      : d8.executionStatus === "NO_PATTERN"
+        ? "No recurrent duration overrun was found across comparable completions."
+        : "More completed tasks with planned durations are needed for this comparison."));
   const d3Diagnostics: DetectorDiagnostics[] = [];
   const d3Reason = (candidate: PatternPromotionInput, promoted: boolean, occasions: SessionEpisode[]) => {
     if (promoted) return "A change was found across comparable same-task sessions.";

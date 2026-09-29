@@ -4,10 +4,15 @@ import { configureDetectorCatalogEntry, detectorCatalog, getDetectorCatalogEntry
 import { generateGapMixCopy, generatePatternCopy } from "./copy";
 import { fixtureThresholds } from "./promotion.fixtures";
 
-test("catalog retains eight distinct semantic dispositions", () => {
-  assert.equal(Object.keys(detectorCatalog).length, 8);
+test("catalog retains ten distinct semantic dispositions", () => {
+  assert.equal(Object.keys(detectorCatalog).length, 10);
   assert.deepEqual(detectorCatalog.context_switching_density.eligiblePatternRoles, ["contributor", "primary"]);
-  assert.equal(detectorCatalog.start_friction.availability, "blocked-not-implemented");
+  assert.equal(detectorCatalog.start_friction.availability, "available");
+  assert.deepEqual(detectorCatalog.start_friction.eligiblePatternRoles, ["primary"]);
+  assert.equal(detectorCatalog.escape_hatch.availability, "available");
+  assert.deepEqual(detectorCatalog.escape_hatch.eligiblePatternRoles, ["primary"]);
+  assert.equal(detectorCatalog.planned_vs_actual.availability, "available");
+  assert.deepEqual(detectorCatalog.planned_vs_actual.eligiblePatternRoles, ["primary"]);
   assert.equal(detectorCatalog.quiet_work_recurrence.availability, "not-implemented");
   assert.equal(detectorCatalog.stability_shift.availability, "insight-material-only");
   assert.ok(detectorCatalog.extended_continuous_activity.eligiblePatternRoles.includes("primary"));

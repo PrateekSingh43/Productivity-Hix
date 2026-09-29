@@ -106,7 +106,8 @@ export class PatternWorker extends BaseWorker<PatternAnalysisJobData, PatternWor
 
   private selectedDetectors(data: PatternAnalysisJobData): DetectorIdentity[] {
     if (!data.targetDetectors?.length) {
-      return ["context_switching_density", "task_execution_fragmentation", "extended_continuous_activity", "schedule_variance"];
+      return ["context_switching_density", "task_execution_fragmentation", "extended_continuous_activity", "schedule_variance",
+        "golden_hours_focus", "start_friction", "escape_hatch", "planned_vs_actual"];
     }
     return data.targetDetectors.filter(isDetectorIdentity);
   }

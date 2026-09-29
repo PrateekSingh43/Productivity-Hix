@@ -31,3 +31,6 @@ export * from "./detectors/task-fragmentation";
 export * from "./detectors/continuous-activity";
 export * from "./detectors/schedule-variance";
 export * from "./detectors/golden-hours";
+export * from "./detectors/start-friction";
+export * from "./detectors/escape-hatch";
+export * from "./detectors/planned-actual";
