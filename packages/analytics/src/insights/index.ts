@@ -18,6 +18,25 @@ export interface ReflectionInput {
   reportedEnergy?: EnergyLevel;
   reportedProgress?: boolean;
   blockers?: string[];
+  /**
+   * Self-reported focus rating carried through verbatim from the check-in
+   * record. Present means the user reported focus on this occasion; absent
+   * means unknown and is never defaulted. Restricted to the shared
+   * FocusLevel vocabulary so source text can never leak into claims.
+   */
+  reportedFocus?: string;
+  /**
+   * Pattern context key this reflection was recorded under (e.g. the linked
+   * task id). When present it must equal the pattern's qualification context
+   * key for the reflection to align. Absent means the legacy date-only path.
+   */
+  contextKey?: string;
+  /**
+   * Occasion window this reflection belongs to. When present it must overlap
+   * at least one pattern occasion window on the same date for the reflection
+   * to align. Absent means the legacy date-only path.
+   */
+  window?: AnalyticalWindow;
 }
 
 export interface OutcomeInput {
@@ -25,6 +44,17 @@ export interface OutcomeInput {
   taskId?: string;
   goalOutcome: GoalOutcome;
   date?: string;
+  /**
+   * Pattern context key this outcome was assessed under. Same shared-context
+   * contract as ReflectionInput.contextKey: when present it must equal the
+   * pattern's qualification context key.
+   */
+  contextKey?: string;
+  /**
+   * Occasion window this outcome assessment belongs to. Same
+   * overlapping-occasion-window contract as ReflectionInput.window.
+   */
+  window?: AnalyticalWindow;
 }
 
 export interface ObservationInput {
@@ -68,9 +98,25 @@ function canonicalRecords<T extends { recordId: string }>(records: readonly T[])
 function reflectionDescription(reflection: ReflectionInput): string {
   const parts: string[] = [];
   if (reflection.reportedEnergy) parts.push(`${reflection.reportedEnergy} energy`);
+  if (reflection.reportedFocus) parts.push(`${reflection.reportedFocus} focus`);
   if (reflection.reportedProgress !== undefined) parts.push(reflection.reportedProgress ? "progress" : "no progress");
   if (reflection.blockers?.length) parts.push("blockers");
   return parts.join(" and ");
+}
+
+/**
+ * Half-open window overlap for the alignment check.
+ *
+ * Purpose: decide whether a reflection/outcome occasion window shares any
+ * observable moment with a pattern occasion window. Units: ISO timestamps,
+ * millisecond precision. Assumes both windows already passed
+ * validAnalyticalWindow. Edge cases: touching endpoints do not overlap;
+ * non-finite parses never overlap (fail closed, never align).
+ */
+function overlapsOccasionWindow(a: AnalyticalWindow, b: AnalyticalWindow): boolean {
+  const start = Math.max(Date.parse(a.start), Date.parse(b.start));
+  const end = Math.min(Date.parse(a.end), Date.parse(b.end));
+  return Number.isFinite(start) && Number.isFinite(end) && start < end;
 }
 
 function conservativeReliability(values: PatternReliability[], hasReport: boolean): PatternReliability {
@@ -155,15 +201,31 @@ export function composeInsight(input: InsightCompositionInput): InsightOutput {
   const outcomes = canonicalRecords(input.outcomes ?? []);
   if (!reflections || !outcomes || reflections.some((reflection) =>
     (reflection.reportedEnergy !== undefined && !["low", "medium", "high"].includes(reflection.reportedEnergy)) ||
-    (reflection.reportedProgress !== undefined && typeof reflection.reportedProgress !== "boolean"))) {
+    (reflection.reportedFocus !== undefined && !["scattered", "mixed", "focused"].includes(reflection.reportedFocus)) ||
+    (reflection.reportedProgress !== undefined && typeof reflection.reportedProgress !== "boolean") ||
+    (reflection.contextKey !== undefined && (typeof reflection.contextKey !== "string" || !reflection.contextKey.trim())) ||
+    (reflection.window !== undefined && !validAnalyticalWindow(reflection.window))) ||
+    outcomes.some((outcome) =>
+      (outcome.contextKey !== undefined && (typeof outcome.contextKey !== "string" || !outcome.contextKey.trim())) ||
+      (outcome.window !== undefined && !validAnalyticalWindow(outcome.window)))) {
     return emptyInsight(window, "INSUFFICIENT_EVIDENCE");
   }
+  // Shared context for the alignment check: the pattern's qualification
+  // context key. Observation-only compositions carry no pattern context, so
+  // context-bound reflections/outcomes cannot align there (absent key stays
+  // on the legacy date-only path; absent content stays unaligned).
+  const patternContextKey = !observation ? first?.qualification.context.key : undefined;
   const alignedReflections = reflections.filter((reflection) => dates.has(reflection.date) &&
-    (!observation || reflection.date === observation.date) && reflectionDescription(reflection));
+    (!observation || reflection.date === observation.date) && reflectionDescription(reflection) &&
+    (reflection.contextKey === undefined || (patternContextKey !== undefined && reflection.contextKey === patternContextKey)) &&
+    (reflection.window === undefined || evidence.some((ref) => ref.date === reflection.date &&
+      overlapsOccasionWindow(reflection.window as AnalyticalWindow, ref.window))));
   const alignedOutcomes = outcomes.filter((outcome) => outcome.goalOutcome !== "NOT_ASSESSED" &&
     ["ACHIEVED", "PARTIALLY_ACHIEVED", "NOT_ACHIEVED"].includes(outcome.goalOutcome) &&
+    (outcome.contextKey === undefined || (patternContextKey !== undefined && outcome.contextKey === patternContextKey)) &&
     evidence.some((ref) => ref.reportIds.includes(outcome.recordId) &&
-      (!outcome.date || outcome.date === ref.date) && (!outcome.taskId || ref.taskIds.includes(outcome.taskId))));
+      (!outcome.date || outcome.date === ref.date) && (!outcome.taskId || ref.taskIds.includes(outcome.taskId)) &&
+      (outcome.window === undefined || overlapsOccasionWindow(outcome.window as AnalyticalWindow, ref.window))));
   const useOutcomes = !observation && selected.length === 1 && first?.detectorIdentity === "schedule_variance" && alignedOutcomes.length > 0;
   if (!alignedReflections.length && !useOutcomes) return emptyInsight(window);
   const personalElements: InsightOutput["personalElements"] = alignedReflections.map((reflection) => ({

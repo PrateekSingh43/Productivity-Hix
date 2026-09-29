@@ -30,6 +30,90 @@ function RelatedPatterns({ insight }: { insight: InsightOutput }) {
   );
 }
 
+const REFLECTION_QUOTE_LIMIT = 140;
+
+/**
+ * Extracts the linked reflection's date and reported description from the
+ * insight's own alternatives lines (`Reflection <id> on <date> reported
+ * <description>.`). Render-only: no new queries, nothing invented — null
+ * when the line is absent.
+ */
+function parseReflectionLine(
+  recordId: string,
+  alternatives: string[],
+): { date: string; description: string } | null {
+  const prefix = `Reflection ${recordId} on `;
+  const line = alternatives.find((alternative) => alternative.startsWith(prefix));
+  if (!line) return null;
+  const rest = line.slice(prefix.length);
+  const separator = " reported ";
+  const index = rest.indexOf(separator);
+  if (index < 0) return null;
+  const description = rest.slice(index + separator.length).replace(/\.\s*$/, "");
+  if (!description.trim()) return null;
+  return { date: rest.slice(0, index), description };
+}
+
+function truncateQuote(value: string, limit = REFLECTION_QUOTE_LIMIT): string {
+  const trimmed = value.trim();
+  return trimmed.length > limit ? `${trimmed.slice(0, limit - 1).trimEnd()}…` : trimmed;
+}
+
+/**
+ * Render-only personal context: aligned reflection quotes (truncated, with
+ * timestamp) and assessed-goal badges, derived solely from the insight
+ * object. No new query keys. Absent details render an honest fallback.
+ */
+function PersonalElements({ insight }: { insight: InsightOutput }) {
+  if (!insight.personalElements.length) return null;
+  return (
+    <section aria-label="What you reported" className="space-y-2 border-t border-border-subtle pt-3">
+      <h3 className="text-sm font-medium text-text-primary">What you reported</h3>
+      <ul className="space-y-2">
+        {insight.personalElements.map((element) => {
+          const key = `${element.kind}:${element.recordId}`;
+          if (element.kind === "reflection") {
+            const parsed = parseReflectionLine(element.recordId, insight.alternatives);
+            return (
+              <li key={key} className="space-y-1">
+                <span className="inline-flex items-center rounded-full border border-border-subtle bg-bg-secondary px-3 py-1 text-xs text-text-secondary">
+                  Your reflection
+                </span>
+                {parsed ? (
+                  <p className="text-sm leading-relaxed text-text-secondary">
+                    <q>{displayCopy(truncateQuote(parsed.description), "A reported experience was recorded.")}</q>
+                    <span className="text-xs text-text-muted"> · {dateLabel(parsed.date)}</span>
+                  </p>
+                ) : (
+                  <p className="text-xs text-text-muted">A reported experience was recorded; its description is not available.</p>
+                )}
+              </li>
+            );
+          }
+          if (element.kind === "outcome") {
+            const occasion = insight.evidenceRefs.find((ref) => ref.reportIds.includes(element.recordId));
+            return (
+              <li key={key} className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center rounded-full border border-border-subtle bg-bg-secondary px-3 py-1 text-xs text-text-secondary">
+                  Assessed goal
+                </span>
+                <span className="text-xs text-text-muted">
+                  {occasion ? dateLabel(occasion.date) : "Linked occasion details were not supplied."}
+                </span>
+              </li>
+            );
+          }
+          return (
+            <li key={key} className="text-xs text-text-muted">
+              {element.kind === "intention" ? "A stated intention" : "A retention check"} was linked to this insight.
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
 export function InsightCard({ insight, period }: { insight: InsightOutput; period: AnalyticsPeriod }) {
   const [hypothesisDismissed, setHypothesisDismissed] = useState(false);
   const limits = [...insight.doesNotEstablish, ...insight.alternatives];
@@ -46,6 +130,7 @@ export function InsightCard({ insight, period }: { insight: InsightOutput; perio
         What this does not show: {displayCopy(insight.doesNotEstablish[0], "whether one observation caused another.")}
       </p>
       {hasPatterns && <RelatedPatterns insight={insight} />}
+      <PersonalElements insight={insight} />
       <EvidenceLink evidence={insight.evidenceRefs[0]} />
       <details className="border-t border-border-subtle pt-2">
         <summary className="min-h-11 cursor-pointer content-center text-sm font-medium text-text-primary">

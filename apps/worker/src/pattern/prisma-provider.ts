@@ -205,6 +205,10 @@ export class PrismaPatternDataProvider implements PatternDataProvider {
       return [serializeEvent({ ...row, timestamp: new Date(start), duration: (end - start) / 1000 })];
     });
     const sessions = sessionRows.map((s) => serializeSession(s)).sort((a, b) => compare(a.startedAt, b.startedAt) || compare(a.id, b.id));
+    // Task 6 passthrough: check-in focus ratings, energy, progress, notes and
+    // occasion windows (windowStart/windowEnd) flow through verbatim into
+    // PatternPipelineInput.reports for insight-composition alignment.
+    // Nothing is defaulted or invented here; absent stays absent downstream.
     const reports = checkInRows.map((r) => serializeCheckIn(r)).sort((a, b) => compare(a.id, b.id));
     const tasks = [...taskRows].sort((a, b) => compare(a.id, b.id));
     const taskInputs = tasks.map((t) => ({
@@ -214,6 +218,10 @@ export class PrismaPatternDataProvider implements PatternDataProvider {
       plannedStart: t.plannedStart?.toISOString() ?? null,
       plannedDurationMinutes: t.plannedDurationMinutes ?? null,
     }));
+    // Task 6 passthrough: only independently assessed goal outcomes
+    // (ACHIEVED / PARTIALLY_ACHIEVED / NOT_ACHIEVED) flow through into
+    // PatternPipelineInput.outcomes for insight-composition alignment.
+    // NOT_ASSESSED and anything unexpected are excluded, never defaulted.
     const outcomes: OutcomeInput[] = goals.flatMap<OutcomeInput>((goal) => {
       const outcome = goal.outcome;
       return outcome === "ACHIEVED" || outcome === "PARTIALLY_ACHIEVED" || outcome === "NOT_ACHIEVED"
