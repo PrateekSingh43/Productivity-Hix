@@ -4,14 +4,16 @@ import { configureDetectorCatalogEntry, detectorCatalog, getDetectorCatalogEntry
 import { generateGapMixCopy, generatePatternCopy } from "./copy";
 import { fixtureThresholds } from "./promotion.fixtures";
 
-test("catalog retains seven distinct semantic dispositions", () => {
-  assert.equal(Object.keys(detectorCatalog).length, 7);
+test("catalog retains eight distinct semantic dispositions", () => {
+  assert.equal(Object.keys(detectorCatalog).length, 8);
   assert.deepEqual(detectorCatalog.context_switching_density.eligiblePatternRoles, ["contributor", "primary"]);
   assert.equal(detectorCatalog.start_friction.availability, "blocked-not-implemented");
   assert.equal(detectorCatalog.quiet_work_recurrence.availability, "not-implemented");
   assert.equal(detectorCatalog.stability_shift.availability, "insight-material-only");
   assert.ok(detectorCatalog.extended_continuous_activity.eligiblePatternRoles.includes("primary"));
   assert.ok(detectorCatalog.schedule_variance.eligiblePatternRoles.includes("primary"));
+  assert.equal(detectorCatalog.golden_hours_focus.availability, "available");
+  assert.deepEqual(detectorCatalog.golden_hours_focus.eligiblePatternRoles, ["primary"]);
 });
 
 test("identity-role contract admits D1 primary and still excludes blocked detectors", () => {

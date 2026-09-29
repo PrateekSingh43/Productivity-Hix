@@ -45,6 +45,18 @@ import { PatternExecutionContext, type PatternLevelExecutionContext, type Episod
 import type { ContextSwitchingConfig } from "./detectors/context-switching/types";
 import type { TaskFragmentationConfig } from "./detectors/task-fragmentation/types";
 import type { TaskScheduleInstance } from "./detectors/schedule-variance/types";
+import {
+  GOLDEN_HOURS_AM_END_MINUTES,
+  GOLDEN_HOURS_AM_START_MINUTES,
+  GOLDEN_HOURS_CONTEXT_KEY,
+  GOLDEN_HOURS_PM_END_MINUTES,
+  GOLDEN_HOURS_PM_START_MINUTES,
+  type GoldenHoursConfig,
+  type GoldenHoursDayEpisode,
+  type GoldenHoursPatternMetrics,
+} from "./detectors/golden-hours/types";
+import { collectGoldenHoursDayEpisodes } from "./detectors/golden-hours/episode";
+import { evaluateGoldenHoursPattern } from "./detectors/golden-hours/pattern";
 import { collectScheduleInstances } from "./detectors/schedule-variance/provider";
 import { stableId, compare, overlaps, timelineFromBlocks } from "./evidence-assembler";
 
@@ -161,6 +173,32 @@ export const scheduleConfig = {
  * with an evaluated personal baseline is routed through promotePattern.
  */
 export const contextSwitchingThresholds = {
+  minimumComparableOccasions: 5, minimumDistinctDays: 3, minimumCoverageRatio: 0.85, maximumUnknownFraction: 0.2,
+  minimumBaselineOccasions: 5, minimumBaselineDays: 3, minimumAbsoluteContrast: 0.5,
+};
+
+/**
+ * Golden-hours configuration (D5 product policy, mirrors the D1 minima:
+ * 5 occasions / 3 days, |contrast| >= 0.5, directional share >= 2/3).
+ * Windows are fixed at 09:30-11:30 vs 15:00-18:00 in the detector timezone.
+ * Each window must contribute at least 30 minutes of observed activity for a
+ * day to qualify; days below the floor report INSUFFICIENT_EVIDENCE.
+ */
+export const goldenHoursConfig: GoldenHoursConfig = {
+  amStartMinutes: GOLDEN_HOURS_AM_START_MINUTES, amEndMinutes: GOLDEN_HOURS_AM_END_MINUTES,
+  pmStartMinutes: GOLDEN_HOURS_PM_START_MINUTES, pmEndMinutes: GOLDEN_HOURS_PM_END_MINUTES,
+  minimumWindowObservedSeconds: 1800,
+  minimumQualifyingDayEpisodes: 5, minimumQualifyingCalendarDays: 3,
+  minimumBaselineDayEpisodes: 5, minimumBaselineDays: 3,
+  contrastThreshold: 0.5, directionalShareThreshold: 2 / 3,
+  minimumPatternCoverageRatio: 0.85, maximumUnknownFraction: 0.2,
+};
+
+/**
+ * Primary-eligibility thresholds for D5 (mirrors the detector gates so
+ * promotion never admits a below-gate finding).
+ */
+export const goldenHoursThresholds = {
   minimumComparableOccasions: 5, minimumDistinctDays: 3, minimumCoverageRatio: 0.85, maximumUnknownFraction: 0.2,
   minimumBaselineOccasions: 5, minimumBaselineDays: 3, minimumAbsoluteContrast: 0.5,
 };
@@ -399,6 +437,119 @@ function contextSwitchingCandidate(
   };
 }
 
+/**
+ * Collects golden-hours day-episodes for one timeline. Days are kept only
+ * when fully inside the analytical window so evidence references stay bounded
+ * (promotion requires every ref window within the temporal window).
+ */
+function goldenHoursDayEpisodes(data: PatternPipelineInput, timeline: EvidenceTimeline): GoldenHoursDayEpisode[] {
+  const window = { start: timeline.windowStart, end: timeline.windowEnd };
+  return collectGoldenHoursDayEpisodes({
+    blocks: timeline.blocks,
+    sessions: data.sessions.map((session) => ({
+      id: session.id, taskId: session.taskId ?? null, startedAt: session.startedAt, endedAt: session.endedAt ?? null,
+    })),
+    reports: data.reports,
+    window,
+    timezone: data.timezone,
+  }, goldenHoursConfig).filter((episode) => episode.amWindow.start >= window.start && episode.pmWindow.end <= window.end);
+}
+
+/**
+ * Builds a primary promotion candidate from a DETECTED D5 output.
+ *
+ * Purpose: route primary-eligible golden-hours findings through
+ * promotePattern with the catalog entry. Below-gate output returns null and
+ * promotes nothing.
+ *
+ * Contrast units: signed relative change of the median AM switches/hour
+ * against the median PM switches/hour (negative when recorded mornings are
+ * calmer). The own-history reference is afternoon switching from the baseline
+ * window, measured with identical windows. Focus means use the explicit 1-3
+ * ordinal scale (scattered/mixed/focused); days without ratings compare
+ * switching alone and never invent focus values.
+ *
+ * Edge cases: returns null for non-DETECTED output, unevaluated baselines,
+ * non-finite contrast, and empty evidence (a day whose span was clipped out
+ * of the analytical window contributes no bounded ref).
+ */
+function goldenHoursCandidate(
+  data: PatternPipelineInput,
+  current: GoldenHoursDayEpisode[],
+  baseline: GoldenHoursDayEpisode[],
+  d5: BehavioralPatternOutput<GoldenHoursPatternMetrics>,
+): PatternPromotionInput | null {
+  if (d5.executionStatus !== "DETECTED" || d5.baseline.comparisonStatus !== "EVALUATED") return null;
+  const contrast = d5.metrics.contrast;
+  if (contrast === null || !Number.isFinite(contrast)) return null;
+  const entry = getDetectorCatalogEntry("golden_hours_focus");
+  const qualified = current.filter((item) => item.executionStatus === "QUALIFIED");
+  const days = (items: GoldenHoursDayEpisode[]) => new Set(items.map((item) => item.date)).size;
+  const evidenceRefs: PatternEvidenceRef[] = [];
+  for (const item of qualified) {
+    const dayStart = item.amWindow.start < item.pmWindow.start ? item.amWindow.start : item.pmWindow.start;
+    const dayEnd = item.amWindow.end > item.pmWindow.end ? item.amWindow.end : item.pmWindow.end;
+    const clipped = {
+      start: dayStart > data.window.start ? dayStart : data.window.start,
+      end: dayEnd < data.window.end ? dayEnd : data.window.end,
+    };
+    if (!(clipped.start < clipped.end)) continue;
+    evidenceRefs.push({
+      occasionId: `golden-hours-${item.date}`, date: item.date, window: clipped,
+      blockIds: [...new Set([...item.am.blockIds, ...item.pm.blockIds])].sort(),
+      sessionIds: [...item.sessionIds].sort(),
+      taskIds: [...new Set(data.sessions.filter((session) => item.sessionIds.includes(session.id))
+        .flatMap((session) => session.taskId ? [session.taskId] : []))].sort(),
+      reportIds: [...item.reportIds].sort(),
+    });
+  }
+  if (!evidenceRefs.length) return null;
+  const totalSpan = qualified.reduce((sum, item) => sum + item.windowSpanSeconds, 0);
+  const totalUnknown = qualified.reduce((sum, item) => sum + item.unknownFraction * item.windowSpanSeconds, 0);
+  const unknownFraction = totalSpan > 0 ? totalUnknown / totalSpan : 1;
+  const baselineQualified = baseline.filter((item) => item.executionStatus === "QUALIFIED");
+  const resultId = stableId(data.userId, "D5", data.window);
+  const focusCorroborated = d5.metrics.focusDays > 0;
+  const caveats = [
+    "Prototype thresholds are configurable product policy, not calibrated confidence.",
+    "Switching counts describe recorded software contexts, not attention or the value of the work.",
+    "Self-reported focus uses an explicit 1-3 ordinal scale (scattered/mixed/focused); days without ratings compare switching alone and no focus values are invented.",
+    "Comparison is limited to days with both the morning and afternoon windows observed; identical measurement and coverage rules apply in both windows.",
+  ];
+  return {
+    metadata: { evaluationId: resultId, patternId: resultId, detectorVersion: PATTERN_ENGINE_VERSION, configurationVersion: PATTERN_CONFIG_VERSION, generatedAt: data.window.end },
+    userId: data.userId, detectorIdentity: "golden_hours_focus", patternType: "golden_hours_focus", role: "primary", resultId,
+    taxonomy: "temporal_distribution", level: "PATTERN", attributionMode: "GENERAL",
+    executionStatus: "DETECTED",
+    temporalWindow: { ...data.window, scale: "14_DAY" }, sample: { ...d5.sample },
+    baseline: { ...d5.baseline },
+    metrics: { ...d5.metrics },
+    reliability: initializeProvisionalReliability({ qualifyingDayCount: days(qualified), qualifyingEpisodeCount: qualified.length,
+      meanTelemetryCoverageRatio: d5.sample.meanCoverageRatio, baselineMaturityDays: days(baselineQualified),
+      hasCorroboratingSelfReport: focusCorroborated }),
+    evidenceReferences: { contributingSessionIds: [...new Set(qualified.flatMap((item) => item.sessionIds))].sort(),
+      contributingTaskIds: [...new Set(data.sessions.flatMap((session) => session.taskId ? [session.taskId] : []))].sort(),
+      sampleBoundingWindows: evidenceRefs.map((ref) => ref.window) },
+    epistemicCaveats: caveats, caveats,
+    claim: focusCorroborated
+      ? "Recorded mornings showed calmer switching between software contexts than afternoons on the same days; calmer recorded mornings often co-occur with steadier reported focus, which these records do not explain."
+      : "Recorded mornings showed calmer switching between software contexts than afternoons on the same days; these records do not describe why mornings differ from afternoons.",
+    claimLevel: "co-occurrence", repertoireCategory: "mismatch",
+    comparison: { referenceKind: "own-history", window: data.baselineWindow, comparabilityNote: "Identical morning-vs-afternoon window measurement in the current and baseline windows; the reference is afternoon switching from the user's own history." },
+    eligibility: { required: { ...goldenHoursThresholds }, observed: {},
+      excluded: current.filter((item) => item.executionStatus !== "QUALIFIED").map((item) => ({ occasionId: `golden-hours-${item.date}`, reason: item.executionStatus })) },
+    contributingResults: [{ detectorIdentity: "golden_hours_focus", resultId,
+      metricsUsed: focusCorroborated ? ["switchesPerHour", "meanFocusScore"] : ["switchesPerHour"], role: "primary" }],
+    evidenceRefs,
+    qualification: {
+      validity: { windowsClipped: true, afkExcluded: true, unknownExcluded: true, metricQualifiedBaseline: true },
+      context: { kind: "time-window", key: GOLDEN_HOURS_CONTEXT_KEY, description: "Same-day morning vs afternoon windows in the detector timezone." },
+      contrast: { size: contrast, direction: "decreased" },
+      unknownFraction, baselineSample: { comparableOccasions: baselineQualified.length, distinctDays: days(baselineQualified) }, userQuestion: entry.userQuestions[0]!,
+    },
+  };
+}
+
 export function evaluatePatterns(data: PatternPipelineInput): PatternPipelineResult {
   const current = sessionEpisodes(data, data.timeline);
   const historical = sessionEpisodes(data, data.baseline);
@@ -451,8 +602,39 @@ export function evaluatePatterns(data: PatternPipelineInput): PatternPipelineRes
     const promoted = promotePattern(d1Candidate, configureDetectorCatalogEntry("context_switching_density", contextSwitchingThresholds), data.window);
     if (promoted.promoted) patterns.push(promoted.pattern);
   }
-  const d3Diagnostics: DetectorDiagnostics[] = [];
+  // D5 primary path: a DETECTED D5 with an evaluated own-history reference is
+  // routed through promotePattern; anything below gate promotes nothing.
+  // (qualifiedEvaluation is shared with the D3 aggregation below.)
   let qualifiedEvaluation = false;
+  const currentGoldenDays = goldenHoursDayEpisodes(data, data.timeline);
+  const baselineGoldenDays = collectGoldenHoursDayEpisodes({
+    blocks: data.baseline.blocks,
+    sessions: data.sessions.map((session) => ({
+      id: session.id, taskId: session.taskId ?? null, startedAt: session.startedAt, endedAt: session.endedAt ?? null,
+    })),
+    reports: data.reports,
+    window: { start: data.baseline.windowStart, end: data.baseline.windowEnd },
+    timezone: data.timezone,
+  }, goldenHoursConfig);
+  const d5 = evaluateGoldenHoursPattern(patternContext(data.userId, data.timezone, data.timeline, "golden_hours_focus", data.window.end),
+    stableId("D5", data.window), stableId("D5-pattern", data.window), currentGoldenDays, baselineGoldenDays, goldenHoursConfig);
+  const d5Candidate = goldenHoursCandidate(data, currentGoldenDays, baselineGoldenDays, d5);
+  if (d5Candidate) {
+    const promoted = promotePattern(d5Candidate, configureDetectorCatalogEntry("golden_hours_focus", goldenHoursThresholds), data.window);
+    if (promoted.promoted) patterns.push(promoted.pattern);
+  }
+  if (d5.executionStatus === "NO_PATTERN") qualifiedEvaluation = true;
+  diagnostics.push(diagnostic("golden_hours_focus", d5,
+    d5.executionStatus === "DETECTED"
+      ? "Recorded mornings ran calmer than afternoons across comparable days."
+      : d5.executionStatus === "NO_PATTERN"
+        ? "No consistent morning-vs-afternoon difference was found across comparable days."
+        : d5.executionStatus === "INDETERMINATE_COVERAGE"
+          ? "Some periods do not have enough recorded activity or telemetry coverage to compare."
+          : d5.executionStatus === "INSUFFICIENT_BASELINE_DATA"
+            ? "More earlier comparable work is needed for this comparison."
+            : "More days with both the morning and afternoon windows observed are needed for this comparison."));
+  const d3Diagnostics: DetectorDiagnostics[] = [];
   const d3Reason = (candidate: PatternPromotionInput, promoted: boolean, occasions: SessionEpisode[]) => {
     if (promoted) return "A change was found across comparable same-task sessions.";
     if (candidate.executionStatus === "NO_PATTERN") return "No change was found across comparable same-task occasions.";

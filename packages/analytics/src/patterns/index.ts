@@ -30,3 +30,4 @@ export * from "./detectors/context-switching/detector";
 export * from "./detectors/task-fragmentation";
 export * from "./detectors/continuous-activity";
 export * from "./detectors/schedule-variance";
+export * from "./detectors/golden-hours";

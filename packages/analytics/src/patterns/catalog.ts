@@ -20,7 +20,7 @@ interface CatalogDefinition {
     claimLevels: readonly PatternClaimLevel[];
     repertoireCategories: readonly PatternRepertoireCategory[];
     referenceKinds: readonly ("own-history" | "declared-intention")[];
-    requiredContext: "task" | "workstream" | "day-type" | "commitment" | "reflection";
+    requiredContext: "task" | "workstream" | "day-type" | "commitment" | "reflection" | "time-window";
     thresholds: PatternEligibilityThresholds | null;
   };
   internalMetrics: readonly string[];
@@ -86,6 +86,21 @@ export const detectorCatalog = {
       thresholds: null,
     },
     internalMetrics: [],
+  },
+  golden_hours_focus: {
+    displayGloss: "When recorded mornings run calmer than afternoons",
+    availability: "available",
+    eligiblePatternRoles: ["primary"],
+    userQuestions: ["Are my mornings calmer than my afternoons — and does my reported focus agree?"],
+    eligibility: {
+      requiredValidityFlags: ["windowsClipped", "afkExcluded", "unknownExcluded", "metricQualifiedBaseline"],
+      claimLevels: ["co-occurrence"],
+      repertoireCategories: ["mismatch"],
+      referenceKinds: ["own-history"],
+      requiredContext: "time-window",
+      thresholds: null,
+    },
+    internalMetrics: ["switchesPerHour", "meanFocusScore"],
   },
   start_friction: {
     displayGloss: "Time between deciding to start and recorded work",

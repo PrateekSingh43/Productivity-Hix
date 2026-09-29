@@ -93,7 +93,8 @@ describe("Patterns and Insights orchestration contracts", () => {
     expect(pattern.reliability.calibrationStatus).toBe("UNVALIDATED_PROTOTYPE");
     expect(pattern.evidenceRefs?.every((ref) => ref.sessionIds.every((id) => data.sessions.some((item) => item.id === id)))).toBe(true);
     expect(JSON.stringify(result)).not.toContain("other-user");
-    expect(result.diagnostics.perDetector).toHaveLength(4);
+    expect(result.diagnostics.perDetector).toHaveLength(5);
+    expect(result.diagnostics.perDetector.find((item) => item.identity === "golden_hours_focus")?.availability).toBe("AVAILABLE");
     expect(result.diagnostics.perDetector.find((item) => item.identity === "schedule_variance")?.reason).toContain("snapshots");
   });
 
