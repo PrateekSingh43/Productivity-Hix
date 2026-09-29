@@ -6,7 +6,7 @@ import { fixtureThresholds } from "./promotion.fixtures";
 
 test("catalog retains seven distinct semantic dispositions", () => {
   assert.equal(Object.keys(detectorCatalog).length, 7);
-  assert.deepEqual(detectorCatalog.context_switching_density.eligiblePatternRoles, ["contributor"]);
+  assert.deepEqual(detectorCatalog.context_switching_density.eligiblePatternRoles, ["contributor", "primary"]);
   assert.equal(detectorCatalog.start_friction.availability, "blocked-not-implemented");
   assert.equal(detectorCatalog.quiet_work_recurrence.availability, "not-implemented");
   assert.equal(detectorCatalog.stability_shift.availability, "insight-material-only");
@@ -14,10 +14,10 @@ test("catalog retains seven distinct semantic dispositions", () => {
   assert.ok(detectorCatalog.schedule_variance.eligiblePatternRoles.includes("primary"));
 });
 
-test("identity-role contract excludes D1 primary and blocked detectors", () => {
-  type D1Primary = Extract<CatalogPatternIdentity, { detectorIdentity: "context_switching_density" }> extends { role: "primary" } ? true : false;
-  const primaryAllowed: D1Primary = false;
-  assert.equal(primaryAllowed, false);
+test("identity-role contract admits D1 primary and still excludes blocked detectors", () => {
+  type D1Roles = Extract<CatalogPatternIdentity, { detectorIdentity: "context_switching_density" }>["role"];
+  const primaryAllowed: D1Roles = "primary";
+  assert.equal(primaryAllowed, "primary");
   assert.equal(isDetectorIdentity("invented"), false);
   assert.equal(isDetectorIdentity("toString"), false);
 });

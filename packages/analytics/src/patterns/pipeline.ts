@@ -32,7 +32,9 @@ import {
   segmentTaskExecutionEpisodes,
   subtractCalendarDays,
   configureDetectorCatalogEntry,
+  getDetectorCatalogEntry,
   type ContextSwitchingMetrics,
+  type ContextSwitchingPatternMetrics,
   type ContinuousActivityMetrics,
   type DetectorIdentity,
   type PatternPromotionInput,
@@ -151,6 +153,16 @@ export const scheduleConfig = {
   onTimeToleranceSeconds: 0, minimumQualifyingTaskInstances: 5, minimumDistinctCalendarDays: 3,
   minimumPatternCoverageRatio: 0.8, delayedStartFractionThreshold: 0.5,
   detectorVersion: "1.0.0", configurationVersion: "api-snapshot-unavailable-1",
+};
+/**
+ * Primary-eligibility thresholds for D1 (product policy, mirrors the detector
+ * gates: 5 sessions / 3 days minima, |contrast| >= 0.5, recurrence >= 0.6).
+ * Below-gate D1 output stays contributor-only (internal); only a DETECTED D1
+ * with an evaluated personal baseline is routed through promotePattern.
+ */
+export const contextSwitchingThresholds = {
+  minimumComparableOccasions: 5, minimumDistinctDays: 3, minimumCoverageRatio: 0.85, maximumUnknownFraction: 0.2,
+  minimumBaselineOccasions: 5, minimumBaselineDays: 3, minimumAbsoluteContrast: 0.5,
 };
 
 // ---------------------------------------------------------------------------
@@ -306,6 +318,87 @@ function continuousCandidate(data: PatternPipelineInput, taskId: string, current
   };
 }
 
+/**
+ * Builds a primary promotion candidate from a DETECTED D1 output.
+ *
+ * Purpose: route primary-eligible context-switching through promotePattern
+ * with the catalog entry. Below-gate output returns null, leaving the
+ * existing contributor-only (internal) behavior unchanged.
+ *
+ * Contrast units: signed relative change of median switches/hour versus the
+ * personal baseline (same units as switchContrastThreshold). Assumes episode
+ * windows are clipped to session spans and AFK/break/unknown intervals are
+ * excluded from the switching sequence (see parseContextSequence).
+ *
+ * Edge cases: returns null for non-DETECTED output, unevaluated baselines,
+ * and non-finite contrast. The zero-baseline absolute path stays
+ * contributor-only because promotion requires an evaluated own-history
+ * comparison.
+ */
+function contextSwitchingCandidate(
+  data: PatternPipelineInput,
+  current: SessionEpisode[],
+  historical: SessionEpisode[],
+  d1: BehavioralPatternOutput<ContextSwitchingPatternMetrics>,
+): PatternPromotionInput | null {
+  if (d1.executionStatus !== "DETECTED" || d1.baseline.comparisonStatus !== "EVALUATED") return null;
+  const contrast = d1.baseline.deltaRatio;
+  if (contrast === null || !Number.isFinite(contrast)) return null;
+  const entry = getDetectorCatalogEntry("context_switching_density");
+  const qualified = current.filter((item) => item.d1.executionStatus === "QUALIFIED");
+  const historyQualified = historical.filter((item) => item.d1.executionStatus === "QUALIFIED");
+  const days = (items: SessionEpisode[]) => countDistinctCalendarDays(items.map((item) => item.session.startedAt), data.timezone);
+  const taskIds = [...new Set(qualified.flatMap((item) => item.session.taskId ? [item.session.taskId] : []))].sort();
+  const evidenceRefs: PatternEvidenceRef[] = qualified.map((item) => ({
+    occasionId: item.session.id, date: resolveProductiveDay(item.session.startedAt, { timezone: data.timezone }),
+    window: { start: item.session.startedAt, end: item.session.endedAt! },
+    blockIds: item.bounded.blocks.map((block) => block.id).sort(), sessionIds: [item.session.id],
+    taskIds: item.session.taskId ? [item.session.taskId] : [],
+    reportIds: data.reports.filter((report) => report.windowStart && report.windowEnd && overlaps(report.windowStart, report.windowEnd,
+      { start: item.session.startedAt, end: item.session.endedAt! })).map((report) => report.id).sort(),
+  }));
+  const boundedBlocks = qualified.flatMap((item) => item.bounded.blocks);
+  const boundedSeconds = boundedBlocks.reduce((sum, block) => sum + block.durationSeconds, 0);
+  const unknownSeconds = boundedBlocks.filter((block) => block.coverage !== "OBSERVED" && block.coverage !== "OBSERVED_REPORTED")
+    .reduce((sum, block) => sum + block.durationSeconds, 0);
+  const unknownFraction = boundedSeconds > 0 ? unknownSeconds / boundedSeconds : 1;
+  const direction = contrast > 0 ? "increased" : contrast < 0 ? "decreased" : "unchanged";
+  const resultId = stableId(data.userId, "D1-primary", data.window);
+  const caveats = [
+    "Prototype thresholds are configurable product policy, not calibrated confidence.",
+    "Switching counts describe recorded software contexts, not attention or the value of the work.",
+    "Comparison is limited to closed manual sessions with qualified switching telemetry; identical measurement and coverage rules apply in both windows.",
+    "AFK, break, and unobserved intervals end a context run instead of contributing switches.",
+  ];
+  return {
+    metadata: { evaluationId: resultId, patternId: resultId, detectorVersion: PATTERN_ENGINE_VERSION, configurationVersion: PATTERN_CONFIG_VERSION, generatedAt: data.window.end },
+    userId: data.userId, detectorIdentity: "context_switching_density", patternType: "context_switching_density", role: "primary", resultId,
+    taxonomy: "context_dynamics", level: "PATTERN", attributionMode: "TASK_LINKED",
+    executionStatus: "DETECTED",
+    temporalWindow: { ...data.window, scale: "14_DAY" }, sample: { ...d1.sample },
+    baseline: { ...d1.baseline },
+    metrics: { ...d1.metrics },
+    reliability: d1.reliability,
+    evidenceReferences: { contributingSessionIds: qualified.map((item) => item.session.id).sort(), contributingTaskIds: taskIds, sampleBoundingWindows: evidenceRefs.map((ref) => ref.window) },
+    epistemicCaveats: caveats, caveats,
+    claim: direction === "increased"
+      ? "Recorded changes between software contexts were more frequent than in earlier comparable records; elevated switching often co-occurs with denser recorded activity, which these records do not explain."
+      : "Recorded changes between software contexts were less frequent than in earlier comparable records; calmer switching often co-occurs with steadier recorded activity, which these records do not explain.",
+    claimLevel: "co-occurrence", repertoireCategory: "changed",
+    comparison: { referenceKind: "own-history", window: data.baselineWindow, comparabilityNote: "Closed manual sessions with qualified switching telemetry; identical measurement and coverage rules in both windows." },
+    eligibility: { required: { ...contextSwitchingThresholds }, observed: {},
+      excluded: current.filter((item) => item.d1.executionStatus !== "QUALIFIED").map((item) => ({ occasionId: item.session.id, reason: item.d1.executionStatus })) },
+    contributingResults: [{ detectorIdentity: "context_switching_density", resultId, metricsUsed: ["switchesPerHour"], role: "primary" }],
+    evidenceRefs,
+    qualification: {
+      validity: { afkExcluded: true, unknownExcluded: true, windowsClipped: true, taskLinkagePreserved: true, metricQualifiedBaseline: true },
+      context: { kind: "task", key: taskIds.length ? taskIds.map((id) => `task:${id}`).join(" ") : "task:unlinked", description: "Closed manual sessions with qualified context-switching telemetry." },
+      contrast: { size: contrast, direction },
+      unknownFraction, baselineSample: { comparableOccasions: historyQualified.length, distinctDays: days(historyQualified) }, userQuestion: entry.userQuestions[0]!,
+    },
+  };
+}
+
 export function evaluatePatterns(data: PatternPipelineInput): PatternPipelineResult {
   const current = sessionEpisodes(data, data.timeline);
   const historical = sessionEpisodes(data, data.baseline);
@@ -351,6 +444,13 @@ export function evaluatePatterns(data: PatternPipelineInput): PatternPipelineRes
   ];
   const taskIds = [...new Set(current.flatMap((item) => item.session.taskId ? [item.session.taskId] : []))].sort();
   const patterns: PatternPromotionInput[] = [];
+  // D1 primary path: a DETECTED D1 with an evaluated personal baseline is
+  // routed through promotePattern; anything below gate stays internal-only.
+  const d1Candidate = contextSwitchingCandidate(data, current, historical, d1);
+  if (d1Candidate) {
+    const promoted = promotePattern(d1Candidate, configureDetectorCatalogEntry("context_switching_density", contextSwitchingThresholds), data.window);
+    if (promoted.promoted) patterns.push(promoted.pattern);
+  }
   const d3Diagnostics: DetectorDiagnostics[] = [];
   let qualifiedEvaluation = false;
   const d3Reason = (candidate: PatternPromotionInput, promoted: boolean, occasions: SessionEpisode[]) => {

@@ -30,7 +30,7 @@ export const detectorCatalog = {
   context_switching_density: {
     displayGloss: "Changes between recorded software contexts",
     availability: "available",
-    eligiblePatternRoles: ["contributor"],
+    eligiblePatternRoles: ["contributor", "primary"],
     userQuestions: ["How often did my recorded environment change during eligible work?"],
     eligibility: {
       requiredValidityFlags: ["afkExcluded", "unknownExcluded", "windowsClipped", "taskLinkagePreserved", "metricQualifiedBaseline"],
