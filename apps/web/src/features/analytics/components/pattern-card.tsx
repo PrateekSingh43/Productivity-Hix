@@ -23,10 +23,18 @@ const repertoireStyles: Record<RepertoireCategory, string> = {
   opportunity: "border-indigo-400/20 bg-indigo-400/5 text-indigo-700 dark:text-indigo-200",
 };
 
+const fallbackBadgeStyle = "border-border-subtle bg-bg-secondary text-text-secondary";
+
 export function PatternCard({ pattern }: { pattern: BehavioralPatternOutput }) {
   const [dismissed, setDismissed] = useState(false);
   const anchor = evidenceAnchor(pattern.evidenceAnchor);
-  const counts = eligibilityLines(pattern.eligibility);
+  const counts = pattern.eligibility ? eligibilityLines(pattern.eligibility) : [];
+  const excluded = pattern.eligibility?.excluded ?? [];
+  const caveats = pattern.caveats ?? [];
+  const contributingResults = pattern.contributingResults ?? [];
+  const evidenceRefs = pattern.evidenceRefs ?? [];
+  const comparison = pattern.comparison;
+  const claimText = claimLabels[pattern.claimLevel as keyof typeof claimLabels] ?? "A finding across comparable occasions";
 
   if (dismissed) {
     return (
@@ -49,53 +57,53 @@ export function PatternCard({ pattern }: { pattern: BehavioralPatternOutput }) {
         <h2 className="min-w-0 max-w-2xl wrap-break-word text-lg font-medium text-text-primary">
           {patternHeadline(pattern)}
         </h2>
-        <span className={`rounded-full border px-2.5 py-1 text-xs capitalize ${repertoireStyles[pattern.repertoireCategory]}`}>
-          {pattern.repertoireCategory}
+        <span className={`rounded-full border px-2.5 py-1 text-xs capitalize ${repertoireStyles[pattern.repertoireCategory] ?? fallbackBadgeStyle}`}>
+          {pattern.repertoireCategory ?? "Finding"}
         </span>
       </div>
       <p className="text-sm leading-relaxed text-text-secondary">
         {displayCopy(pattern.supportingLine, "A finding across comparable records; inspect the details and limits below.")}
       </p>
       {anchor && <p className="text-xs text-text-muted">{anchor}</p>}
-      <EvidenceLink evidence={pattern.evidenceRefs[0]} />
+      <EvidenceLink evidence={evidenceRefs[0]} />
       <details className="group border-t border-border-subtle pt-2">
         <summary className="min-h-11 cursor-pointer content-center text-sm font-medium text-text-primary">
           Details
         </summary>
         <div className="space-y-5 pt-3 text-sm leading-relaxed text-text-secondary">
           <DetailSection title="What this says">
-            <p>{claimLabels[pattern.claimLevel]}</p>
+            <p>{claimText}</p>
           </DetailSection>
           <DetailSection title="Comparison">
             <p>
-              {pattern.comparison.referenceKind === "declared-intention"
+              {comparison?.referenceKind === "declared-intention"
                 ? "Compared with your declared plans."
-                : pattern.comparison.referenceKind === "own-history"
+                : comparison?.referenceKind === "own-history"
                 ? "Compared with your earlier recorded work."
                 : "Comparison reference not provided."}
             </p>
             <p>
-              {dateLabel(pattern.comparison.window.start)} – {dateLabel(pattern.comparison.window.end)}
+              {dateLabel(comparison?.window?.start)} – {dateLabel(comparison?.window?.end)}
             </p>
             <p>
-              {displayCopy(pattern.comparison.comparabilityNote, "A plain-language comparison note was not provided.")}
+              {displayCopy(comparison?.comparabilityNote, "A plain-language comparison note was not provided.")}
             </p>
           </DetailSection>
           <DetailSection title="Comparable work">
             {counts.length ? counts.map((line) => <p key={line}>{line}</p>) : <p>Comparable occasion counts were not provided.</p>}
-            <p>{pattern.eligibility.excluded.length} excluded occasions</p>
+            <p>{excluded.length} excluded occasions</p>
             <ul className="list-disc space-y-1 pl-5">
-              {pattern.eligibility.excluded.map((item, index) => (
-                <li key={`${item.occasionId}-${index}`}>
-                  {displayCopy(item.reason, "This occasion could not be compared; a plain-language reason was not provided.")}
+              {excluded.map((item, index) => (
+                <li key={`${item?.occasionId ?? "occasion"}-${index}`}>
+                  {displayCopy(item?.reason, "This occasion could not be compared; a plain-language reason was not provided.")}
                 </li>
               ))}
             </ul>
           </DetailSection>
           <DetailSection title="Limits and exceptions">
-            {pattern.caveats.length ? (
+            {caveats.length ? (
               <ul className="list-disc space-y-1 pl-5">
-                {pattern.caveats.map((line, index) => (
+                {caveats.map((line, index) => (
                   <li key={index}>
                     {displayCopy(line, "An additional limitation was recorded; its plain-language description is not available.")}
                   </li>
@@ -106,17 +114,17 @@ export function PatternCard({ pattern }: { pattern: BehavioralPatternOutput }) {
             )}
           </DetailSection>
           <DetailSection title="Supporting observations">
-            {pattern.contributingResults.length ? (
+            {contributingResults.length ? (
               <ul className="list-disc space-y-1 pl-5">
-                {pattern.contributingResults.map((result, index) => (
-                  <li key={`${result.resultId}-${index}`}>{resultGloss(result)}</li>
+                {contributingResults.map((result, index) => (
+                  <li key={`${result?.resultId ?? "result"}-${index}`}>{resultGloss(result)}</li>
                 ))}
               </ul>
             ) : (
               <p>Supporting descriptions were not provided.</p>
             )}
           </DetailSection>
-          <EvidenceRows evidence={pattern.evidenceRefs} />
+          <EvidenceRows evidence={evidenceRefs} />
           <button
             type="button"
             onClick={() => setDismissed(true)}

@@ -33,8 +33,13 @@ export function useRequestPatternAnalysis(period: AnalyticsPeriod) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: () => requestPatternAnalysis(period),
-    onSettled: () => {
+    // Success only: invalidating on POST error would refetch GET and risk a
+    // GET-error card masking the actual POST failure. The consumer surfaces
+    // mutation.error inline. Insights are invalidated too so both pages
+    // refresh after a successful run.
+    onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: analyticsQueries.patterns(period).queryKey });
+      void queryClient.invalidateQueries({ queryKey: analyticsQueries.insights(period).queryKey });
     },
   });
 }

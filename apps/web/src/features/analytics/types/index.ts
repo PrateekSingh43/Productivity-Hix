@@ -107,8 +107,17 @@ export interface InsightOutput {
   };
 }
 
+export interface AnalyticsDetectorDiagnostic {
+  identity: string;
+  status: string;
+  reason?: string;
+  availability?: "AVAILABLE" | "NOT_AVAILABLE";
+  eligibleOccasions?: number;
+  eligibleDays?: number;
+}
+
 export interface AnalyticsDiagnostics {
-  perDetector: { identity: string; status: string; reason?: string; availability?: "AVAILABLE" | "NOT_AVAILABLE" }[];
+  perDetector: AnalyticsDetectorDiagnostic[];
   observationCount?: number;
   recordingHistory?: {
     firstObservationAt: string | null;

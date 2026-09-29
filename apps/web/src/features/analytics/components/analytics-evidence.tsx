@@ -40,36 +40,40 @@ export function EvidenceRows({
   evidence,
   relatedPatterns,
 }: {
-  evidence: AnalyticsEvidenceRef[];
+  evidence?: AnalyticsEvidenceRef[];
   relatedPatterns?: ReactNode;
 }) {
+  const rows = evidence ?? [];
   return (
     <div className="space-y-2">
       <h3 className="font-medium text-text-primary">Evidence</h3>
-      {evidence.length === 0 ? (
+      {rows.length === 0 ? (
         <p>Evidence links were not provided.</p>
       ) : (
         <ul className="divide-y divide-border-subtle">
-          {evidence.map((ref, index) => {
-            const href = timelineHref(ref.date);
+          {rows.map((ref, index) => {
+            const href = ref ? timelineHref(ref.date) : null;
+            const label = dateLabel(ref?.date);
             return (
               <li
-                key={`${ref.occasionId}-${index}`}
+                key={`${ref?.occasionId ?? "evidence"}-${index}`}
                 className="flex flex-wrap items-center justify-between gap-2 py-2"
               >
                 <div className="space-y-1">
-                  <p>{dateLabel(ref.date)}</p>
+                  <p>{label}</p>
                   {relatedPatterns}
                 </div>
-                {href && (
+                {href ? (
                   <Link
                     href={href}
                     className="inline-flex min-h-11 items-center gap-1 text-text-primary underline underline-offset-4"
-                    aria-label={`Open timeline for ${dateLabel(ref.date)}`}
+                    aria-label={`Open timeline for ${label}`}
                   >
                     Open timeline
                     <ArrowUpRight size={13} aria-hidden="true" />
                   </Link>
+                ) : (
+                  <span className="text-xs text-text-muted">Timeline link not available for this occasion.</span>
                 )}
               </li>
             );

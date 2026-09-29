@@ -12,7 +12,7 @@ import {
 import { DetailSection, EvidenceLink, EvidenceRows } from "./analytics-evidence";
 
 function RelatedPatterns({ insight }: { insight: InsightOutput }) {
-  const refs = [...new Set(insight.inputs.flatMap((input) => (input.patternId ? [input.patternId] : [])))];
+  const refs = [...new Set((insight.inputs ?? []).flatMap((input) => (input?.patternId ? [input.patternId] : [])))];
   return refs.length ? (
     <div className="flex flex-wrap gap-2">
       {refs.map((id) => (
@@ -65,15 +65,18 @@ function truncateQuote(value: string, limit = REFLECTION_QUOTE_LIMIT): string {
  * object. No new query keys. Absent details render an honest fallback.
  */
 function PersonalElements({ insight }: { insight: InsightOutput }) {
-  if (!insight.personalElements.length) return null;
+  const elements = insight.personalElements ?? [];
+  const alternatives = insight.alternatives ?? [];
+  const evidenceRefs = insight.evidenceRefs ?? [];
+  if (!elements.length) return null;
   return (
     <section aria-label="What you reported" className="space-y-2 border-t border-border-subtle pt-3">
       <h3 className="text-sm font-medium text-text-primary">What you reported</h3>
       <ul className="space-y-2">
-        {insight.personalElements.map((element) => {
-          const key = `${element.kind}:${element.recordId}`;
-          if (element.kind === "reflection") {
-            const parsed = parseReflectionLine(element.recordId, insight.alternatives);
+        {elements.map((element) => {
+          const key = `${element?.kind ?? "unknown"}:${element?.recordId ?? "missing"}`;
+          if (element?.kind === "reflection") {
+            const parsed = parseReflectionLine(element.recordId, alternatives);
             return (
               <li key={key} className="space-y-1">
                 <span className="inline-flex items-center rounded-full border border-border-subtle bg-bg-secondary px-3 py-1 text-xs text-text-secondary">
@@ -90,8 +93,8 @@ function PersonalElements({ insight }: { insight: InsightOutput }) {
               </li>
             );
           }
-          if (element.kind === "outcome") {
-            const occasion = insight.evidenceRefs.find((ref) => ref.reportIds.includes(element.recordId));
+          if (element?.kind === "outcome") {
+            const occasion = evidenceRefs.find((ref) => ref?.reportIds?.includes(element.recordId));
             return (
               <li key={key} className="flex flex-wrap items-center gap-2">
                 <span className="inline-flex items-center rounded-full border border-border-subtle bg-bg-secondary px-3 py-1 text-xs text-text-secondary">
@@ -116,9 +119,13 @@ function PersonalElements({ insight }: { insight: InsightOutput }) {
 
 export function InsightCard({ insight, period }: { insight: InsightOutput; period: AnalyticsPeriod }) {
   const [hypothesisDismissed, setHypothesisDismissed] = useState(false);
-  const limits = [...insight.doesNotEstablish, ...insight.alternatives];
+  const doesNotEstablish = insight.doesNotEstablish ?? [];
+  const alternatives = insight.alternatives ?? [];
+  const evidenceRefs = insight.evidenceRefs ?? [];
+  const limits = [...doesNotEstablish, ...alternatives];
   const hypothesis = insight.hypothesis;
-  const hasPatterns = insight.inputs.some((input) => input.patternId);
+  const hasPatterns = (insight.inputs ?? []).some((input) => input?.patternId);
+  const claimText = claimLabels[insight.claimLevel as keyof typeof claimLabels] ?? "Seen together, not shown to cause each other";
 
   return (
     <article className="min-w-0 space-y-3 rounded-xl border border-border-subtle bg-bg-card p-5 sm:p-6">
@@ -127,11 +134,11 @@ export function InsightCard({ insight, period }: { insight: InsightOutput; perio
       </h2>
       <p className="text-sm leading-relaxed text-text-secondary">{insightExplanation(insight)}</p>
       <p className="text-xs leading-relaxed text-text-muted">
-        What this does not show: {displayCopy(insight.doesNotEstablish[0], "whether one observation caused another.")}
+        What this does not show: {displayCopy(doesNotEstablish[0], "whether one observation caused another.")}
       </p>
       {hasPatterns && <RelatedPatterns insight={insight} />}
       <PersonalElements insight={insight} />
-      <EvidenceLink evidence={insight.evidenceRefs[0]} />
+      <EvidenceLink evidence={evidenceRefs[0]} />
       <details className="border-t border-border-subtle pt-2">
         <summary className="min-h-11 cursor-pointer content-center text-sm font-medium text-text-primary">
           Details
@@ -139,7 +146,7 @@ export function InsightCard({ insight, period }: { insight: InsightOutput; perio
         <div className="space-y-5 pt-3 text-sm leading-relaxed text-text-secondary">
           <DetailSection title="Observation">
             <p>{displayCopy(insight.claim, "A plain-language observation was not provided.")}</p>
-            <p>{claimLabels[insight.claimLevel]}</p>
+            <p>{claimText}</p>
           </DetailSection>
           <DetailSection title="Related patterns">
             <RelatedPatterns insight={insight} />
@@ -150,7 +157,7 @@ export function InsightCard({ insight, period }: { insight: InsightOutput; perio
             </p>
           </DetailSection>
           <EvidenceRows
-            evidence={insight.evidenceRefs}
+            evidence={evidenceRefs}
             relatedPatterns={
               hasPatterns ? (
                 <div>

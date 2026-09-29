@@ -53,9 +53,28 @@ export function timelineHref(date: string): string | null {
   return valid ? `/timeline?date=${valid}` : null;
 }
 
-export function dateLabel(value: string): string {
+export function dateLabel(value: string | undefined | null): string {
+  if (typeof value !== "string") return "Date not provided";
   const date = evidenceDate(value.slice(0, 10));
   return date ? format(new Date(`${date}T12:00:00`), "MMM d, yyyy") : "Date not provided";
+}
+
+/**
+ * Normalizes a period prop that may arrive as `{from,to}` (web shape) or
+ * `{start,end}` (backend AnalyticalWindow shape). Never throws; falls back
+ * to the provided period so cards always have a date range to display.
+ */
+export function toDisplayPeriod(
+  window: { from?: unknown; to?: unknown; start?: unknown; end?: unknown } | undefined | null,
+  fallback: AnalyticsPeriod
+): AnalyticsPeriod {
+  if (window && typeof window.from === "string" && typeof window.to === "string") {
+    return { from: window.from, to: window.to };
+  }
+  if (window && typeof window.start === "string" && typeof window.end === "string") {
+    return { from: window.start.slice(0, 10), to: window.end.slice(0, 10) };
+  }
+  return fallback;
 }
 
 export function isCount(value: unknown): value is number {
@@ -90,13 +109,22 @@ const resultGlosses: Record<string, string> = {
   task_execution_fragmentation: "What separated returns to a linked task",
   extended_continuous_activity: "Lengths of recorded stretches, keeping unobserved gaps separate",
   schedule_variance: "When work began compared with the plan in effect",
+  golden_hours_focus: "When recorded focus was strongest across the day",
   start_friction: "Time between deciding to start and recorded work",
+  escape_hatch: "What recorded activity often followed friction",
+  planned_vs_actual: "Planned durations compared with recorded time",
   quiet_work_recurrence: "Days that included quiet, recorded work",
   stability_shift: "How recorded work lengths differed within a day",
 };
 
 export function resultGloss(result: BehavioralPatternOutput["contributingResults"][number]): string {
   return displayCopy(result.gloss, resultGlosses[result.detectorIdentity] ?? "Supporting recorded activity; description not provided");
+}
+
+/** Plain-language gloss for a detector identity (used for progress lines). */
+export function detectorGloss(identity: string): string | null {
+  const gloss = resultGlosses[identity];
+  return typeof gloss === "string" ? gloss : null;
 }
 
 export function diagnosticLines(diagnostics?: AnalyticsDiagnostics): string[] {
@@ -120,7 +148,7 @@ export function diagnosticLines(diagnostics?: AnalyticsDiagnostics): string[] {
 }
 
 export function insightExplanation(insight: InsightOutput): string {
-  const kinds = [...new Set(insight.personalElements.map(({ kind }) => ({
+  const kinds = [...new Set((insight.personalElements ?? []).map(({ kind }) => ({
     intention: "declared intentions",
     reflection: "your reflections",
     outcome: "outcomes you assessed",

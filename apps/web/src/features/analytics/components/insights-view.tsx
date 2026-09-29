@@ -6,12 +6,15 @@ import { OnboardingNote } from "./onboarding-note";
 import { AnalyticsState } from "./analytics-state";
 import { onboardingMessage } from "./analytics-evidence";
 import { useInsights } from "../api/queries";
-import { analyticsPeriod } from "../lib/presentation";
+import { analyticsPeriod, toDisplayPeriod } from "../lib/presentation";
 
 export function InsightsView() {
   const period = analyticsPeriod(14);
   const query = useInsights(period);
   const data = query.data;
+  // Backend returns {start,end}; web shape is {from,to}. Normalize so the
+  // fallback period passed to cards is always well-formed.
+  const displayPeriod = toDisplayPeriod(data?.window as { from?: unknown; to?: unknown; start?: unknown; end?: unknown } | undefined, period);
   const insights = data?.insights.filter((insight) => !insight.status || insight.status === "DETECTED") ?? [];
   const showCards = !query.isPending && !query.isError && data?.state === "ok" && insights.length > 0;
   const noInsight = data?.state === "ok" && insights.length === 0;
@@ -30,7 +33,7 @@ export function InsightsView() {
             <InsightCard
               key={`${period.from}-${period.to}-${insight.id ?? index}`}
               insight={insight}
-              period={data.window ?? period}
+              period={displayPeriod}
             />
           ))
         ) : onboarding ? (

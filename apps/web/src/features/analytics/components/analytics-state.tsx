@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { RefreshCw, Unplug } from "lucide-react";
 import type { AnalyticsResponse, EarlySignal } from "../types";
-import { diagnosticLines, earlySignalNeedsLine, isCount } from "../lib/presentation";
+import { detectorGloss, diagnosticLines, earlySignalNeedsLine, isCount } from "../lib/presentation";
 
 interface AnalyticsStateProps {
   isLoading: boolean;
@@ -14,6 +14,37 @@ interface AnalyticsStateProps {
   noInsight?: boolean;
   onRunAnalysis?: () => void;
   isRunningAnalysis?: boolean;
+  /** POST /analyze failure text (mutation.error). Shown inline; GET errors use isError. */
+  runError?: string | null;
+  /** True when state has been RUNNING longer than the client timeout. */
+  runningTimedOut?: boolean;
+}
+
+/** Honest observed-progress line: counts only, never a promise. */
+function progressLine(data: AnalyticsResponse): string | null {
+  const detectors = data.diagnostics?.perDetector ?? [];
+  let best: { occasions: number; days: number; gloss: string } | null = null;
+  for (const d of detectors) {
+    if (d.availability === "NOT_AVAILABLE") continue;
+    const occasions = typeof d.eligibleOccasions === "number" ? d.eligibleOccasions : 0;
+    const days = typeof d.eligibleDays === "number" ? d.eligibleDays : 0;
+    if (occasions <= 0) continue;
+    const gloss = detectorGloss(d.identity);
+    if (!gloss) continue;
+    if (!best || occasions > best.occasions) best = { occasions, days, gloss };
+  }
+  if (!best) return null;
+  const occasionWord = best.occasions === 1 ? "occasion" : "occasions";
+  const dayWord = best.days === 1 ? "day" : "days";
+  return `${best.occasions} comparable ${occasionWord} across ${best.days} ${dayWord} so far — most progress in ${best.gloss.charAt(0).toLowerCase()}${best.gloss.slice(1)}.`;
+}
+
+function RunError({ message }: { message: string }) {
+  return (
+    <div role="alert" className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-700 dark:text-red-300">
+      The analysis request failed: {message} Your recorded activity is safe — try again.
+    </div>
+  );
 }
 
 function RunButton({
@@ -49,6 +80,8 @@ export function AnalyticsState({
   noInsight,
   onRunAnalysis,
   isRunningAnalysis,
+  runError,
+  runningTimedOut,
 }: AnalyticsStateProps) {
   const isWorking = isFetching || Boolean(isRunningAnalysis);
 
@@ -95,6 +128,7 @@ export function AnalyticsState({
     const blocked = data.analysisBlocked;
     return (
       <div role="status" className="space-y-3 rounded-xl border border-border-subtle bg-bg-card p-6 sm:p-8">
+        {runError && <RunError message={runError} />}
         <h2 className="text-base font-medium text-text-primary">
           {blocked?.reason === "request-failed"
             ? "The last analysis attempt failed."
@@ -124,11 +158,30 @@ export function AnalyticsState({
   if (data.state === "RUNNING") {
     return (
       <div role="status" className="space-y-3 rounded-xl border border-border-subtle bg-bg-card p-6 sm:p-8">
-        <h2 className="text-base font-medium text-text-primary">Computing patterns from your activity…</h2>
+        <h2 className="text-base font-medium text-text-primary">
+          {runningTimedOut ? "Analysis is taking longer than expected." : "Computing patterns from your activity…"}
+        </h2>
         <p className="text-sm text-text-secondary">
-          The analysis worker is calculating multi-day recurrence and baseline statistics. This view updates
-          automatically when it finishes.
+          {runningTimedOut
+            ? "The worker has not finished after 10 minutes — it may be stuck or offline. Your recorded activity is safe. You can wait, retry the view, or re-run the analysis."
+            : "The analysis worker is calculating multi-day recurrence and baseline statistics. This view updates automatically when it finishes."}
         </p>
+        {runningTimedOut && (
+          <div className="flex flex-wrap gap-2 pt-1">
+            <button
+              type="button"
+              onClick={onRetry}
+              disabled={isFetching}
+              className="inline-flex min-h-11 items-center gap-2 rounded-md border border-border-subtle px-3 text-sm text-text-primary disabled:opacity-50"
+            >
+              <RefreshCw size={14} aria-hidden="true" />
+              {isFetching ? "Retrying…" : "Retry view"}
+            </button>
+            {onRunAnalysis && (
+              <RunButton onRunAnalysis={onRunAnalysis} disabled={isWorking} spinning={isWorking} label={isWorking ? "Analyzing…" : "Re-run analysis"} />
+            )}
+          </div>
+        )}
       </div>
     );
   }
@@ -136,6 +189,7 @@ export function AnalyticsState({
   if (data.state === "FAILED") {
     return (
       <div role="alert" className="space-y-3 rounded-xl border border-border-subtle bg-bg-card p-6 sm:p-8">
+        {runError && <RunError message={runError} />}
         <h2 className="text-base font-medium text-text-primary">Pattern analysis failed.</h2>
         <p className="text-sm text-text-secondary">Your recorded activity is safe. Re-run the analysis.</p>
         {onRunAnalysis && (
@@ -167,9 +221,11 @@ export function AnalyticsState({
   const missing = data.state === "insufficient-evidence" ? diagnosticLines(data.diagnostics) : [];
   const earlySignals: EarlySignal[] =
     data.state === "insufficient-evidence" ? (data.earlySignals ?? []).filter((signal) => signal.confidence === "low") : [];
+  const progress = data.state === "insufficient-evidence" ? progressLine(data) : null;
 
   return (
     <div role="status" className="space-y-3 rounded-xl border border-border-subtle bg-bg-card p-6 sm:p-8">
+      {runError && <RunError message={runError} />}
       <h2 className="text-base font-medium text-text-primary">{title}</h2>
       {data.state === "not-connected" && (
         <>
@@ -189,6 +245,7 @@ export function AnalyticsState({
         <p className="text-sm text-text-secondary">{count} activity observations recorded for this period.</p>
       )}
       {body && <p className="text-sm text-text-secondary">{body}</p>}
+      {progress && <p className="text-sm text-text-secondary">{progress}</p>}
       {missing.length > 0 && (
         <ul className="list-disc space-y-2 pl-5 text-sm text-text-secondary">
           {missing.map((line) => (
