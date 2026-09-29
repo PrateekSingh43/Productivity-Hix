@@ -63,7 +63,7 @@ import { PatternExecutionContext, type PatternLevelExecutionContext, type Episod
 import { collectEarlySignal } from "./promotion";
 import type { ContextSwitchingConfig } from "./detectors/context-switching/types";
 import type { TaskFragmentationConfig } from "./detectors/task-fragmentation/types";
-import type { TaskScheduleInstance } from "./detectors/schedule-variance/types";
+import type { ScheduleVariancePatternMetrics, TaskScheduleInstance } from "./detectors/schedule-variance/types";
 import {
   GOLDEN_HOURS_AM_END_MINUTES,
   GOLDEN_HOURS_AM_START_MINUTES,
@@ -190,6 +190,18 @@ export const scheduleConfig = {
   onTimeToleranceSeconds: 0, minimumQualifyingTaskInstances: 5, minimumDistinctCalendarDays: 3,
   minimumPatternCoverageRatio: 0.8, delayedStartFractionThreshold: 0.5,
   detectorVersion: "1.0.0", configurationVersion: "api-snapshot-unavailable-1",
+};
+
+/**
+ * Primary-eligibility thresholds for D4 (mirrors the detector gates: 5
+ * instances / 3 days, late share >= 0.5). The contrast is the late-start
+ * share itself, so promotion never admits a below-gate share. Coverage is
+ * 1.0 / unknown 0 because schedule fidelity needs no telemetry span — only
+ * authoritative plans and recorded onsets.
+ */
+export const scheduleVarianceThresholds = {
+  minimumComparableOccasions: 5, minimumDistinctDays: 3, minimumCoverageRatio: 1.0, maximumUnknownFraction: 0,
+  minimumBaselineOccasions: 1, minimumBaselineDays: 1, minimumAbsoluteContrast: 0.5,
 };
 /**
  * Primary-eligibility thresholds for D1 (product policy, mirrors the detector
@@ -645,6 +657,121 @@ function goldenHoursCandidate(
 }
 
 /**
+ * Builds a primary promotion candidate from a DETECTED D4 output.
+ *
+ * Purpose: route primary-eligible schedule-variance findings through
+ * promotePattern with the catalog entry. Below-gate output returns null and
+ * promotes nothing. D4 differs from D6 only in tolerance: D4 counts any
+ * positive delay (tolerance 0), D6 only delays beyond a 5-minute grace.
+ *
+ * Contrast units: late-start share (delayed observed tasks / observed
+ * tasks), a fraction in (0, 1]; direction is always "increased" because
+ * DETECTED requires a share at or above the gate. The reference is the
+ * declared intention (authoritative plannedStart), so no own-history
+ * baseline applies. Copy states the median delay as observed fact and never
+ * assigns a reason for the delay.
+ *
+ * Edge cases: returns null for non-DETECTED output, non-positive shares,
+ * and empty in-window evidence. Planned starts pass through verbatim and
+ * are never inferred.
+ */
+function scheduleVarianceCandidate(
+  data: PatternPipelineInput,
+  instances: TaskScheduleInstance[],
+  d4: BehavioralPatternOutput<ScheduleVariancePatternMetrics>,
+): PatternPromotionInput | null {
+  if (d4.executionStatus !== "DETECTED") return null;
+  const lateFraction = d4.metrics.lateTaskFraction;
+  if (lateFraction === null || !Number.isFinite(lateFraction) || lateFraction <= 0) return null;
+  const medianDelay = d4.metrics.medianStartDeltaSeconds;
+  const entry = getDetectorCatalogEntry("schedule_variance");
+  const windowStartMs = Date.parse(data.window.start);
+  const windowEndMs = Date.parse(data.window.end);
+  const observed = instances.flatMap((instance) => {
+    const actualStart = resolveFirstWorkStart(instance);
+    const latency = calculateStartLatency(
+      instance.taskId, instance.plannedStart, actualStart,
+      scheduleConfig.onTimeToleranceSeconds, instance.plannedCapturedAt ?? null,
+    );
+    if (latency.status !== "OBSERVED" || latency.actualStart === null || latency.plannedStart === null) {
+      return [];
+    }
+    const plannedMs = Date.parse(latency.plannedStart);
+    const actualMs = Date.parse(latency.actualStart);
+    if (!(plannedMs >= windowStartMs && actualMs <= windowEndMs && plannedMs < actualMs)) return [];
+    return [{ instance, latency }];
+  });
+  if (!observed.length) return null;
+  const days = (items: typeof observed) => countDistinctCalendarDays(
+    items.map((item) => item.latency.plannedStart!),
+    data.timezone,
+  );
+  const evidenceRefs: PatternEvidenceRef[] = observed.map(({ instance, latency }) => ({
+    occasionId: instance.taskId,
+    date: resolveProductiveDay(latency.plannedStart!, { timezone: data.timezone }),
+    window: { start: latency.plannedStart!, end: latency.actualStart! },
+    blockIds: [],
+    sessionIds: instance.sessions
+      .filter((session) => session.startedAt === latency.actualStart)
+      .map((session) => session.id)
+      .sort(),
+    taskIds: [instance.taskId],
+    reportIds: data.reports.filter((report) => report.windowStart && report.windowEnd && overlaps(
+      report.windowStart, report.windowEnd,
+      { start: latency.plannedStart!, end: latency.actualStart! },
+    )).map((report) => report.id).sort(),
+  })).filter((ref) => ref.sessionIds.length > 0);
+  if (!evidenceRefs.length) return null;
+  const totalObservedHours = observed.reduce((sum, { instance }) => sum + instance.sessions.reduce((inner, session) => {
+    if (typeof session.durationSeconds === "number" && session.durationSeconds > 0) return inner + session.durationSeconds;
+    if (session.startedAt && session.endedAt) {
+      const dur = (Date.parse(session.endedAt) - Date.parse(session.startedAt)) / 1000;
+      return inner + (dur > 0 ? dur : 0);
+    }
+    return inner;
+  }, 0), 0) / 3600;
+  const resultId = stableId(data.userId, "D4", data.window);
+  const medianMinutes = medianDelay !== null && Number.isFinite(medianDelay) ? Math.round(medianDelay / 60) : null;
+  const delayedCount = d4.metrics.delayedStartTaskCount;
+  const observedCount = d4.metrics.observedStartTaskCount;
+  const caveats = [
+    "Prototype thresholds are configurable product policy, not calibrated confidence.",
+    "Session onsets are uncorroborated declarations; a recorded start does not prove work began at that moment.",
+    "Comparison is limited to planned tasks with an authoritative planned start and a recorded onset; identical measurement rules apply to every occasion.",
+  ];
+  return {
+    metadata: { evaluationId: resultId, patternId: resultId, detectorVersion: PATTERN_ENGINE_VERSION, configurationVersion: PATTERN_CONFIG_VERSION, generatedAt: data.window.end },
+    userId: data.userId, detectorIdentity: "schedule_variance", patternType: "schedule_variance", role: "primary", resultId,
+    taxonomy: "schedule_fidelity", level: "PATTERN", attributionMode: "TASK_LINKED",
+    executionStatus: "DETECTED",
+    temporalWindow: { ...data.window, scale: "14_DAY" },
+    sample: { qualifyingEpisodes: evidenceRefs.length, qualifyingDays: days(observed), totalObservedHours, meanCoverageRatio: 1.0 },
+    baseline: { strategy: "NONE", comparedMetric: "lateTaskFraction", baselineValue: null, currentValue: lateFraction, deltaRatio: null, comparisonStatus: "NOT_APPLICABLE" },
+    metrics: { ...d4.metrics },
+    reliability: initializeProvisionalReliability({ qualifyingDayCount: days(observed), qualifyingEpisodeCount: evidenceRefs.length,
+      meanTelemetryCoverageRatio: 1.0, baselineMaturityDays: 0, hasCorroboratingSelfReport: false }),
+    evidenceReferences: { contributingSessionIds: [...new Set(evidenceRefs.flatMap((ref) => ref.sessionIds))].sort(),
+      contributingTaskIds: [...new Set(evidenceRefs.flatMap((ref) => ref.taskIds))].sort(),
+      sampleBoundingWindows: evidenceRefs.map((ref) => ref.window) },
+    epistemicCaveats: caveats, caveats,
+    claim: `Work began after the planned start on ${delayedCount} of ${observedCount} planned tasks${medianMinutes !== null ? `; the median start was ${medianMinutes} minutes late` : ""}.`,
+    claimLevel: "recurrence", repertoireCategory: "mismatch",
+    comparison: { referenceKind: "declared-intention", window: data.baselineWindow, comparabilityNote: "Planned tasks with an authoritative planned start and a recorded onset; identical onset measurement in every occasion." },
+    eligibility: { required: { ...scheduleVarianceThresholds }, observed: {},
+      excluded: instances.filter((instance) => !evidenceRefs.some((ref) => ref.occasionId === instance.taskId))
+        .map((instance) => ({ occasionId: instance.taskId, reason: !instance.plannedStart ? "NO_PLANNED_START" : "NOT_OBSERVED_OR_OUT_OF_WINDOW" })) },
+    contributingResults: [{ detectorIdentity: "schedule_variance", resultId, metricsUsed: ["lateTaskFraction"], role: "primary" }],
+    evidenceRefs,
+    qualification: {
+      validity: { windowsClipped: true, planSnapshots: true, asOfEvaluation: true },
+      context: { kind: "task", key: "planned-starts", description: "Authoritative planned starts compared with first recorded work per task." },
+      contrast: { size: lateFraction, direction: "increased" },
+      unknownFraction: 0, baselineSample: { comparableOccasions: 0, distinctDays: 0 }, userQuestion: entry.userQuestions[0]!,
+    },
+  };
+}
+
+/**
  * Builds a primary promotion candidate from a DETECTED D6 output.
  *
  * Purpose: route primary-eligible start-friction findings through
@@ -1050,6 +1177,16 @@ export function evaluatePatterns(data: PatternPipelineInput): PatternPipelineRes
   ];
   const taskIds = [...new Set(current.flatMap((item) => item.session.taskId ? [item.session.taskId] : []))].sort();
   const patterns: PatternPromotionInput[] = [];
+  // D4 primary path: a DETECTED D4 (late share at/above gate, 5 instances /
+  // 3 days) is routed through promotePattern; anything below gate promotes
+  // nothing. A qualified D4 NO_PATTERN counts as an evaluated comparison.
+  let qualifiedEvaluation = false;
+  const d4Candidate = scheduleVarianceCandidate(data, scheduleInstances, d4);
+  if (d4Candidate) {
+    const promoted = promotePattern(d4Candidate, configureDetectorCatalogEntry("schedule_variance", scheduleVarianceThresholds), data.window);
+    if (promoted.promoted) patterns.push(promoted.pattern);
+  }
+  if (d4.executionStatus === "NO_PATTERN") qualifiedEvaluation = true;
   // D1 primary path: a DETECTED D1 with an evaluated personal baseline is
   // routed through promotePattern; anything below gate stays internal-only.
   const d1Candidate = contextSwitchingCandidate(data, current, historical, d1);
@@ -1060,7 +1197,6 @@ export function evaluatePatterns(data: PatternPipelineInput): PatternPipelineRes
   // D5 primary path: a DETECTED D5 with an evaluated own-history reference is
   // routed through promotePattern; anything below gate promotes nothing.
   // (qualifiedEvaluation is shared with the D3 aggregation below.)
-  let qualifiedEvaluation = false;
   const currentGoldenDays = goldenHoursDayEpisodes(data, data.timeline);
   const baselineGoldenDays = collectGoldenHoursDayEpisodes({
     blocks: data.baseline.blocks,

@@ -96,11 +96,14 @@ describe("Patterns and Insights orchestration contracts", () => {
     expect(JSON.stringify(result)).not.toContain("other-user");
     expect(result.diagnostics.perDetector).toHaveLength(8);
     expect(result.diagnostics.perDetector.find((item) => item.identity === "golden_hours_focus")?.availability).toBe("AVAILABLE");
-    expect(result.diagnostics.perDetector.find((item) => item.identity === "schedule_variance")?.reason).toContain("snapshots");
+    expect(result.diagnostics.perDetector.find((item) => item.identity === "schedule_variance")?.reason).toContain("authoritative planned starts");
   });
 
   it("marks D4 schedule_variance NOT_AVAILABLE instead of a silent empty-input finding", async () => {
-    fixture();
+    const built = fixture();
+    // The shared fixture carries an authoritative plannedStart; strip it so
+    // this case exercises the genuinely plan-less population.
+    built.db.task.findMany = async () => [{ id: "task-1", completedAt: null, plannedStart: null }];
     const result = await runPatternPipeline(userId, window);
     const d4 = result.diagnostics.perDetector.find((item) => item.identity === "schedule_variance")!;
     expect(d4.availability).toBe("NOT_AVAILABLE");

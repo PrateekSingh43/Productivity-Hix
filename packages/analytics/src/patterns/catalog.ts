@@ -78,7 +78,11 @@ export const detectorCatalog = {
     eligiblePatternRoles: ["primary"],
     userQuestions: ["Did work on planned tasks begin when I planned — and when it didn't, did the plan or the start move?"],
     eligibility: {
-      requiredValidityFlags: ["windowsClipped", "planSnapshots", "asOfEvaluation", "onsetCorroborated", "personalTolerance"],
+      // Onset corroboration and personal tolerance are not available in
+      // current telemetry (onsets are uncorroborated declarations, tolerance
+      // is a uniform product policy) — so they cannot be promotion gates.
+      // They remain documented caveats on the candidate instead.
+      requiredValidityFlags: ["windowsClipped", "planSnapshots", "asOfEvaluation"],
       claimLevels: ["recurrence", "co-occurrence"],
       repertoireCategories: ["mismatch"],
       referenceKinds: ["declared-intention"],

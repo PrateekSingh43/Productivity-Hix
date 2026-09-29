@@ -9,9 +9,14 @@ import {
   contextConfig,
   continuousThresholds,
   countDistinctCalendarDays,
+  escapeHatchThresholds,
   evaluatePatterns,
   fragmentationConfig,
+  goldenHoursThresholds,
   isDetectorIdentity,
+  plannedActualThresholds,
+  scheduleConfig,
+  startFrictionThresholds,
   subtractCalendarDays,
   type DetectorDiagnostics,
   type OutcomeInput,
@@ -78,7 +83,7 @@ interface Data {
   sessions: WorkSession[];
   reports: CheckIn[];
   outcomes: OutcomeInput[];
-  tasks: Array<{ id: string; completedAt: Date | null }>;
+  tasks: Array<{ id: string; completedAt: Date | null; plannedStart: Date | null; plannedDurationMinutes: number | null }>;
   connected: boolean;
   recordingHistory: RecordingHistory;
 }
@@ -117,7 +122,7 @@ async function readData(userId: string, window: AnalyticalWindow): Promise<Data>
   const range = { from: new Date(baselineWindow.start), to: new Date(window.end) };
   const [events, sessions, reports, tasks, goals, activityCount, recordingHistory, desktopCount, browserCount] = await Promise.all([
     activityInRange(userId, range.from, range.to), listSessions(userId, range), listCheckIns(userId, range),
-    db.task.findMany({ where: { userId }, select: { id: true, completedAt: true } }),
+    db.task.findMany({ where: { userId }, select: { id: true, completedAt: true, plannedStart: true, plannedDurationMinutes: true } }),
     db.dailyGoal.findMany({ where: { userId, plan: { date: { gte: resolveProductiveDay(window.start, { timezone }), lte: resolveProductiveDay(window.end, { timezone }) } } },
       select: { id: true, outcome: true, plan: { select: { date: true } }, tasks: { select: { id: true } } } }),
     db.normalizedActivity.count({ where: { userId } }),
@@ -277,8 +282,8 @@ function earlySignalsFor(state: PatternsState, diagnostics: PatternsResponse["di
 /**
  * Minimum evidence bar per available detector, sourced from the same
  * configuration objects the pipeline enforces — never duplicated literals.
- * D4 (schedule_variance) is intentionally absent: NOT_AVAILABLE detectors
- * cannot contribute sufficiency.
+ * Covers all 8 detectors; NOT_AVAILABLE entries are still excluded by the
+ * availability check at the call site.
  */
 const EVIDENCE_BAR: Record<string, { occasions: number; days: number }> = {
   context_switching_density: {
@@ -292,6 +297,26 @@ const EVIDENCE_BAR: Record<string, { occasions: number; days: number }> = {
   extended_continuous_activity: {
     occasions: continuousThresholds.minimumComparableOccasions,
     days: continuousThresholds.minimumDistinctDays,
+  },
+  schedule_variance: {
+    occasions: scheduleConfig.minimumQualifyingTaskInstances,
+    days: scheduleConfig.minimumDistinctCalendarDays,
+  },
+  golden_hours_focus: {
+    occasions: goldenHoursThresholds.minimumComparableOccasions,
+    days: goldenHoursThresholds.minimumDistinctDays,
+  },
+  start_friction: {
+    occasions: startFrictionThresholds.minimumComparableOccasions,
+    days: startFrictionThresholds.minimumDistinctDays,
+  },
+  escape_hatch: {
+    occasions: escapeHatchThresholds.minimumComparableOccasions,
+    days: escapeHatchThresholds.minimumDistinctDays,
+  },
+  planned_vs_actual: {
+    occasions: plannedActualThresholds.minimumComparableOccasions,
+    days: plannedActualThresholds.minimumDistinctDays,
   },
 };
 
@@ -376,11 +401,26 @@ export async function getPersistedPatterns(userId: string, window: AnalyticalWin
   };
 }
 
+/**
+ * Sync-path task mapping (Fix 4b): the legacy `{id, completedAt}` projection
+ * starved D4/D6/D7/D8 of plans even when they exist. Planned fields pass
+ * through verbatim (null stays null — never inferred) so the sync path
+ * matches the worker provider.
+ */
+function mapSyncTasks(tasks: Data["tasks"]) {
+  return tasks.map((task) => ({
+    id: task.id,
+    completedAt: task.completedAt?.toISOString() ?? null,
+    plannedStart: task.plannedStart?.toISOString() ?? null,
+    plannedDurationMinutes: task.plannedDurationMinutes,
+  }));
+}
+
 export async function runPatternPipeline(userId: string, window: AnalyticalWindow): Promise<PatternsResponse> {
   const data = await readData(userId, window);
   return evaluatePatterns({
     ...data,
-    tasks: data.tasks.map((task) => ({ id: task.id, completedAt: task.completedAt?.toISOString() ?? null })),
+    tasks: mapSyncTasks(data.tasks),
   });
 }
 
@@ -388,7 +428,7 @@ export async function runInsightPipeline(userId: string, window: AnalyticalWindo
   const data = await readData(userId, window);
   const result = evaluatePatterns({
     ...data,
-    tasks: data.tasks.map((task) => ({ id: task.id, completedAt: task.completedAt?.toISOString() ?? null })),
+    tasks: mapSyncTasks(data.tasks),
   });
   const reflections: ReflectionInput[] = data.reports.flatMap((report) => {
     if (!report.windowStart || !report.windowEnd || !overlaps(report.windowStart, report.windowEnd, window)) return [];
