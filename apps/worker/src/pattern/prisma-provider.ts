@@ -9,6 +9,7 @@
 import { getDb } from "@repo/db";
 import {
   assembleEvidence,
+  collectScheduleInstances,
   countDistinctCalendarDays,
   subtractCalendarDays,
   type OutcomeInput,
@@ -180,7 +181,10 @@ export class PrismaPatternDataProvider implements PatternDataProvider {
         },
         orderBy: [{ createdAt: "desc" }, { id: "asc" }],
       }),
-      db.task.findMany({ where: { userId }, select: { id: true, completedAt: true } }),
+      db.task.findMany({
+        where: { userId },
+        select: { id: true, completedAt: true, plannedStart: true, plannedDurationMinutes: true },
+      }),
       db.dailyGoal.findMany({
         where: { userId, plan: { date: { gte: resolveProductiveDay(window.start, { timezone }), lte: resolveProductiveDay(window.end, { timezone }) } } },
         select: { id: true, outcome: true, plan: { select: { date: true } } },
@@ -203,6 +207,13 @@ export class PrismaPatternDataProvider implements PatternDataProvider {
     const sessions = sessionRows.map((s) => serializeSession(s)).sort((a, b) => compare(a.startedAt, b.startedAt) || compare(a.id, b.id));
     const reports = checkInRows.map((r) => serializeCheckIn(r)).sort((a, b) => compare(a.id, b.id));
     const tasks = [...taskRows].sort((a, b) => compare(a.id, b.id));
+    const taskInputs = tasks.map((t) => ({
+      id: t.id,
+      completedAt: t.completedAt?.toISOString() ?? null,
+      // Authoritative plan snapshot: passed through verbatim, never inferred.
+      plannedStart: t.plannedStart?.toISOString() ?? null,
+      plannedDurationMinutes: t.plannedDurationMinutes ?? null,
+    }));
     const outcomes: OutcomeInput[] = goals.flatMap<OutcomeInput>((goal) => {
       const outcome = goal.outcome;
       return outcome === "ACHIEVED" || outcome === "PARTIALLY_ACHIEVED" || outcome === "NOT_ACHIEVED"
@@ -212,7 +223,8 @@ export class PrismaPatternDataProvider implements PatternDataProvider {
     return {
       userId, timezone, boundary: preferences?.dayBoundary ?? "00:00", window, baselineWindow,
       sessions, reports, outcomes,
-      tasks: tasks.map((t) => ({ id: t.id, completedAt: t.completedAt?.toISOString() ?? null })),
+      tasks: taskInputs,
+      scheduleInstances: collectScheduleInstances(taskInputs, sessions, window),
       timeline: assembleEvidence(userId, window, events, sessions, reports),
       baseline: assembleEvidence(userId, baselineWindow, events, sessions, reports),
       connected: desktopCount + browserCount + activityCount > 0,

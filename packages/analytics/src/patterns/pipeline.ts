@@ -42,6 +42,8 @@ import {
 import { PatternExecutionContext, type PatternLevelExecutionContext, type EpisodeExecutionContext } from "./base/context";
 import type { ContextSwitchingConfig } from "./detectors/context-switching/types";
 import type { TaskFragmentationConfig } from "./detectors/task-fragmentation/types";
+import type { TaskScheduleInstance } from "./detectors/schedule-variance/types";
+import { collectScheduleInstances } from "./detectors/schedule-variance/provider";
 import { stableId, compare, overlaps, timelineFromBlocks } from "./evidence-assembler";
 
 export const PATTERN_ENGINE_VERSION = "1.0.0";
@@ -92,7 +94,25 @@ export interface PatternPipelineInput {
   sessions: WorkSession[];
   reports: CheckIn[];
   outcomes: OutcomeInput[];
-  tasks: Array<{ id: string; completedAt: string | null }>;
+  tasks: Array<{
+    id: string;
+    completedAt: string | null;
+    /**
+     * Authoritative planned start from the stored task record (never inferred
+     * from session times). Absent/null means the episode contract reports
+     * NO_PLANNED_START downstream.
+     */
+    plannedStart?: string | null;
+    /** As-of marker of the plan value used, when the source exposes it. */
+    plannedCapturedAt?: string | null;
+    plannedDurationMinutes?: number | null;
+  }>;
+  /**
+   * Pre-built schedule instances for D4. When omitted, the pipeline derives
+   * them via collectScheduleInstances() from tasks + sessions (additive
+   * extension point: later detectors reuse this input without renames).
+   */
+  scheduleInstances?: TaskScheduleInstance[];
   connected: boolean;
   recordingHistory: RecordingHistory;
 }
@@ -301,14 +321,21 @@ export function evaluatePatterns(data: PatternPipelineInput): PatternPipelineRes
       ...episode.metrics, episodeId: episode.metadata.evaluationId, userId: data.userId,
       startedAt: episode.temporalWindow.start, endedAt: episode.temporalWindow.end, coverageRatio: episode.coverageRatio,
     })), fragmentationConfig);
-  // D4 input contract (§13 State B): no plan/schedule snapshot provider exists, so
-  // the detector is deliberately NOT fed real instances. Passing [] would
-  // masquerade missing infrastructure as a legitimate "no finding", therefore
-  // the diagnostic is explicitly marked NOT_AVAILABLE. Detector untouched.
+  // D4 input contract: authoritative planned-start snapshots flow in through
+  // PatternPipelineInput (tasks.plannedStart, optionally pre-built
+  // scheduleInstances). Instances are clipped to the current window by
+  // collectScheduleInstances; a null plannedStart stays null so the episode
+  // contract reports NO_PLANNED_START instead of inventing a plan.
+  // Availability is AVAILABLE when at least one instance carries an
+  // authoritative plannedStart, NOT_AVAILABLE when the plan infrastructure
+  // contributes nothing (missing input, not a "no finding"). Detector untouched.
+  const scheduleInstances = data.scheduleInstances ?? collectScheduleInstances(data.tasks, data.sessions, data.window);
+  const scheduleAvailable = scheduleInstances.some((instance) =>
+    instance.plannedStart !== null && Number.isFinite(Date.parse(instance.plannedStart)));
   const d4 = new ScheduleVarianceDetector(scheduleConfig).evaluatePatternWithInstances(
     patternContext(data.userId, data.timezone, data.timeline, "schedule_variance", data.window.end),
     stableId("D4", data.window), stableId("D4-pattern", data.window),
-    [],
+    scheduleInstances,
   );
   const diagnostics: DetectorDiagnostics[] = [
     diagnostic("context_switching_density", d1, "Changes between recorded software contexts are evaluated alongside other findings."),
@@ -316,8 +343,10 @@ export function evaluatePatterns(data: PatternPipelineInput): PatternPipelineRes
     diagnostic(
       "schedule_variance",
       d4,
-      "Schedule variance is not available yet because plan/schedule snapshots are not currently available to Pattern Analytics.",
-      "NOT_AVAILABLE",
+      scheduleAvailable
+        ? "Schedule variance evaluated from authoritative planned starts."
+        : "Schedule variance is not available yet because plan/schedule snapshots are not currently available to Pattern Analytics.",
+      scheduleAvailable ? "AVAILABLE" : "NOT_AVAILABLE",
     ),
   ];
   const taskIds = [...new Set(current.flatMap((item) => item.session.taskId ? [item.session.taskId] : []))].sort();
