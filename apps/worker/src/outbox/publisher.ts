@@ -33,6 +33,20 @@ export interface OutboxPublisherOptions {
   logger?: WorkerLogger;
 }
 
+/**
+ * True when a dispatch failure is an infrastructure outage (Redis down,
+ * quota exhausted, connection lost) rather than a poison payload. Infra
+ * failures must park the event WITHOUT consuming publication attempts —
+ * otherwise a transient outage deterministically dead-letters healthy
+ * events and breaks the at-least-once outbox guarantee.
+ */
+export function isInfrastructureError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err ?? "");
+  return /max requests limit exceeded|quota|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|EHOSTUNREACH|Connection is closed|ECONNRESET|READONLY|LOADING|MISCONF/i.test(
+    message
+  );
+}
+
 export class OutboxPublisher {
   public readonly publisherId: string;
   private readonly db: Database;
@@ -277,6 +291,32 @@ export class OutboxPublisher {
     } catch (dispatchErr) {
       const errorMessage =
         dispatchErr instanceof Error ? dispatchErr.message : String(dispatchErr);
+
+      // Infrastructure outage: park WITHOUT consuming an attempt. The event
+      // is healthy; the transport is not. Backoff still applies via
+      // availableAt so we don't hot-loop against a dead endpoint.
+      if (isInfrastructureError(dispatchErr)) {
+        const backoffDelayMs = Math.min(1000 * Math.pow(2, event.publicationAttemptCount), 60_000);
+        const nextAvailableAt = new Date(Date.now() + backoffDelayMs);
+
+        await this.db.outboxEvent.update({
+          where: { id: event.id },
+          data: {
+            status: 'PENDING',
+            availableAt: nextAvailableAt,
+            lastError: `[infra] dispatch unavailable (attempt count unchanged at ${event.publicationAttemptCount}/${event.maxAttempts}): ${errorMessage}`,
+            claimedBy: null,
+            claimExpiresAt: null,
+            updatedAt: new Date(),
+          },
+        });
+
+        this.metrics.increment('outbox.publish_failed', { queue: targetQueue });
+        this.logger?.warn(
+          `Outbox event ${event.id} dispatch hit infrastructure outage; parked without consuming an attempt. Next try at ${nextAvailableAt.toISOString()}: ${errorMessage}`
+        );
+        return false;
+      }
 
       const nextAttemptCount = event.publicationAttemptCount + 1;
       const isDeadLetter = nextAttemptCount >= event.maxAttempts;

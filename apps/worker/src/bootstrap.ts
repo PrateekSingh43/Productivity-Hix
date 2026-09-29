@@ -8,8 +8,7 @@
 import 'dotenv/config';
 import { getDb, disconnectDb } from '@repo/db';
 import {
-  createRedisConnection,
-  checkRedisHealth,
+  createResilientRedisConnection,
   closeRedisConnection,
 } from './runtime/redis';
 import { QueueManager } from './runtime/queue';
@@ -18,6 +17,7 @@ import { TimelineWorker } from './timeline/timeline-worker';
 import { PatternWorker } from './pattern/pattern-worker';
 import { OutboxPublisher } from './outbox/publisher';
 import { MemoryWorkerMetricsCollector } from './shared/metrics';
+import { createConsoleWorkerLogger } from './shared/logging';
 
 export interface BootstrapResult {
   runtime: WorkerRuntime;
@@ -30,10 +30,13 @@ export interface BootstrapResult {
 export async function bootstrap(): Promise<BootstrapResult> {
   console.log('[WorkerBootstrap] Initializing ProductiveHix Dedicated Worker Runtime...');
 
-  // 1. Redis Connection & Health Probe
-  const redis = createRedisConnection();
-  const health = await checkRedisHealth(redis);
-  console.log(`[WorkerBootstrap] Redis status: ${health.status} (${health.latencyMs}ms latency)`);
+  // 1. Redis Connection (cloud-first, localhost fallback)
+  // Probes REDIS_URL / Upstash first; falls back to REDIS_LOCAL_* when the
+  // cloud is unreachable so local dev (127.0.0.1:6379) keeps working.
+  const { redis, selectedEndpoint, health } = await createResilientRedisConnection();
+  console.log(
+    `[WorkerBootstrap] Redis status: ${health.status} via ${selectedEndpoint} (${health.latencyMs}ms latency)`,
+  );
 
   if (health.status === 'unhealthy') {
     throw new Error(`Cannot start worker subsystem: Redis connection unhealthy. ${health.error ?? ''}`);
@@ -55,6 +58,7 @@ export async function bootstrap(): Promise<BootstrapResult> {
     db,
     queueManager,
     metrics,
+    logger: createConsoleWorkerLogger('OutboxPublisher'),
     pollIntervalMs: Number(process.env.OUTBOX_POLL_INTERVAL_MS ?? 500),
     batchSize: Number(process.env.OUTBOX_BATCH_SIZE ?? 25),
   });

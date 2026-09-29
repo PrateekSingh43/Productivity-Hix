@@ -28,6 +28,21 @@ export function createScopedWorkerLogger(context: WorkerLogContext): WorkerLogge
   };
 }
 
+/**
+ * Console-backed logger for process-level components (bootstrap, outbox
+ * publisher) that have no per-job context. Without this, publisher
+ * dispatch failures are silent (`logger?.warn` no-ops on undefined).
+ */
+export function createConsoleWorkerLogger(scope: string): WorkerLogger {
+  const prefix = `[${scope}]`;
+  return {
+    info: (msg, meta) => console.log(`${prefix} ${msg}`, meta ? JSON.stringify(meta) : ''),
+    warn: (msg, meta) => console.warn(`${prefix} ${msg}`, meta ? JSON.stringify(meta) : ''),
+    error: (msg, err, meta) => console.error(`${prefix} ${msg}`, err, meta ? JSON.stringify(meta) : ''),
+    debug: (msg, meta) => console.debug(`${prefix} ${msg}`, meta ? JSON.stringify(meta) : ''),
+  };
+}
+
 export class MemoryWorkerLogger implements WorkerLogger {
   public readonly logs: { level: string; msg: string; meta?: Record<string, unknown>; error?: unknown }[] = [];
 
