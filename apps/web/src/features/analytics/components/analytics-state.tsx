@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { RefreshCw, Unplug } from "lucide-react";
-import type { AnalyticsResponse } from "../types";
-import { diagnosticLines, isCount } from "../lib/presentation";
+import type { AnalyticsResponse, EarlySignal } from "../types";
+import { diagnosticLines, earlySignalNeedsLine, isCount } from "../lib/presentation";
 
 interface AnalyticsStateProps {
   isLoading: boolean;
@@ -165,6 +165,8 @@ export function AnalyticsState({
       ? "No detector passed the configured evidence and recurrence thresholds for this period. That is itself a completed result."
       : null;
   const missing = data.state === "insufficient-evidence" ? diagnosticLines(data.diagnostics) : [];
+  const earlySignals: EarlySignal[] =
+    data.state === "insufficient-evidence" ? (data.earlySignals ?? []).filter((signal) => signal.confidence === "low") : [];
 
   return (
     <div role="status" className="space-y-3 rounded-xl border border-border-subtle bg-bg-card p-6 sm:p-8">
@@ -193,6 +195,22 @@ export function AnalyticsState({
             <li key={line}>{line}</li>
           ))}
         </ul>
+      )}
+      {earlySignals.length > 0 && (
+        <div className="space-y-2 pt-1">
+          <h3 className="text-sm font-medium text-text-primary">What we&apos;ve seen so far</h3>
+          <ul className="space-y-2">
+            {earlySignals.map((signal) => (
+              <li
+                key={signal.detectorIdentity}
+                className="rounded-lg border border-border-subtle p-3 text-sm text-text-secondary"
+              >
+                <p>{signal.headline}</p>
+                <p className="mt-1 text-xs text-text-muted">{earlySignalNeedsLine(signal)}</p>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
       {onRunAnalysis && (data.state === "insufficient-evidence" || data.state === "no-findings") && (
         <div className="pt-2">

@@ -270,6 +270,25 @@ export type InsightClaimLevel =
   | "contrast"
   | "pattern-outcome-association";
 
+/**
+ * Observation-level early signal for users with <7 days of data (Task 5).
+ *
+ * Additive export: never part of `result.patterns`, never above
+ * `co-occurrence`. Framed as "what we've seen so far" — never a score or
+ * a verdict. `sessions` counts qualifying occasions for the detector;
+ * `needsMoreDays` is derived from that detector's day minima (>= 1).
+ */
+export interface EarlySignal {
+  detectorIdentity: string;
+  headline: string;
+  confidence: "low";
+  claimLevel: "co-occurrence";
+  sessions: number;
+  occasions: number;
+  days: number;
+  needsMoreDays: number;
+}
+
 export type InsightInputRef =
   | { patternId: string; role: "primary" | "supporting" }
   | { observationRef: string; role: "primary" | "supporting" };

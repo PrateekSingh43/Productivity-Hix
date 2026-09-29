@@ -130,3 +130,13 @@ export function insightExplanation(insight: InsightOutput): string {
     ? `Recorded work is considered alongside ${kinds.join(" and ")}.`
     : "Inspect the linked records and the limits of this finding.");
 }
+
+/**
+ * Honest "needs N more days" line for an early-signal card (Task 5).
+ * Always framed as what is still missing — never a score, verdict, or
+ * promise of progress toward a pattern.
+ */
+export function earlySignalNeedsLine(signal: { needsMoreDays: number }): string {
+  const days = Number.isSafeInteger(signal.needsMoreDays) && signal.needsMoreDays > 0 ? signal.needsMoreDays : 1;
+  return `Needs ${days} more ${days === 1 ? "day" : "days"} of comparable activity before this can be evaluated.`;
+}

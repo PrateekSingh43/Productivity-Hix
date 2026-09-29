@@ -1,4 +1,4 @@
-import type { AnalyticalWindow, QualifiedBehavioralPatternOutput } from "@repo/types";
+import type { AnalyticalWindow, EarlySignal, QualifiedBehavioralPatternOutput } from "@repo/types";
 import {
   detectorCatalog, getDetectorCatalogEntry, isDetectorIdentity, patternRelationship, validPatternEligibilityThresholds,
   type CatalogPatternIdentity, type DetectorCatalogEntry,
@@ -196,4 +196,64 @@ export function promotePatterns<TMetrics>(
     return entry ? promotePattern(output, entry, window, seen)
       : reject("NOT_PROMOTED_INTERNAL_ONLY", "catalog", "No catalog entry was supplied.");
   });
+}
+
+// ---------------------------------------------------------------------------
+// EARLY_OBSERVATION path (Task 5, additive only — existing gates untouched)
+// ---------------------------------------------------------------------------
+
+/**
+ * Minimum qualifying occasions for an early signal. Below this there is not
+ * even an observation to report; at/above this (but below the detector's own
+ * promotion minima) the pipeline may emit an honest low-confidence note.
+ */
+export const EARLY_OBSERVATION_MIN_OCCASIONS = 2;
+
+export interface EarlyObservationInput {
+  detectorIdentity: string;
+  eligibleOccasions: number;
+  eligibleDays: number;
+  minimumComparableOccasions: number;
+  minimumDistinctDays: number;
+}
+
+/**
+ * Builds an Observation-level early signal from sub-threshold counts.
+ *
+ * Purpose: give day-2..day-6 users an honest "what we've seen so far" note
+ * while their evidence cannot promote a Pattern. Reads only aggregate
+ * sub-threshold counts — never raw telemetry.
+ *
+ * Contract: returns null when there are fewer than 2 qualifying occasions,
+ * or when the detector's own gate is already met (that finding belongs to
+ * promotePattern, not here). claimLevel is always "co-occurrence" and
+ * confidence always "low"; the headline carries no score or verdict, and
+ * needsMoreDays is always >= 1 and derived from the detector's day minima.
+ *
+ * Edge cases: NOT_AVAILABLE detectors must be filtered by the caller (no
+ * observation can be claimed without upstream input). Non-finite or negative
+ * counts return null rather than inventing a signal.
+ */
+export function collectEarlySignal(input: EarlyObservationInput): EarlySignal | null {
+  const { detectorIdentity, eligibleOccasions, eligibleDays, minimumComparableOccasions, minimumDistinctDays } = input;
+  for (const count of [eligibleOccasions, eligibleDays, minimumComparableOccasions, minimumDistinctDays]) {
+    if (!Number.isSafeInteger(count) || count < 0) return null;
+  }
+  if (eligibleOccasions < EARLY_OBSERVATION_MIN_OCCASIONS) return null;
+  if (eligibleOccasions >= minimumComparableOccasions && eligibleDays >= minimumDistinctDays) return null;
+  const gloss = isDetectorIdentity(detectorIdentity)
+    ? getDetectorCatalogEntry(detectorIdentity).displayGloss
+    : "Recorded work";
+  const dayWord = eligibleDays === 1 ? "day" : "days";
+  const occasionWord = eligibleOccasions === 1 ? "occasion" : "occasions";
+  return {
+    detectorIdentity,
+    headline: `What we've seen so far: ${gloss.charAt(0).toLowerCase()}${gloss.slice(1)} across ${eligibleOccasions} ${occasionWord} on ${eligibleDays} ${dayWord}.`,
+    confidence: "low",
+    claimLevel: "co-occurrence",
+    sessions: eligibleOccasions,
+    occasions: eligibleOccasions,
+    days: eligibleDays,
+    needsMoreDays: Math.max(minimumDistinctDays - eligibleDays, 1),
+  };
 }

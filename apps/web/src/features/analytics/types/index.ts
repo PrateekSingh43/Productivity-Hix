@@ -125,12 +125,28 @@ export interface AnalysisBlocked {
   requestedAt: string;
 }
 
+export interface EarlySignal {
+  detectorIdentity: string;
+  headline: string;
+  confidence: "low";
+  claimLevel: "co-occurrence";
+  sessions: number;
+  occasions: number;
+  days: number;
+  needsMoreDays: number;
+}
+
 export interface AnalyticsResponse {
   state: AnalyticsState;
   window?: AnalyticsPeriod;
   diagnostics?: AnalyticsDiagnostics;
   observationCount?: number;
   analysisBlocked?: AnalysisBlocked | null;
+  /**
+   * Honest low-confidence observations (Task 5). Present only alongside
+   * `state: insufficient-evidence`; never promoted patterns.
+   */
+  earlySignals?: EarlySignal[];
 }
 
 export interface PatternsResponse extends AnalyticsResponse {

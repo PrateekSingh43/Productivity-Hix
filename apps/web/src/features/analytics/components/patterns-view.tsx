@@ -38,7 +38,7 @@ export function PatternsView() {
                 pattern={pattern}
               />
             ))}
-            <ReadinessStrip readiness={data.readiness} />
+            <ReadinessStrip readiness={data.readiness} earlySignals={data.earlySignals} />
           </>
         ) : (
           <>
@@ -52,7 +52,7 @@ export function PatternsView() {
               isRunningAnalysis={runAnalysis.isPending}
             />
             {!query.isPending && !query.isError && stateData && (
-              <ReadinessStrip readiness={stateData.readiness} />
+              <ReadinessStrip readiness={stateData.readiness} earlySignals={stateData.earlySignals} />
             )}
           </>
         )}

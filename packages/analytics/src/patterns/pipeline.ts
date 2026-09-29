@@ -12,6 +12,7 @@ import type {
   AnalyticalWindow,
   BehavioralPatternOutput,
   CheckIn,
+  EarlySignal,
   EpisodeMeasurementOutput,
   EvidenceTimeline,
   PatternEvidenceRef,
@@ -59,6 +60,7 @@ import {
   type OutcomeInput,
 } from "../index";
 import { PatternExecutionContext, type PatternLevelExecutionContext, type EpisodeExecutionContext } from "./base/context";
+import { collectEarlySignal } from "./promotion";
 import type { ContextSwitchingConfig } from "./detectors/context-switching/types";
 import type { TaskFragmentationConfig } from "./detectors/task-fragmentation/types";
 import type { TaskScheduleInstance } from "./detectors/schedule-variance/types";
@@ -152,6 +154,12 @@ export interface PatternPipelineResult {
   state: PatternsState;
   window: AnalyticalWindow;
   patterns: PatternPromotionInput[];
+  /**
+   * Honest low-confidence observations for days 1-6 (Task 5). Emitted only
+   * alongside `state: insufficient-evidence`; never part of `patterns`.
+   * Empty for every other state. Existing `PatternsState` values unchanged.
+   */
+  earlySignals: EarlySignal[];
   diagnostics: { perDetector: DetectorDiagnostics[]; recordingHistory?: RecordingHistory };
 }
 
@@ -931,6 +939,72 @@ function plannedActualCandidate(
   };
 }
 
+/**
+ * Detector day/occasion minima for the early-signal tier, sourced from the
+ * same configuration objects the pipeline enforces — never duplicated
+ * literals. Covers all 8 detectors (D1–D8).
+ */
+function earlySignalBars(): Record<string, { occasions: number; days: number }> {
+  return {
+    context_switching_density: {
+      occasions: contextConfig.minimumQualifyingSessions,
+      days: contextConfig.minimumQualifyingCalendarDays,
+    },
+    task_execution_fragmentation: {
+      occasions: fragmentationConfig.minimumQualifyingEpisodes,
+      days: fragmentationConfig.minimumQualifyingCalendarDays,
+    },
+    extended_continuous_activity: {
+      occasions: continuousThresholds.minimumComparableOccasions,
+      days: continuousThresholds.minimumDistinctDays,
+    },
+    schedule_variance: {
+      occasions: scheduleConfig.minimumQualifyingTaskInstances,
+      days: scheduleConfig.minimumDistinctCalendarDays,
+    },
+    golden_hours_focus: {
+      occasions: goldenHoursConfig.minimumQualifyingDayEpisodes,
+      days: goldenHoursConfig.minimumQualifyingCalendarDays,
+    },
+    start_friction: {
+      occasions: startFrictionConfig.minimumQualifyingTaskInstances,
+      days: startFrictionConfig.minimumDistinctCalendarDays,
+    },
+    escape_hatch: {
+      occasions: escapeHatchConfig.minimumQualifyingTaskStarts,
+      days: escapeHatchConfig.minimumDistinctCalendarDays,
+    },
+    planned_vs_actual: {
+      occasions: plannedActualConfig.minimumQualifyingCompletedTasks,
+      days: plannedActualConfig.minimumDistinctCalendarDays,
+    },
+  };
+}
+
+/**
+ * Collects honest low-confidence early signals from sub-threshold
+ * per-detector counts. Pure/deterministic: reads aggregate diagnostics only.
+ * NOT_AVAILABLE detectors are skipped (no observation without input).
+ */
+export function collectEarlySignals(diagnostics: readonly DetectorDiagnostics[]): EarlySignal[] {
+  const bars = earlySignalBars();
+  const signals: EarlySignal[] = [];
+  for (const diagnostic of [...diagnostics].sort((a, b) => compare(a.identity, b.identity))) {
+    if (diagnostic.availability === "NOT_AVAILABLE") continue;
+    const bar = bars[diagnostic.identity];
+    if (!bar) continue;
+    const signal = collectEarlySignal({
+      detectorIdentity: diagnostic.identity,
+      eligibleOccasions: diagnostic.eligibleOccasions,
+      eligibleDays: diagnostic.eligibleDays,
+      minimumComparableOccasions: bar.occasions,
+      minimumDistinctDays: bar.days,
+    });
+    if (signal) signals.push(signal);
+  }
+  return signals;
+}
+
 export function evaluatePatterns(data: PatternPipelineInput): PatternPipelineResult {
   const current = sessionEpisodes(data, data.timeline);
   const historical = sessionEpisodes(data, data.baseline);
@@ -1144,7 +1218,9 @@ export function evaluatePatterns(data: PatternPipelineInput): PatternPipelineRes
   const hasObservations = data.timeline.blocks.some((block) => block.observation !== null);
   const state: PatternsState = patterns.length ? "ok" : !hasObservations ? data.connected ? "no-observations" : "not-connected"
     : qualifiedEvaluation ? "no-findings" : "insufficient-evidence";
+  const sortedDiagnostics = diagnostics.sort((a, b) => compare(a.identity, b.identity));
   return { state, window: data.window, patterns: patterns.sort((a, b) => compare(a.metadata.patternId, b.metadata.patternId)),
-    diagnostics: { perDetector: diagnostics.sort((a, b) => compare(a.identity, b.identity)), recordingHistory: data.recordingHistory } };
+    earlySignals: state === "insufficient-evidence" ? collectEarlySignals(sortedDiagnostics) : [],
+    diagnostics: { perDetector: sortedDiagnostics, recordingHistory: data.recordingHistory } };
 }
 

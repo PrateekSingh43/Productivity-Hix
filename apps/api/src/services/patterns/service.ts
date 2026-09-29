@@ -1,9 +1,10 @@
 import type {
-  AnalyticalWindow, BehavioralPatternOutput, CheckIn, EvidenceTimeline, WorkSession,
+  AnalyticalWindow, BehavioralPatternOutput, CheckIn, EarlySignal, EvidenceTimeline, WorkSession,
 } from "@repo/types";
 import { resolveProductiveDay } from "@repo/types";
 import { randomUUID } from "node:crypto";
 import {
+  collectEarlySignals,
   composeInsights,
   contextConfig,
   continuousThresholds,
@@ -25,10 +26,16 @@ import { listSessions } from "../sessions/service";
 import { assembleEvidence, compare, overlaps } from "./evidence";
 
 export type { DetectorDiagnostics, PatternsState, RecordingHistory };
+export type { EarlySignal };
 export interface PatternsResponse {
   state: PatternsState;
   window: AnalyticalWindow;
   patterns: BehavioralPatternOutput[];
+  /**
+   * Honest low-confidence observations (Task 5). Populated only alongside
+   * `state: insufficient-evidence`; never part of `patterns`.
+   */
+  earlySignals: EarlySignal[];
   diagnostics: { perDetector: DetectorDiagnostics[]; recordingHistory?: RecordingHistory };
 }
 export interface InsightsResponse {
@@ -243,6 +250,25 @@ function emptyDiagnostics(): PatternsResponse["diagnostics"] {
 }
 
 /**
+ * Derives honest early signals from stored per-detector diagnostics (Task 5).
+ * Only meaningful alongside `insufficient-evidence`; every other state gets
+ * []. Defensive defaults keep older stored rows (missing counts) signal-free
+ * instead of inventing observations.
+ */
+function earlySignalsFor(state: PatternsState, diagnostics: PatternsResponse["diagnostics"]): EarlySignal[] {
+  if (state !== "insufficient-evidence") return [];
+  return collectEarlySignals((diagnostics.perDetector ?? []).map((d) => ({
+    identity: d.identity,
+    status: d.status,
+    reason: d.reason,
+    eligibleOccasions: d.eligibleOccasions ?? 0,
+    eligibleDays: d.eligibleDays ?? 0,
+    meanCoverageRatio: d.meanCoverageRatio ?? null,
+    availability: d.availability ?? "AVAILABLE",
+  })));
+}
+
+/**
  * Minimum evidence bar per available detector, sourced from the same
  * configuration objects the pipeline enforces — never duplicated literals.
  * D4 (schedule_variance) is intentionally absent: NOT_AVAILABLE detectors
@@ -300,7 +326,7 @@ export async function getPersistedPatterns(userId: string, window: AnalyticalWin
   if (running) {
     return {
       state: "RUNNING", runStatus: "RUNNING", runId: running.id, computedAt: null,
-      window, patterns: [], diagnostics: emptyDiagnostics(),
+      window, patterns: [], earlySignals: [], diagnostics: emptyDiagnostics(),
       readiness: { activity, evidence: "unknown", analysis: "running", patterns: "unknown" },
     };
   }
@@ -323,7 +349,8 @@ export async function getPersistedPatterns(userId: string, window: AnalyticalWin
     return {
       state: (completed.state ?? "ok") as PatternsState, runStatus: "COMPLETED",
       runId: completed.id, computedAt: completed.computedAt?.toISOString() ?? null,
-      window, patterns, diagnostics,
+      window, patterns, earlySignals: earlySignalsFor((completed.state ?? "ok") as PatternsState, diagnostics),
+      diagnostics,
       readiness: { activity, evidence, analysis: "completed", patterns: patterns.length > 0 ? "found" : "none" },
     };
   }
@@ -331,13 +358,13 @@ export async function getPersistedPatterns(userId: string, window: AnalyticalWin
     return {
       state: "FAILED", runStatus: "FAILED", runId: failed.id,
       computedAt: failed.computedAt?.toISOString() ?? null,
-      window, patterns: [], diagnostics: emptyDiagnostics(),
+      window, patterns: [], earlySignals: [], diagnostics: emptyDiagnostics(),
       readiness: { activity, evidence: "unknown", analysis: "failed", patterns: "unknown" },
     };
   }
   return {
     state: "NO_RUN", runStatus: "NO_RUN", runId: null, computedAt: null,
-    window, patterns: [], diagnostics: emptyDiagnostics(),
+    window, patterns: [], earlySignals: [], diagnostics: emptyDiagnostics(),
     readiness: { activity, evidence: "unknown", analysis: "never", patterns: "unknown" },
     analysisBlocked: await blockedAnalysis(userId),
   };
