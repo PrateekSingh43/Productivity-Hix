@@ -184,6 +184,7 @@ Managed with [Turborepo](https://turbo.build/repo) and [pnpm](https://pnpm.io/) 
 | [`apps/web`](file:///c:/Users/prate/ProductiveHix/apps/web)             | **Next.js 16**, React 19, Tailwind CSS | `:5173`  | Rich, responsive dashboard, real-time telemetry visualizer, daily intention planner, and spaced retrieval review.       |
 | [`apps/api`](file:///c:/Users/prate/ProductiveHix/apps/api)             | **Express 5**, WebSocket (`ws`), Pino  | `:5000`  | High-throughput REST & WebSocket backend handling device pairing, batch telemetry ingestion, and session state.         |
 | [`apps/desktop`](file:///c:/Users/prate/ProductiveHix/apps/desktop)     | **Node.js 24**, TypeScript, `tsup`     | CLI      | Native daemon bridging local ActivityWatch window/AFK buckets to ProductiveHix ingestion endpoints.                     |
+| [`apps/worker`](file:///c:/Users/prate/ProductiveHix/apps/worker)         | **Node.js 24**, TypeScript, `tsup`     | Internal | Dedicated BullMQ background runtime hosting timeline/pattern workers and the outbox publisher.                          |
 | [`apps/extension`](file:///c:/Users/prate/ProductiveHix/apps/extension) | **Chrome Extension (Manifest V3)**     | Popup    | Context-aware browser tracker, focus guard tab protector, and non-intrusive 50-minute reflection trigger.               |
 | [`apps/ai`](file:///c:/Users/prate/ProductiveHix/apps/ai)               | **TypeScript**, Streaming SDKs         | Internal | Multi-provider runtime supporting Anthropic Claude, Google Gemini, and Groq with streaming and structured tool calling. |
 
@@ -255,6 +256,7 @@ Copy development templates:
 cp apps/api/.env.example apps/api/.env
 cp apps/web/.env.example apps/web/.env
 cp apps/desktop/.env.example apps/desktop/.env
+cp apps/worker/.env.example apps/worker/.env
 ```
 
 _Default Ports:_
@@ -289,7 +291,10 @@ pnpm --filter web dev
 # Terminal 3: ActivityWatch Desktop Bridge
 pnpm --filter @repo/desktop dev
 
-# Terminal 4: Chrome Extension Watcher
+# Terminal 4: Background Worker Runtime (timeline/pattern workers)
+pnpm --filter @repo/worker dev
+
+# Terminal 5: Chrome Extension Watcher
 pnpm --filter @repo/extension dev
 ```
 
