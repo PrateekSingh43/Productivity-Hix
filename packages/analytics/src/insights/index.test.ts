@@ -7,7 +7,8 @@ function composition(): InsightCompositionInput {
   return {
     window: fixtureWindow,
     patterns: [{ pattern: fixturePattern() }],
-    reflections: [{ recordId: "reflection-1", date: "2026-09-01", reportedEnergy: "low", reportedProgress: false }],
+    reflections: [{ recordId: "reflection-1", date: "2026-09-01", reportedEnergy: "low", reportedProgress: false,
+      contextKey: "task-1", window: { start: "2026-09-01T10:15:00Z", end: "2026-09-01T10:45:00Z" } }],
   };
 }
 
@@ -48,7 +49,8 @@ test("missing reflection answers stay unknown rather than defaulting to low ener
 
 test("every contradictory same-period reflection remains in alternatives and lineage", () => {
   const input = composition();
-  input.reflections = [...input.reflections!, { recordId: "reflection-2", date: "2026-09-02", reportedEnergy: "high", reportedProgress: true }];
+  input.reflections = [...input.reflections!, { recordId: "reflection-2", date: "2026-09-02", reportedEnergy: "high", reportedProgress: true,
+    contextKey: "task-1", window: { start: "2026-09-02T10:15:00Z", end: "2026-09-02T10:45:00Z" } }];
   const output = composeInsight(input);
   assert.equal(output.personalElements.length, 2);
   assert.ok(output.alternatives.some((alternative) => alternative.includes("reflection-1")));
@@ -68,7 +70,8 @@ test("D4 and independently assessed goal outcomes yield association, never task-
   pattern.evidenceRefs[0]!.reportIds = ["outcome-1"];
   const output = composeInsight({
     window: fixtureWindow, patterns: [{ pattern }],
-    outcomes: [{ recordId: "outcome-1", taskId: "task-1", goalOutcome: "ACHIEVED" }],
+    outcomes: [{ recordId: "outcome-1", taskId: "task-1", goalOutcome: "ACHIEVED",
+      contextKey: "task-1", window: { start: "2026-09-01T10:15:00Z", end: "2026-09-01T10:45:00Z" } }],
   });
   assert.equal(output.status, "DETECTED");
   assert.equal(output.claimLevel, "pattern-outcome-association");
@@ -160,6 +163,7 @@ test("templates never inject blocker text or observation summaries into claims",
   bounded.summary = "This causes fatigue because of your bad habits.";
   const output = composeInsight({ window: fixtureWindow, observation: bounded, reflections: [{
     recordId: "reflection-1", date: "2026-09-01", blockers: ["Work causes failure"],
+    window: { start: "2026-09-01T10:15:00Z", end: "2026-09-01T10:45:00Z" },
   }] });
   assert.equal(output.status, "DETECTED");
   assert.ok(isNonCausalClaim(output.claim));
@@ -169,7 +173,8 @@ test("templates never inject blocker text or observation summaries into claims",
 test("determinism: shuffled patterns, reflections, compositions and duplicated evidence yield the same output", () => {
   const input = composition();
   input.patterns = [...input.patterns!, { pattern: fixturePattern("schedule_variance", "b") }];
-  input.reflections = [...input.reflections!, { recordId: "reflection-2", date: "2026-09-02", reportedEnergy: "high" }];
+  input.reflections = [...input.reflections!, { recordId: "reflection-2", date: "2026-09-02", reportedEnergy: "high",
+    contextKey: "task-1", window: { start: "2026-09-02T10:15:00Z", end: "2026-09-02T10:45:00Z" } }];
   const reversed = structuredClone(input);
   reversed.patterns = [...reversed.patterns!].reverse();
   reversed.reflections = [...reversed.reflections!].reverse();

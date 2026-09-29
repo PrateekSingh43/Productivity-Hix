@@ -21,10 +21,10 @@ const session = (event: ReturnType<typeof row>) => ({
   startedAt: event.timestamp, endedAt: new Date(event.timestamp.getTime() + event.duration * 1000),
   durationSeconds: event.duration, isPaused: false,
 });
-const report = (id: string, date: string, energy: string | null) => ({
+const report = (id: string, date: string, energy: string | null, focus: string | null = null) => ({
   id, userId, workSessionId: null, taskId: "task-1", windowStart: new Date(`${date}T10:00:00Z`),
   windowEnd: new Date(`${date}T11:00:00Z`), activityAssessment: null, alignment: null, reasons: [], state: null,
-  energy, focus: null, note: null, questionVersion: "v1", source: "extension_hourly", deeperAnswers: null,
+  energy, focus, note: null, questionVersion: "v1", source: "extension_hourly", deeperAnswers: null,
   intent: null, progress: null, blocker: null, productive: null, outcome: null, createdAt: new Date(`${date}T11:00:00Z`),
 });
 
@@ -34,13 +34,14 @@ type HistoryQuery = (strings: TemplateStringsArray, ...values: unknown[]) => Pro
 
 function fixture(options: {
   currentSeconds?: number; history?: boolean; count?: number; connected?: boolean; reflections?: boolean; reverse?: boolean;
-  timezone?: string; queryRaw?: HistoryQuery; taskId?: string;
+  timezone?: string; queryRaw?: HistoryQuery; taskId?: string; focusRatings?: boolean;
 } = {}) {
   const current = Array.from({ length: options.count ?? 3 }, (_, index) => row(`2026-09-0${index + 1}`, options.currentSeconds ?? 3600, `current-${index}`));
   const historical = options.history === false ? [] : [20, 21, 22].map((day) => row(`2026-08-${day}`, 1800, `history-${day}`));
   const events = [...current, ...historical, row("2026-09-01", 7200, "other-user", "other-user")];
   const sessions = events.map((event) => ({ ...session(event), taskId: options.taskId ?? "task-1" }));
-  const reports = options.reflections ? [report("reflection-high", "2026-09-01", "high"), report("reflection-low", "2026-09-02", "low")] : [];
+  const focus = options.focusRatings ? "scattered" : null;
+  const reports = options.reflections ? [report("reflection-high", "2026-09-01", "high", focus), report("reflection-low", "2026-09-02", "low", focus)] : [];
   if (options.reverse) { events.reverse(); sessions.reverse(); reports.reverse(); }
   const calls: Array<{ kind: string; args: unknown }> = [];
   const db = {
@@ -60,7 +61,7 @@ function fixture(options: {
     } },
     checkIn: { findMany: async (args: { take?: number }) => { calls.push({ kind: "checkIns", args }); return reports.slice(0, args.take); } },
     task: { findMany: async () => [{ id: options.taskId ?? "task-1", completedAt: null, plannedStart: new Date("2026-09-01T09:00:00Z") }] },
-    dailyGoal: { findMany: async () => [{ id: "goal-1", outcome: "ACHIEVED", plan: { date: "2026-09-01" } }] },
+    dailyGoal: { findMany: async () => [{ id: "goal-1", outcome: "ACHIEVED", plan: { date: "2026-09-01" }, tasks: [{ id: options.taskId ?? "task-1" }] }] },
     desktopDevice: { count: async () => options.connected === false ? 0 : 1 },
     browserInstallation: { count: async () => 0 },
     patternAnalysisRun: { findFirst: async () => null },
@@ -171,6 +172,23 @@ describe("Patterns and Insights orchestration contracts", () => {
     ]);
     expect(result.insights[0]?.alternatives.join(" ")).toContain("Reflections differ");
     expect(result.insights[0]?.doesNotEstablish.join(" ")).toContain("Task completion");
+  });
+
+  it("maps check-in focus ratings and occasion context into aligned reflections without inventing outcomes", async () => {
+    fixture({ reflections: true, focusRatings: true });
+    const result = await runInsightPipeline(userId, window);
+    expect(result.state).toBe("ok");
+    expect(result.insights).toHaveLength(1);
+    // Aligned reflections populate personalElements through the new mapping
+    // (reportedFocus + contextKey + occasion window).
+    expect(result.insights[0]?.personalElements).toEqual([
+      { kind: "reflection", recordId: "reflection-high" }, { kind: "reflection", recordId: "reflection-low" },
+    ]);
+    // The mapped focus rating is cited, proving reportedFocus flows end to end.
+    expect(result.insights[0]?.alternatives.join(" ")).toContain("scattered focus");
+    // The assessed goal carries no occasion window, so no outcome element is
+    // invented for it (fail closed, honest boundary).
+    expect(result.insights[0]?.personalElements.some((element) => element.kind === "outcome")).toBe(false);
   });
 
   it("does not emit fabricated confidence or percentage fields", async () => {

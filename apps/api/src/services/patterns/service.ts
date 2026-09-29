@@ -119,7 +119,7 @@ async function readData(userId: string, window: AnalyticalWindow): Promise<Data>
     activityInRange(userId, range.from, range.to), listSessions(userId, range), listCheckIns(userId, range),
     db.task.findMany({ where: { userId }, select: { id: true, completedAt: true } }),
     db.dailyGoal.findMany({ where: { userId, plan: { date: { gte: resolveProductiveDay(window.start, { timezone }), lte: resolveProductiveDay(window.end, { timezone }) } } },
-      select: { id: true, outcome: true, plan: { select: { date: true } } } }),
+      select: { id: true, outcome: true, plan: { select: { date: true } }, tasks: { select: { id: true } } } }),
     db.normalizedActivity.count({ where: { userId } }),
     readRecordingHistory(userId, timezone),
     db.desktopDevice.count({ where: { userId } }), db.browserInstallation.count({ where: { userId } }),
@@ -129,8 +129,14 @@ async function readData(userId: string, window: AnalyticalWindow): Promise<Data>
   tasks.sort((a, b) => compare(a.id, b.id));
   const outcomes: OutcomeInput[] = goals.flatMap<OutcomeInput>((goal) => {
     const outcome = goal.outcome;
-    return outcome === "ACHIEVED" || outcome === "PARTIALLY_ACHIEVED" || outcome === "NOT_ACHIEVED"
-      ? [{ recordId: goal.id, date: goal.plan.date, goalOutcome: outcome }] : [];
+    if (outcome !== "ACHIEVED" && outcome !== "PARTIALLY_ACHIEVED" && outcome !== "NOT_ACHIEVED") return [];
+    // Honest task linkage only: a goal linked to exactly one task carries
+    // that task id; zero or several linked tasks carry none (never picked
+    // arbitrarily). No occasion window exists on a goal row, so none is
+    // invented — unlinked outcomes stay unaligned downstream (fail closed).
+    const taskIds = [...new Set((goal.tasks ?? []).map((task) => task.id))].sort();
+    return [{ recordId: goal.id, date: goal.plan.date, goalOutcome: outcome,
+      ...(taskIds.length === 1 && taskIds[0] ? { taskId: taskIds[0] } : {}) }];
   }).sort((a, b) => compare(a.recordId, b.recordId));
   return {
     userId, timezone, boundary: preferences?.dayBoundary ?? "00:00", window, baselineWindow, sessions, reports, tasks, outcomes,
@@ -387,9 +393,20 @@ export async function runInsightPipeline(userId: string, window: AnalyticalWindo
   const reflections: ReflectionInput[] = data.reports.flatMap((report) => {
     if (!report.windowStart || !report.windowEnd || !overlaps(report.windowStart, report.windowEnd, window)) return [];
     const energy = report.energy;
+    const focus = report.focus;
     return [{ recordId: report.id, date: resolveProductiveDay(report.windowStart, { timezone: data.timezone }),
       ...(energy === "low" || energy === "medium" || energy === "high" ? { reportedEnergy: energy } : {}),
+      // FocusLevel vocabulary only: any other stored string stays unmapped so
+      // analytics fail-closed validation never poisons the whole composition.
+      ...(focus === "scattered" || focus === "mixed" || focus === "focused" ? { reportedFocus: focus } : {}),
+      ...(typeof report.progress === "boolean" ? { reportedProgress: report.progress } : {}),
       ...(report.blocker ? { blockers: [report.blocker] } : {}),
+      // Context key uses the pipeline's own qualification convention
+      // (`task:<id>`, see continuousCandidate/contextSwitchingCandidate) so
+      // the analytics shared-context check can match. Reports without a
+      // linked task carry no key and fail closed downstream — never guessed.
+      ...(report.taskId ? { contextKey: `task:${report.taskId}` } : {}),
+      window: { start: new Date(report.windowStart).toISOString(), end: new Date(report.windowEnd).toISOString() },
     }];
   });
   const inputs = (result.patterns as any[]).map((pattern) => ({ patterns: [{ pattern }], reflections, outcomes: data.outcomes, window }));

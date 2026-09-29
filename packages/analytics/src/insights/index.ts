@@ -27,14 +27,15 @@ export interface ReflectionInput {
   reportedFocus?: string;
   /**
    * Pattern context key this reflection was recorded under (e.g. the linked
-   * task id). When present it must equal the pattern's qualification context
-   * key for the reflection to align. Absent means the legacy date-only path.
+   * task id). On the pattern path it must equal the pattern's qualification
+   * context key for the reflection to align; a reflection without one never
+   * aligns there (fail closed, no date-only fallback).
    */
   contextKey?: string;
   /**
-   * Occasion window this reflection belongs to. When present it must overlap
-   * at least one pattern occasion window on the same date for the reflection
-   * to align. Absent means the legacy date-only path.
+   * Occasion window this reflection belongs to. It must overlap at least one
+   * evidence occasion window on the same date for the reflection to align; a
+   * reflection without one never aligns (fail closed, no date-only fallback).
    */
   window?: AnalyticalWindow;
 }
@@ -46,13 +47,14 @@ export interface OutcomeInput {
   date?: string;
   /**
    * Pattern context key this outcome was assessed under. Same shared-context
-   * contract as ReflectionInput.contextKey: when present it must equal the
-   * pattern's qualification context key.
+   * contract as ReflectionInput.contextKey: it must equal the pattern's
+   * qualification context key; an outcome without one never aligns.
    */
   contextKey?: string;
   /**
    * Occasion window this outcome assessment belongs to. Same
-   * overlapping-occasion-window contract as ReflectionInput.window.
+   * overlapping-occasion-window contract as ReflectionInput.window; an
+   * outcome without one never aligns.
    */
   window?: AnalyticalWindow;
 }
@@ -211,21 +213,27 @@ export function composeInsight(input: InsightCompositionInput): InsightOutput {
     return emptyInsight(window, "INSUFFICIENT_EVIDENCE");
   }
   // Shared context for the alignment check: the pattern's qualification
-  // context key. Observation-only compositions carry no pattern context, so
-  // context-bound reflections/outcomes cannot align there (absent key stays
-  // on the legacy date-only path; absent content stays unaligned).
+  // context key. Fail closed: a reflection aligns only with an occasion
+  // window that overlaps a same-date evidence occasion window, plus a
+  // context key equal to the pattern's key on the pattern path. Records
+  // lacking a window never align. Observation-only compositions carry no
+  // pattern context, so the context-key comparison is scoped to the pattern
+  // path there (same-date window overlap plus reported content still bind
+  // the reflection to the observed occasion); absent content stays unaligned.
   const patternContextKey = !observation ? first?.qualification.context.key : undefined;
   const alignedReflections = reflections.filter((reflection) => dates.has(reflection.date) &&
     (!observation || reflection.date === observation.date) && reflectionDescription(reflection) &&
-    (reflection.contextKey === undefined || (patternContextKey !== undefined && reflection.contextKey === patternContextKey)) &&
-    (reflection.window === undefined || evidence.some((ref) => ref.date === reflection.date &&
-      overlapsOccasionWindow(reflection.window as AnalyticalWindow, ref.window))));
+    reflection.window !== undefined && evidence.some((ref) => ref.date === reflection.date &&
+      overlapsOccasionWindow(reflection.window as AnalyticalWindow, ref.window)) &&
+    (observation !== undefined || (reflection.contextKey !== undefined && patternContextKey !== undefined &&
+      reflection.contextKey === patternContextKey)));
   const alignedOutcomes = outcomes.filter((outcome) => outcome.goalOutcome !== "NOT_ASSESSED" &&
     ["ACHIEVED", "PARTIALLY_ACHIEVED", "NOT_ACHIEVED"].includes(outcome.goalOutcome) &&
-    (outcome.contextKey === undefined || (patternContextKey !== undefined && outcome.contextKey === patternContextKey)) &&
+    outcome.contextKey !== undefined && outcome.window !== undefined &&
+    patternContextKey !== undefined && outcome.contextKey === patternContextKey &&
     evidence.some((ref) => ref.reportIds.includes(outcome.recordId) &&
       (!outcome.date || outcome.date === ref.date) && (!outcome.taskId || ref.taskIds.includes(outcome.taskId)) &&
-      (outcome.window === undefined || overlapsOccasionWindow(outcome.window as AnalyticalWindow, ref.window))));
+      overlapsOccasionWindow(outcome.window as AnalyticalWindow, ref.window)));
   const useOutcomes = !observation && selected.length === 1 && first?.detectorIdentity === "schedule_variance" && alignedOutcomes.length > 0;
   if (!alignedReflections.length && !useOutcomes) return emptyInsight(window);
   const personalElements: InsightOutput["personalElements"] = alignedReflections.map((reflection) => ({
