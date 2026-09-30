@@ -90,6 +90,10 @@ function createFakeDb() {
     $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(db),
     runs,
     findings,
+    user: {
+      findUnique: async ({ where }: { where: { id: string } }) =>
+        where.id === USER ? { id: USER } : null,
+    },
     patternAnalysisRun: {
       findFirst: async ({ where }: { where: Record<string, unknown> }) =>
         runs.filter((r) => match(r, where)).sort((a, b) => (a.computedAt ?? "") < (b.computedAt ?? "") ? 1 : -1)[0] ?? null,
@@ -220,6 +224,15 @@ describe("PatternWorker", () => {
     await expect(
       worker.run(job({ targetDetectors: ["nope_not_a_detector"] }), { metrics, logger })
     ).rejects.toThrow(WorkerPermanentError);
+  });
+
+  it("rejects ghost-user jobs as permanent errors before creating a run row", async () => {
+    const { provider } = stubProvider(emptyInput());
+    const worker = new PatternWorker(db as never, provider);
+    await expect(
+      worker.run(job({ userId: "ghost-no-such-user" }), { metrics, logger, idempotencyProvider: locks })
+    ).rejects.toThrow(WorkerPermanentError);
+    expect(db.runs).toHaveLength(0);
   });
 
   it("unwraps outbox DomainEventEnvelope payloads", async () => {

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { PRODUCTIVEHIX_QUEUES } from "@repo/types";
-import { WorkerValidationError } from "../base/errors";
+import { WorkerPermanentError, WorkerValidationError } from "../base/errors";
 import { TimelineWorker } from "./timeline-worker";
 import { createWorkerExecutionContext, type WorkerExecutionContext } from "../base/context";
 
@@ -42,6 +42,11 @@ function createFakeDb() {
   const db: any = {
     userPreference: {
       findUnique: vi.fn().mockResolvedValue({ timezone: "UTC" }),
+    },
+    user: {
+      findUnique: vi.fn().mockImplementation(async ({ where }: any) =>
+        where.id === USER ? { id: USER } : null
+      ),
     },
     timelineDayState: {
       findUnique: vi.fn().mockImplementation(async ({ where }: any) => {
@@ -216,6 +221,23 @@ describe("TimelineWorker", () => {
 
       expect(validated.requestedRevision.observationRevision).toBe(9);
       expect(validated.requestedRevision.ruleRevision).toBe(3);
+    });
+
+    it("rejects ghost-user jobs as permanent errors before any writes", async () => {
+      await expect(
+        worker.execute(
+          {
+            userId: "ghost-no-such-user",
+            localDate: DATE,
+            reason: "TELEMETRY_INGEST",
+            requestedRevision: { observationRevision: 5, ruleRevision: 0, semanticVersion: "3b.0.1" },
+            jobCorrelationId: "corr-1",
+            queuedAt: new Date().toISOString(),
+          },
+          ctx
+        )
+      ).rejects.toThrow(WorkerPermanentError);
+      expect(fake.snapshots.length).toBe(0);
     });
 
     it("throws WorkerValidationError on invalid payloads", () => {

@@ -177,6 +177,18 @@ export class PatternWorker extends BaseWorker<PatternAnalysisJobData, PatternWor
   }
 
   async execute(data: PatternAnalysisJobData, context: WorkerExecutionContext): Promise<PatternWorkerResult> {
+    // Poison guard: requests for users with no users-row can never persist
+    // (pattern_analysis_runs_user_id_fkey). Fail permanent immediately
+    // instead of burning attempts + timeouts on an impossible insert.
+    const owner = await (this.db as unknown as {
+      user: { findUnique: (args: unknown) => Promise<{ id: string } | null> };
+    }).user.findUnique({ where: { id: data.userId }, select: { id: true } }).catch(() => ({ id: data.userId }));
+    if (!owner) {
+      throw new WorkerPermanentError(
+        `Unknown user ${data.userId}: no users row; refusing poison pattern request.`
+      );
+    }
+
     const identityKey = this.getJobIdentity(data);
     const inputFingerprint = this.preFingerprints.get(identityKey) ?? await this.computeFingerprint(data);
     context.throwIfCancelled();

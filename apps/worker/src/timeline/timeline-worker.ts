@@ -210,6 +210,16 @@ export class TimelineWorker extends BaseWorker<TimelineMaterializationJobData, T
     context: WorkerExecutionContext
   ): Promise<TimelineWorkerResult> {
     const { userId, localDate } = jobData;
+    // Poison guard (same rationale as PatternWorker): a missing users row
+    // makes every downstream write FK-fail. Fail permanent up front.
+    const owner = await (this.db as unknown as {
+      user: { findUnique: (args: unknown) => Promise<{ id: string } | null> };
+    }).user.findUnique({ where: { id: userId }, select: { id: true } }).catch(() => ({ id: userId }));
+    if (!owner) {
+      throw new WorkerPermanentError(
+        `Unknown user ${userId}: no users row; refusing poison timeline job.`
+      );
+    }
     const executeStart = Date.now();
     this.metrics.increment('timeline.executed', { queue: this.queueName });
 
