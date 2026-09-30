@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { BehavioralPatternOutput, RepertoireCategory } from "../types";
+import type { BehavioralPatternOutput } from "../types";
 import {
   claimLabels,
   dateLabel,
@@ -11,34 +11,40 @@ import {
   patternHeadline,
   resultGloss,
 } from "../lib/presentation";
+import {
+  evidenceFootprintDates,
+  observedCounts,
+  patternKindLabel,
+  referenceKindLine,
+} from "../lib/evidence-summary";
 import { DetailSection, EvidenceLink, EvidenceRows } from "./analytics-evidence";
+import { EvidenceFootprint } from "./evidence-footprint";
 
-const repertoireStyles: Record<RepertoireCategory, string> = {
-  strength: "border-teal-400/20 bg-teal-400/5 text-teal-700 dark:text-teal-200",
-  stable: "border-border-subtle bg-bg-secondary text-text-secondary",
-  emerging: "border-sky-400/20 bg-sky-400/5 text-sky-700 dark:text-sky-200",
-  changed: "border-violet-400/20 bg-violet-400/5 text-violet-700 dark:text-violet-200",
-  friction: "border-stone-400/20 bg-stone-400/5 text-text-secondary",
-  mismatch: "border-amber-400/20 bg-amber-400/5 text-amber-700 dark:text-amber-200",
-  opportunity: "border-indigo-400/20 bg-indigo-400/5 text-indigo-700 dark:text-indigo-200",
-};
-
-const fallbackBadgeStyle = "border-border-subtle bg-bg-secondary text-text-secondary";
-
+/**
+ * Structured analytical card for one qualified Pattern.
+ *
+ * Hierarchy: small context label → strong headline → one explanatory
+ * sentence → compact evidence metadata → presence visualization → evidence
+ * action → secondary Details disclosure. One main surface with internal
+ * dividers; no nested cards. Stays neutral — no category color coding.
+ */
 export function PatternCard({ pattern }: { pattern: BehavioralPatternOutput }) {
   const [dismissed, setDismissed] = useState(false);
   const anchor = evidenceAnchor(pattern.evidenceAnchor);
   const counts = pattern.eligibility ? eligibilityLines(pattern.eligibility) : [];
+  const observed = observedCounts(pattern.eligibility);
   const excluded = pattern.eligibility?.excluded ?? [];
   const caveats = pattern.caveats ?? [];
   const contributingResults = pattern.contributingResults ?? [];
   const evidenceRefs = pattern.evidenceRefs ?? [];
   const comparison = pattern.comparison;
   const claimText = claimLabels[pattern.claimLevel as keyof typeof claimLabels] ?? "A finding across comparable occasions";
+  const footprintDates = evidenceFootprintDates(evidenceRefs);
+  const referenceLine = referenceKindLine(comparison?.referenceKind);
 
   if (dismissed) {
     return (
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border-subtle p-4 text-sm text-text-secondary">
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-[var(--radius-lg)] border border-border-subtle p-4 text-sm text-text-secondary">
         Finding hidden for this visit.
         <button
           type="button"
@@ -52,21 +58,44 @@ export function PatternCard({ pattern }: { pattern: BehavioralPatternOutput }) {
   }
 
   return (
-    <article className="min-w-0 space-y-3 rounded-xl border border-border-subtle bg-bg-card p-5 sm:p-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <h2 className="min-w-0 max-w-2xl wrap-break-word text-lg font-medium text-text-primary">
-          {patternHeadline(pattern)}
-        </h2>
-        <span className={`rounded-full border px-2.5 py-1 text-xs capitalize ${repertoireStyles[pattern.repertoireCategory] ?? fallbackBadgeStyle}`}>
-          {pattern.repertoireCategory ?? "Finding"}
-        </span>
-      </div>
-      <p className="text-sm leading-relaxed text-text-secondary">
-        {displayCopy(pattern.supportingLine, "A finding across comparable records; inspect the details and limits below.")}
+    <article className="min-w-0 rounded-[var(--radius-lg)] border border-border-subtle bg-bg-card p-5 sm:p-6">
+      <p className="text-[11px] font-medium uppercase tracking-wider text-text-tertiary">
+        {patternKindLabel(pattern.claimLevel)}
       </p>
-      {anchor && <p className="text-xs text-text-muted">{anchor}</p>}
-      <EvidenceLink evidence={evidenceRefs[0]} />
-      <details className="group border-t border-border-subtle pt-2">
+      <h2 className="mt-1.5 wrap-break-word text-lg font-medium tracking-tight text-text-primary sm:text-xl">
+        {patternHeadline(pattern)}
+      </h2>
+      <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-text-secondary">
+        {displayCopy(pattern.supportingLine, "Seen across comparable recorded occasions; details and limits below.")}
+      </p>
+
+      {(observed || referenceLine) && (
+        <p className="mt-2.5 text-xs text-text-muted">
+          {observed && (
+            <span>
+              {observed.occasions} comparable {observed.occasions === 1 ? "occasion" : "occasions"}
+              {observed.days > 0 && (
+                <span> · {observed.days} {observed.days === 1 ? "day" : "days"}</span>
+              )}
+            </span>
+          )}
+          {observed && referenceLine && <span aria-hidden="true"> · </span>}
+          {referenceLine && <span>{referenceLine}</span>}
+        </p>
+      )}
+      {anchor && <p className="mt-1.5 text-xs text-text-muted">{anchor}</p>}
+
+      {footprintDates.length > 0 && (
+        <div className="mt-3 border-t border-border-subtle/60 pt-3">
+          <EvidenceFootprint dates={footprintDates} />
+        </div>
+      )}
+
+      <div className="mt-3">
+        <EvidenceLink evidence={evidenceRefs[0]} />
+      </div>
+
+      <details className="group mt-2 border-t border-border-subtle pt-2">
         <summary className="min-h-11 cursor-pointer content-center text-sm font-medium text-text-primary">
           Details
         </summary>
