@@ -907,6 +907,61 @@ model OutboxEvent {
 }
 
 // ----------------------------------------------------------------------------
+// 12B. TIMELINE WORK (Coalesced per-day materialization work items, Phase 2)
+// ----------------------------------------------------------------------------
+// One row per (userId, localDate), upserted by ingestion instead of one
+// outbox row per sync batch. Many telemetry ticks → one dirty-day marker →
+// one materialization. Standalone (no FK) so work coordination never blocks
+// on user-row lifecycle; rows are mutable until terminal, then retained 7d.
+model TimelineWork {
+  id                          String   @id @default(cuid())
+  userId                      String   @map("user_id")
+  localDate                   String   @map("local_date") // "YYYY-MM-DD"
+  status                      String   @default("PENDING") @map("status") // PENDING|PROCESSING|COMPLETED|FAILED|DEAD_LETTER
+  requestedObservationRevision Int     @default(0) @map("requested_observation_revision")
+  requestedRuleRevision       Int      @default(0) @map("requested_rule_revision")
+  attempts                    Int      @default(0)
+  maxAttempts                 Int      @default(5) @map("max_attempts")
+  availableAt                 DateTime @default(now()) @map("available_at")
+  claimedBy                   String?  @map("claimed_by")
+  claimExpiresAt              DateTime? @map("claim_expires_at")
+  lastError                   String?  @map("last_error")
+  createdAt                   DateTime @default(now()) @map("created_at")
+  updatedAt                   DateTime @updatedAt @map("updated_at")
+
+  @@unique([userId, localDate])
+  @@index([status, availableAt])
+  @@map("timeline_work")
+}
+
+// ----------------------------------------------------------------------------
+// 12C. INSIGHT (Durable composed finding, Phase 6)
+// ----------------------------------------------------------------------------
+// Insights were transient (recomputed per GET, never stored). Each row is an
+// immutable composition output, deduplicated by contentHash so re-running the
+// same window never duplicates rows.
+model Insight {
+  id                String   @id @default(cuid())
+  userId            String   @map("user_id")
+  windowStart       DateTime @map("window_start")
+  windowEnd         DateTime @map("window_end")
+  contentHash       String   @map("content_hash")
+  patternIds        String[] @map("pattern_ids")
+  claim             String
+  claimLevel        String   @map("claim_level")
+  headline          String?
+  supportingLine    String?  @map("supporting_line")
+  status            String   @default("DETECTED")
+  createdFromRunId  String?  @map("created_from_run_id")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  @@unique([userId, contentHash])
+  @@index([userId, windowStart, windowEnd])
+  @@map("insights")
+}
+
+// ----------------------------------------------------------------------------
 // 13. TIMELINE DAY STATE (Day Revisions & Materialization Lifecycle)
 // ----------------------------------------------------------------------------
 enum MaterializationStatus {
