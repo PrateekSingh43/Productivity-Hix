@@ -12,7 +12,9 @@
  */
 
 import type { Database, OutboxEvent } from '@repo/db';
-import type { DomainEventEnvelope } from '@repo/types';
+import { PRODUCTIVEHIX_QUEUES, type DomainEventEnvelope } from '@repo/types';
+import { InMemoryLockProvider, type IdempotencyProvider } from '../base/idempotency';
+import { TimelineWorker } from '../timeline/timeline-worker';
 import type { QueueManager } from '../runtime/queue';
 import { resolveQueueForEvent } from '../queues/registry';
 import { createDeterministicJobId } from '../runtime/queue';
@@ -21,6 +23,15 @@ import {
   noopMetricsCollector,
 } from '../shared/metrics';
 import type { WorkerLogger } from '../shared/logging';
+
+export interface DirectExecutor {
+  (payload: unknown, opts: {
+    jobId: string;
+    correlationId: string;
+    attempt: number;
+    maxAttempts: number;
+  }): Promise<{ status: string }>;
+}
 
 export interface OutboxPublisherOptions {
   publisherId?: string;
@@ -31,6 +42,17 @@ export interface OutboxPublisherOptions {
   lockTimeoutMs?: number;
   metrics?: WorkerMetricsCollector;
   logger?: WorkerLogger;
+  /** Phase 4: retention sweep cadence. Default 6h; 0 disables. */
+  cleanupIntervalMs?: number;
+  /** Phase 4: retention horizon for terminal rows. Default 7 days. */
+  retentionMs?: number;
+  /**
+   * Phase 3: executes timeline work inline instead of enqueueing to BullMQ.
+   * Defaults to a lazily constructed TimelineWorker with a process-local
+   * in-memory lock (correct for a single publisher process; multi-process
+   * deployments must keep the BullMQ path until a shared lock lands).
+   */
+  directExecutor?: DirectExecutor;
 }
 
 /**
@@ -61,6 +83,15 @@ export class OutboxPublisher {
   private abortController: AbortController | null = null;
   private pollTimer: NodeJS.Timeout | null = null;
   private activeProcessingPromise: Promise<number> | null = null;
+  private lastOpsSummaryAt = 0;
+  private static readonly OPS_SUMMARY_INTERVAL_MS = 60_000;
+  private readonly cleanupIntervalMs: number;
+  private readonly retentionMs: number;
+  private lastCleanupAt = 0;
+
+  private directExecutor?: DirectExecutor;
+  private directLocks?: IdempotencyProvider;
+  private directWorker?: TimelineWorker;
 
   constructor(options: OutboxPublisherOptions) {
     this.publisherId = options.publisherId ?? `pub-${Date.now()}-${Math.random().toString(36).substring(7)}`;
@@ -71,6 +102,9 @@ export class OutboxPublisher {
     this.lockTimeoutMs = options.lockTimeoutMs ?? 60_000;
     this.metrics = options.metrics ?? noopMetricsCollector;
     this.logger = options.logger;
+    this.directExecutor = options.directExecutor;
+    this.cleanupIntervalMs = options.cleanupIntervalMs ?? 6 * 60 * 60 * 1000;
+    this.retentionMs = options.retentionMs ?? 7 * 24 * 60 * 60 * 1000;
   }
 
   /**
@@ -96,6 +130,19 @@ export class OutboxPublisher {
       if (result.count > 0) {
         this.metrics.increment('outbox.reclaimed');
         this.logger?.warn(`Reclaimed ${result.count} stale outbox events stuck in PROCESSING`);
+      }
+
+      // Phase 2: same lease recovery for coalesced work rows.
+      const db = this.db as any;
+      if (typeof db.timelineWork?.updateMany === 'function') {
+        const work = await db.timelineWork.updateMany({
+          where: { status: 'PROCESSING', claimExpiresAt: { lt: now } },
+          data: { status: 'PENDING', claimedBy: null, claimExpiresAt: null, updatedAt: now },
+        });
+        if (work.count > 0) {
+          this.logger?.warn(`Reclaimed ${work.count} stale timeline work rows stuck in PROCESSING`);
+        }
+        return result.count + work.count;
       }
       return result.count;
     } catch (err) {
@@ -393,9 +440,265 @@ export class OutboxPublisher {
    * Executes one polling and dispatch cycle.
    * Returns count of events processed.
    */
+  /**
+   * Phase 0 ops visibility: once a minute, log pending depth + oldest
+   * pending age (single cheap aggregate). This is the backlog signal —
+   * persistent growth here means the dispatcher, not Redis, is behind.
+   */
+  async logOpsSummary(): Promise<void> {
+    const now = Date.now();
+    if (now - this.lastOpsSummaryAt < OutboxPublisher.OPS_SUMMARY_INTERVAL_MS) return;
+    this.lastOpsSummaryAt = now;
+    try {
+      const rows = (await (this.db as any).outboxEvent.groupBy({
+        by: ['status'],
+        _count: { _all: true },
+        _min: { createdAt: true },
+        where: { status: { in: ['PENDING', 'PROCESSING', 'DEAD_LETTER'] } },
+      })) as Array<{ status: string; _count: { _all: number }; _min: { createdAt: Date | null } }>;
+      const summary = rows
+        .map((r) => {
+          const ageSec =
+            r._min.createdAt != null ? Math.round((now - new Date(r._min.createdAt).getTime()) / 1000) : -1;
+          return `${r.status}=${r._count._all}(oldest ${ageSec}s)`;
+        })
+        .join(' ');
+      this.logger?.info(`Outbox backlog: ${summary || 'empty'}`);
+    } catch (err) {
+      this.logger?.debug('Outbox backlog summary unavailable', { error: String(err) });
+    }
+  }
+
+  /**
+   * Phase 2 coalesced dispatch: claims due timeline_work rows (one per dirty
+   * user/day) and enqueues each as a single timeline-materialization job
+   * carrying the row's latest requested revisions. Enabled only when
+   * TIMELINE_WORK_DISPATCH=true; the legacy outbox path stays default.
+   */
+  private workDispatchEnabled(): boolean {
+    return process.env.TIMELINE_WORK_DISPATCH === 'true';
+  }
+
+  /**
+   * Phase 3: execute timeline work inline (no BullMQ/Redis) when
+   * TIMELINE_DIRECT_DISPATCH=true. Uses the same BaseWorker.run engine —
+   * validation, idempotency, locks, supersession, timeouts — with a
+   * process-local lock provider. Correct for a single publisher process;
+   * multi-process deployments must keep the queue path until a shared
+   * lock lands. A custom executor may be injected (tests do this).
+   */
+  private directDispatchEnabled(): boolean {
+    return process.env.TIMELINE_DIRECT_DISPATCH === 'true';
+  }
+
+  private async executeWorkDirectly(
+    payload: unknown,
+    opts: { jobId: string; correlationId: string; attempt: number; maxAttempts: number }
+  ): Promise<void> {
+    if (this.directExecutor) {
+      await this.directExecutor(payload, opts);
+      return;
+    }
+    if (!this.directLocks) this.directLocks = new InMemoryLockProvider();
+    if (!this.directWorker) this.directWorker = new TimelineWorker(this.db);
+    await this.directWorker.run(payload, {
+      jobId: opts.jobId,
+      correlationId: opts.correlationId,
+      attempt: opts.attempt,
+      maxAttempts: opts.maxAttempts,
+      idempotencyProvider: this.directLocks,
+      metrics: this.metrics,
+      logger: this.logger,
+    });
+    // run() resolves SUCCEEDED/SUPERSEDED or throws — both are terminal for
+    // the work row (obsolete work completing as SUPERSEDED is still done).
+  }
+
+  async dispatchTimelineWork(): Promise<number> {
+    const now = new Date();
+    const claimExpiresAt = new Date(now.getTime() + this.lockTimeoutMs);
+    const db = this.db as any;
+    if (typeof db.timelineWork?.findMany !== 'function') return 0;
+
+    const due = await db.timelineWork.findMany({
+      where: { status: 'PENDING', availableAt: { lte: now } },
+      orderBy: { createdAt: 'asc' },
+      take: this.batchSize,
+    });
+    let done = 0;
+    for (const row of due) {
+      const claimed = await db.timelineWork.updateMany({
+        where: { id: row.id, status: 'PENDING' },
+        data: {
+          status: 'PROCESSING',
+          claimedBy: this.publisherId,
+          claimExpiresAt,
+          updatedAt: now,
+        },
+      });
+      if (!claimed || claimed.count === 0) continue; // lost the race
+
+      const workPayload = {
+        userId: row.userId,
+        localDate: row.localDate,
+        reason: 'TELEMETRY_INGEST',
+        requestedRevision: {
+          observationRevision: row.requestedObservationRevision ?? 0,
+          ruleRevision: row.requestedRuleRevision ?? 0,
+          semanticVersion: '3b.0.1',
+        },
+        jobCorrelationId: `work-${row.id}`,
+        queuedAt: new Date().toISOString(),
+      };
+      const workJobId = createDeterministicJobId(
+        PRODUCTIVEHIX_QUEUES.TIMELINE_MATERIALIZATION,
+        `work-${row.id}`
+      );
+
+      try {
+        if (this.directDispatchEnabled()) {
+          await this.executeWorkDirectly(workPayload, {
+            jobId: workJobId,
+            correlationId: `work-${row.id}`,
+            attempt: (row.attempts ?? 0) + 1,
+            maxAttempts: row.maxAttempts ?? 5,
+          });
+        } else {
+          await this.queueManager.addJob(
+            PRODUCTIVEHIX_QUEUES.TIMELINE_MATERIALIZATION,
+            'timeline.work.requested',
+            workPayload,
+            { jobId: workJobId, timestamp: Date.now() }
+          );
+        }
+        await db.timelineWork.update({
+          where: { id: row.id },
+          data: {
+            status: 'COMPLETED',
+            claimedBy: null,
+            claimExpiresAt: null,
+            lastError: null,
+            updatedAt: new Date(),
+          },
+        });
+        this.metrics.increment('timeline.work_dispatched', {
+          queue: PRODUCTIVEHIX_QUEUES.TIMELINE_MATERIALIZATION,
+        });
+        done++;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (isInfrastructureError(err)) {
+          // Infra outage: park without consuming an attempt (same rule as outbox).
+          const backoffMs = Math.min(1000 * Math.pow(2, row.attempts ?? 0), 60_000);
+          await db.timelineWork.update({
+            where: { id: row.id },
+            data: {
+              status: 'PENDING',
+              availableAt: new Date(Date.now() + backoffMs),
+              lastError: `[infra] dispatch unavailable (attempts unchanged at ${row.attempts ?? 0}): ${message}`,
+              claimedBy: null,
+              claimExpiresAt: null,
+              updatedAt: new Date(),
+            },
+          });
+          this.logger?.warn(`Timeline work ${row.id} hit infrastructure outage; parked without consuming an attempt.`);
+        } else {
+          const attempts = (row.attempts ?? 0) + 1;
+          const maxAttempts = row.maxAttempts ?? 5;
+          if (attempts >= maxAttempts) {
+            await db.timelineWork.update({
+              where: { id: row.id },
+              data: {
+                status: 'DEAD_LETTER',
+                attempts,
+                lastError: `Exhausted work retries (${attempts}/${maxAttempts}): ${message}`,
+                claimedBy: null,
+                claimExpiresAt: null,
+                updatedAt: new Date(),
+              },
+            });
+            this.metrics.increment('timeline.work_failed', {
+              queue: PRODUCTIVEHIX_QUEUES.TIMELINE_MATERIALIZATION,
+            });
+            this.logger?.error(`Timeline work ${row.id} permanently failed -> DEAD_LETTER`, err);
+          } else {
+            const backoffMs = Math.min(1000 * Math.pow(2, row.attempts ?? 0), 60_000);
+            await db.timelineWork.update({
+              where: { id: row.id },
+              data: {
+                status: 'PENDING',
+                attempts,
+                availableAt: new Date(Date.now() + backoffMs),
+                lastError: message,
+                claimedBy: null,
+                claimExpiresAt: null,
+                updatedAt: new Date(),
+              },
+            });
+            this.logger?.warn(`Timeline work ${row.id} dispatch failed (attempt ${attempts}/${maxAttempts}).`);
+          }
+        }
+      }
+    }
+    return done;
+  }
+
+  /**
+   * Phase 4 scheduled retention: terminal outbox rows + completed work rows
+   * older than the horizon, plus expired non-active snapshots. Each step is
+   * independently guarded so a missing model (older clients, unit fakes)
+   * skips instead of failing the sweep.
+   */
+  async runRetentionCleanup(now = new Date()): Promise<void> {
+    if (this.cleanupIntervalMs <= 0) return;
+    if (now.getTime() - this.lastCleanupAt < this.cleanupIntervalMs) return;
+    this.lastCleanupAt = now.getTime();
+    try {
+      const pruned = await this.cleanupPublishedEvents(this.retentionMs);
+      if (pruned > 0) this.logger?.info(`Retention: pruned ${pruned} published outbox rows`);
+    } catch (err) {
+      this.logger?.warn('Retention: outbox cleanup failed', { error: String(err) });
+    }
+    try {
+      const db = this.db as any;
+      if (typeof db.timelineWork?.deleteMany === 'function') {
+        const cutoff = new Date(now.getTime() - this.retentionMs);
+        const pruned = await db.timelineWork.deleteMany({
+          where: { status: { in: ['COMPLETED', 'DEAD_LETTER'] }, updatedAt: { lt: cutoff } },
+        });
+        if (pruned.count > 0) this.logger?.info(`Retention: pruned ${pruned.count} terminal timeline work rows`);
+      }
+    } catch (err) {
+      this.logger?.warn('Retention: work cleanup failed', { error: String(err) });
+    }
+    try {
+      const db = this.db as any;
+      if (typeof db.$queryRaw === 'function') {
+        const pruned = await db.$queryRaw`
+          DELETE FROM "timeline_snapshots" WHERE "expires_at" < ${now}
+          AND "id" NOT IN (SELECT "active_snapshot_id" FROM "timeline_day_states" WHERE "active_snapshot_id" IS NOT NULL)`;
+        const count = Array.isArray(pruned) ? pruned.length : Number((pruned as any)?.count ?? 0);
+        if (count > 0) this.logger?.info(`Retention: pruned ${count} expired snapshots`);
+      }
+    } catch (err) {
+      this.logger?.warn('Retention: snapshot cleanup failed', { error: String(err) });
+    }
+  }
+
   async processNextBatch(): Promise<number> {
     // 1. Reclaim any stale crash artifacts
     await this.reclaimStaleProcessing();
+
+    // 1b. Periodic ops visibility (non-blocking cadence, cheap aggregate)
+    await this.logOpsSummary();
+
+    // 1c. Phase 2 coalesced path: dirty days first when enabled.
+    if (this.workDispatchEnabled()) {
+      await this.dispatchTimelineWork();
+    }
+
+    // 1d. Phase 4 scheduled retention (cadence-gated, cheap when idle).
+    await this.runRetentionCleanup();
 
     // 2. Claim pending batch
     const claimedEvents = await this.claimPendingEvents(this.batchSize);
@@ -451,7 +754,13 @@ export class OutboxPublisher {
     };
 
     scheduleNext();
-    this.logger?.info('OutboxPublisher started polling for events');
+    this.logger?.info(
+      `OutboxPublisher started polling for events (timeline dispatch: ${
+        this.directDispatchEnabled() ? 'direct-inline (no Redis)' : 'BullMQ queue'
+      }, work-table: ${
+        process.env.TIMELINE_WORK_DISPATCH === 'true' ? 'preferred' : 'observe-only'
+      })`
+    );
   }
 
   /**

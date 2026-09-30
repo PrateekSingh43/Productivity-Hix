@@ -8,11 +8,16 @@
 import { Queue, type JobsOptions, type QueueOptions } from 'bullmq';
 import type { Redis } from 'ioredis';
 import { validateJobPayload } from '@repo/validation';
+import {
+  type WorkerMetricsCollector,
+  noopMetricsCollector,
+} from '../shared/metrics';
 
 export interface QueueFactoryOptions {
   connection: Redis;
   prefix?: string;
   defaultJobOptions?: JobsOptions;
+  metrics?: WorkerMetricsCollector;
 }
 
 export const CANONICAL_JOB_OPTIONS: JobsOptions = {
@@ -91,8 +96,12 @@ export class QueueManager {
     // Validate payload against canonical schema before enqueueing
     validateJobPayload(queueName, data);
 
+    const metrics = this.options.metrics ?? noopMetricsCollector;
+    const startTime = Date.now();
     const queue = this.getQueue(queueName);
     const job = await queue.add(jobName, data, opts);
+    metrics.increment('queue.enqueued', { queue: queueName });
+    metrics.timing('queue.enqueue_latency', Date.now() - startTime, { queue: queueName });
     return job.id ?? jobName;
   }
 

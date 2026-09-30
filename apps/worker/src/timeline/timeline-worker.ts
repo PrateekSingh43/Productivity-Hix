@@ -28,6 +28,10 @@ import {
   type BlockEngineInput,
 } from "@repo/analytics";
 import { getDb, type Prisma } from "@repo/db";
+import {
+  type WorkerMetricsCollector,
+  noopMetricsCollector,
+} from "../shared/metrics";
 
 type Database = ReturnType<typeof getDb>;
 
@@ -51,7 +55,10 @@ export class TimelineWorker extends BaseWorker<TimelineMaterializationJobData, T
   readonly queueName = PRODUCTIVEHIX_QUEUES.TIMELINE_MATERIALIZATION;
   readonly defaultTimeoutMs = 120_000;
 
-  constructor(private readonly db: Database = getDb()) {
+  constructor(
+    private readonly db: Database = getDb(),
+    private readonly metrics: WorkerMetricsCollector = noopMetricsCollector
+  ) {
     super();
   }
 
@@ -77,14 +84,34 @@ export class TimelineWorker extends BaseWorker<TimelineMaterializationJobData, T
     }
 
     const requestedRevision = (p.revision ?? p.requestedRevision ?? {}) as Record<string, unknown>;
+    // Phase 1 fallback: producers on the current contract emit
+    // requestedRevision explicitly, but rows enqueued before the fix (or by
+    // any producer still on the old shape) carry flat sourceRevision /
+    // ruleRevision. Map those instead of defaulting to 0/0.
+    const fallbackObservation =
+      typeof requestedRevision.observationRevision === "number"
+        ? requestedRevision.observationRevision
+        : typeof p.sourceRevision === "number"
+          ? p.sourceRevision
+          : 0;
+    const fallbackRule =
+      typeof requestedRevision.ruleRevision === "number"
+        ? requestedRevision.ruleRevision
+        : typeof p.ruleRevision === "number"
+          ? p.ruleRevision
+          : 0;
+
+    // Phase 0 instrumentation: count every received job per (user, day) so the
+    // coalescing ratio (received vs executed) is observable.
+    this.metrics.increment('timeline.received', { queue: this.queueName });
 
     return {
       userId,
       localDate,
       reason: (p.reason as any) || "TELEMETRY_INGEST",
       requestedRevision: {
-        observationRevision: typeof requestedRevision.observationRevision === "number" ? requestedRevision.observationRevision : 0,
-        ruleRevision: typeof requestedRevision.ruleRevision === "number" ? requestedRevision.ruleRevision : 0,
+        observationRevision: fallbackObservation,
+        ruleRevision: fallbackRule,
         semanticVersion: typeof requestedRevision.semanticVersion === "string" ? requestedRevision.semanticVersion : "3b.0.1",
       },
       jobCorrelationId: (p.jobCorrelationId as string) || jobCorrelationId,
@@ -122,13 +149,27 @@ export class TimelineWorker extends BaseWorker<TimelineMaterializationJobData, T
 
   override async checkSuperseded(
     jobData: TimelineMaterializationJobData,
-    _context: WorkerExecutionContext
+    context: WorkerExecutionContext
   ): Promise<boolean> {
     const dayState = await this.db.timelineDayState.findUnique({
       where: { userId_localDate: { userId: jobData.userId, localDate: jobData.localDate } },
     });
 
     if (!dayState) return false;
+
+    // Phase 0 revision-skew probe: a zeroed requested revision against a day
+    // that already has revisions is the producer/consumer contract mismatch
+    // (producers emit sourceRevision; validate only reads revision/requestedRevision).
+    if (
+      jobData.requestedRevision.observationRevision === 0 &&
+      dayState.currentObservationRevision > 0
+    ) {
+      this.metrics.increment('timeline.revision_skew', { queue: this.queueName });
+      context.logger?.warn(
+        `Revision skew: job carries observationRevision=0 but day ${jobData.localDate} is at current=${dayState.currentObservationRevision}. ` +
+        `Producer/consumer revision contract mismatch — supersession below may misfire.`
+      );
+    }
 
     // Pre-execution supersession: If higher revision already materialized, job is obsolete
     if (
@@ -141,11 +182,36 @@ export class TimelineWorker extends BaseWorker<TimelineMaterializationJobData, T
     return false;
   }
 
+  /**
+   * Phase 4 hardening: a failed run must leave a visible FAILED state with
+   * the error recorded. Previously failures left the day stuck in
+   * MATERIALIZING forever (indistinguishable from a running job).
+   */
+  override async onFailure(
+    data: TimelineMaterializationJobData,
+    error: Error
+  ): Promise<void> {
+    try {
+      await this.db.timelineDayState.update({
+        where: { userId_localDate: { userId: data.userId, localDate: data.localDate } },
+        data: {
+          status: "FAILED",
+          lastError: `${error.name ?? "Error"}: ${error.message ?? String(error)}`.slice(0, 500),
+          lastAttemptedAt: new Date(),
+        },
+      });
+    } catch {
+      // Failure bookkeeping must never throw (day may not exist in tests).
+    }
+  }
+
   async execute(
     jobData: TimelineMaterializationJobData,
     context: WorkerExecutionContext
   ): Promise<TimelineWorkerResult> {
     const { userId, localDate } = jobData;
+    const executeStart = Date.now();
+    this.metrics.increment('timeline.executed', { queue: this.queueName });
 
     // 1. Fetch user timezone preference
     const userPref = await this.db.userPreference.findUnique({
@@ -406,6 +472,9 @@ export class TimelineWorker extends BaseWorker<TimelineMaterializationJobData, T
     ) {
       // Source mutated mid-execution: discard snapshot and report SUPERSEDED
       context.logger?.info("Day state mutated during execution. Discarding stale snapshot.");
+      this.metrics.timing('timeline.materialization_duration', Date.now() - executeStart, {
+        queue: this.queueName,
+      });
       return {
         snapshotId: "",
         status: "SUPERSEDED",
@@ -413,68 +482,59 @@ export class TimelineWorker extends BaseWorker<TimelineMaterializationJobData, T
       };
     }
 
-    // 10. Persist TimelineSnapshot in PostgreSQL
-    const snapshot = await this.db.timelineSnapshot.create({
-      data: {
-        userId,
-        localDate,
-        dayStateId: dayState.id,
-        snapshotGeneration: (dayState.materializedObservationRevision || 0) + 1,
-        status: "COMPLETE",
-        observationRevision: dayState.currentObservationRevision,
-        ruleRevision: dayState.currentRuleRevision,
-        semanticEngineVersion: "3b.0.1",
-        summary: summary as any,
-        blocksJson: formattedBlocks as any,
-        gapsJson: [] as any,
-        blockCount: formattedBlocks.length,
-        gapCount: 0,
-        startOfDay,
-        endOfDay,
-        wallClockDurationMs: totalTrackedMs,
-        observedActiveDurationMs: focusedMs,
-        quietActivityDurationMs: 0,
-        prolongedAbsenceDurationMs: breakMs,
-        machineUnavailableDurationMs: 0,
-        coverageGapDurationMs: 0,
-        materializedAt: new Date(),
-      },
-    });
-
-    // 11. Atomically activate snapshot on TimelineDayState
-    await this.db.timelineDayState.update({
-      where: { id: dayState.id },
-      data: {
-        activeSnapshotId: snapshot.id,
-        materializedObservationRevision: dayState.currentObservationRevision,
-        materializedRuleRevision: dayState.currentRuleRevision,
-        status: "READY",
-        lastMaterializedAt: new Date(),
-        lastError: null,
-      },
-    });
-
-    // 12. Emit outbox event for downstream workers
-    try {
-      await this.db.outboxEvent.create({
+    // 10+11. Persist + activate in ONE transaction (Phase 4 hardening).
+    // Previously two sequential writes: a crash between them left orphan
+    // snapshots or stuck MATERIALIZING days. Snapshots carry a 30-day TTL
+    // (retention cleanup deletes expired non-active rows).
+    const snapshot = await this.db.$transaction(async (tx: any) => {
+      const created = await tx.timelineSnapshot.create({
         data: {
-          eventType: "timeline.window.materialized",
-          aggregateType: "TimelineDay",
-          aggregateId: `${userId}:${localDate}`,
-          payload: {
-            userId,
-            localDate,
-            snapshotId: snapshot.id,
-            observationRevision: dayState.currentObservationRevision,
-            ruleRevision: dayState.currentRuleRevision,
-          },
-          correlationId: jobData.jobCorrelationId,
-          status: "PENDING",
+          userId,
+          localDate,
+          dayStateId: dayState.id,
+          snapshotGeneration: (dayState.materializedObservationRevision || 0) + 1,
+          status: "COMPLETE",
+          observationRevision: dayState.currentObservationRevision,
+          ruleRevision: dayState.currentRuleRevision,
+          semanticEngineVersion: "3b.0.1",
+          summary: summary as any,
+          blocksJson: formattedBlocks as any,
+          gapsJson: [] as any,
+          blockCount: formattedBlocks.length,
+          gapCount: 0,
+          startOfDay,
+          endOfDay,
+          wallClockDurationMs: totalTrackedMs,
+          observedActiveDurationMs: focusedMs,
+          quietActivityDurationMs: 0,
+          prolongedAbsenceDurationMs: breakMs,
+          machineUnavailableDurationMs: 0,
+          coverageGapDurationMs: 0,
+          materializedAt: new Date(),
+          expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
         },
       });
-    } catch {
-      // Outbox creation failure should not abort successful snapshot activation
-    }
+
+      await tx.timelineDayState.update({
+        where: { id: dayState.id },
+        data: {
+          activeSnapshotId: created.id,
+          materializedObservationRevision: dayState.currentObservationRevision,
+          materializedRuleRevision: dayState.currentRuleRevision,
+          status: "READY",
+          lastMaterializedAt: new Date(),
+          lastError: null,
+        },
+      });
+
+      return created;
+    });
+
+    // 12. Downstream fan-out (Phase 5): REMOVED. The former
+    // 'timeline.window.materialized' outbox event routed to the
+    // analytical-projection queue, which has no registered consumer — every
+    // materialization paid one outbox row + one queue job into the void.
+    // Pattern analysis is manually triggered; nothing consumes this event.
 
     return {
       snapshotId: snapshot.id,

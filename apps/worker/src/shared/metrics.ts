@@ -56,12 +56,18 @@ export type InfrastructureMetricEvent =
   | 'outbox.reclaimed'
   | 'queue.enqueued'
   | 'queue.enqueue_latency'
-  | 'outbox.latency';
+  | 'outbox.latency'
+  | 'timeline.received'
+  | 'timeline.executed'
+  | 'timeline.revision_skew'
+  | 'timeline.work_dispatched'
+  | 'timeline.work_failed';
 
 export type InfrastructureTimingEvent =
   | 'job.duration'
   | 'queue.enqueue_latency'
-  | 'outbox.latency';
+  | 'outbox.latency'
+  | 'timeline.materialization_duration';
 
 export interface WorkerMetricsCollector {
   increment(metric: InfrastructureMetricEvent, tags?: Record<string, string | number>): void;

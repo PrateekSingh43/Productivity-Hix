@@ -5,4 +5,6 @@
 
 export * from './timeline';
 export * from './pattern';
-export * from './insight';
+// NOTE (Phase 5): processors/insight.ts (Phase-0 stub that only threw) was
+// deleted. Insight composition lives in packages/analytics + the API service;
+// no insight worker is registered, so no processor adapter is needed.

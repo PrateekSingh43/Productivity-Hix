@@ -44,7 +44,7 @@ export async function bootstrap(): Promise<BootstrapResult> {
 
   // 2. Metrics & Queue Infrastructure
   const metrics = new MemoryWorkerMetricsCollector();
-  const queueManager = new QueueManager({ connection: redis });
+  const queueManager = new QueueManager({ connection: redis, metrics });
 
   // 3. Worker Runtime Layer
   const runtime = new WorkerRuntime({
@@ -64,7 +64,7 @@ export async function bootstrap(): Promise<BootstrapResult> {
   });
 
   // 5. Register domain workers, then start execution in deterministic order
-  runtime.registerWorker(new TimelineWorker(db));
+  runtime.registerWorker(new TimelineWorker(db, metrics));
   runtime.registerWorker(new PatternWorker());
 
   await runtime.start();

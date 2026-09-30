@@ -193,6 +193,31 @@ describe("TimelineWorker", () => {
       expect(validated.jobCorrelationId).toBe("corr-xyz");
     });
 
+    it("maps legacy flat sourceRevision/ruleRevision onto requestedRevision (Phase 1 fallback)", () => {
+      const validated = worker.validate({
+        userId: USER,
+        localDate: DATE,
+        sourceRevision: 7,
+        ruleRevision: 2,
+      });
+
+      expect(validated.requestedRevision.observationRevision).toBe(7);
+      expect(validated.requestedRevision.ruleRevision).toBe(2);
+    });
+
+    it("prefers explicit requestedRevision over legacy flat fields", () => {
+      const validated = worker.validate({
+        userId: USER,
+        localDate: DATE,
+        requestedRevision: { observationRevision: 9, ruleRevision: 3, semanticVersion: "3b.0.1" },
+        sourceRevision: 1,
+        ruleRevision: 0,
+      });
+
+      expect(validated.requestedRevision.observationRevision).toBe(9);
+      expect(validated.requestedRevision.ruleRevision).toBe(3);
+    });
+
     it("throws WorkerValidationError on invalid payloads", () => {
       expect(() => worker.validate(null)).toThrow(WorkerValidationError);
       expect(() => worker.validate({})).toThrow(WorkerValidationError);
@@ -336,10 +361,50 @@ describe("TimelineWorker", () => {
       expect(dayState.activeSnapshotId).toBe(snapshot.id);
       expect(dayState.materializedObservationRevision).toBe(1);
 
-      // Verify outbox event emitted
-      expect(fake.outboxEvents.length).toBe(1);
-      expect(fake.outboxEvents[0].eventType).toBe("timeline.window.materialized");
-      expect(fake.outboxEvents[0].payload.snapshotId).toBe(snapshot.id);
+      // Phase 5: no downstream outbox event (consumerless analytical-projection
+      // queue deleted from the hot path) — activation alone is the contract.
+      expect(fake.outboxEvents.length).toBe(0);
+    });
+
+    it("persists snapshot TTL on create (Phase 4 retention)", async () => {
+      await worker.execute(
+        {
+          userId: USER,
+          localDate: DATE,
+          reason: "TELEMETRY_INGEST",
+          requestedRevision: { observationRevision: 1, ruleRevision: 0, semanticVersion: "3b.0.1" },
+          jobCorrelationId: "corr-1",
+          queuedAt: new Date().toISOString(),
+        },
+        ctx
+      );
+
+      expect(fake.snapshots.length).toBe(1);
+      const expiresAt = new Date(fake.snapshots[0].expiresAt).getTime();
+      expect(expiresAt).toBeGreaterThan(Date.now() + 29 * 24 * 60 * 60 * 1000);
+    });
+
+    it("marks the day FAILED with the error recorded on failure (Phase 4)", async () => {
+      fake.setDayState(USER, DATE, {
+        status: "MATERIALIZING",
+        currentObservationRevision: 2,
+      });
+
+      await worker.onFailure(
+        {
+          userId: USER,
+          localDate: DATE,
+          reason: "TELEMETRY_INGEST",
+          requestedRevision: { observationRevision: 2, ruleRevision: 0, semanticVersion: "3b.0.1" },
+          jobCorrelationId: "corr-1",
+          queuedAt: new Date().toISOString(),
+        },
+        new Error("snapshot write blew up")
+      );
+
+      const dayState = fake.dayStates.get(`${USER}:${DATE}`);
+      expect(dayState.status).toBe("FAILED");
+      expect(String(dayState.lastError)).toContain("snapshot write blew up");
     });
 
     it("materializes raw activity rows into blocks and persists snapshot", async () => {
