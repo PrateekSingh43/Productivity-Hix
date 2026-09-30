@@ -296,6 +296,8 @@ export function composeInsight(input: InsightCompositionInput): InsightOutput {
   };
 }
 
+export * from "./envelope";
+
 export function composeInsights(inputs: readonly InsightCompositionInput[]): InsightOutput[] {
   const outputs = inputs.map(composeInsight);
   const key = (output: InsightOutput) => JSON.stringify([
