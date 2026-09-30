@@ -103,7 +103,7 @@ describe("Patterns and Insights orchestration contracts", () => {
     const built = fixture();
     // The shared fixture carries an authoritative plannedStart; strip it so
     // this case exercises the genuinely plan-less population.
-    built.db.task.findMany = async () => [{ id: "task-1", completedAt: null, plannedStart: null }];
+    built.db.task.findMany = (async () => [{ id: "task-1", completedAt: null, plannedStart: null }]) as any;
     const result = await runPatternPipeline(userId, window);
     const d4 = result.diagnostics.perDetector.find((item) => item.identity === "schedule_variance")!;
     expect(d4.availability).toBe("NOT_AVAILABLE");

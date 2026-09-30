@@ -97,6 +97,7 @@ export const handleTelemetryBatch: RequestHandler = async (request, response, ne
       `corr-${Date.now()}-${Math.random().toString(36).substring(7)}`;
 
     let actuallyInsertedCount = 0;
+    let lastInsertedRow: { id: string; externalId: string; timestamp: Date; duration: number } | null = null;
 
     await prisma.$transaction(async (tx) => {
       if (updateEvents.length > 0) {
@@ -161,6 +162,7 @@ export const handleTelemetryBatch: RequestHandler = async (request, response, ne
       }
 
       actuallyInsertedCount = insertedRows.length;
+      lastInsertedRow = insertedRows.length > 0 ? insertedRows[insertedRows.length - 1]! : null;
 
       // ACTUAL-MUTATION RULE:
       // A Timeline revision may advance ONLY for an authoritative database mutation.
@@ -229,6 +231,41 @@ export const handleTelemetryBatch: RequestHandler = async (request, response, ne
           },
         });
 
+        // Phase 2 coalescing: one durable work row per (user, day), upserted
+        // in the same TX. N ticks revive the same row with the latest
+        // revision instead of creating N work items. Always written —
+        // the dispatcher (not the flag) decides whether it drives execution.
+        await tx.timelineWork.upsert({
+          where: { userId_localDate: { userId, localDate } },
+          create: {
+            userId,
+            localDate,
+            status: "PENDING",
+            requestedObservationRevision: dayState.currentObservationRevision,
+            requestedRuleRevision: dayState.currentRuleRevision,
+            attempts: 0,
+            maxAttempts: 5,
+            availableAt: new Date(),
+          },
+          update: {
+            status: "PENDING",
+            requestedObservationRevision: dayState.currentObservationRevision,
+            requestedRuleRevision: dayState.currentRuleRevision,
+            attempts: 0,
+            maxAttempts: 5,
+            availableAt: new Date(),
+            claimedBy: null,
+            claimExpiresAt: null,
+            lastError: null,
+            updatedAt: new Date(),
+          },
+        });
+
+        // With work-table dispatch enabled the work row above IS the durable
+        // promise; skip the legacy per-batch outbox row (dual-write stays on
+        // by default so counts remain comparable and rollback is a flag flip).
+        if (process.env.TIMELINE_WORK_DISPATCH === "true") continue;
+
         await tx.outboxEvent.create({
           data: {
             eventType: "telemetry.ingested",
@@ -238,12 +275,24 @@ export const handleTelemetryBatch: RequestHandler = async (request, response, ne
               userId,
               localDate,
               sourceRevision: dayState.currentObservationRevision,
+              // Phase 1 revision contract: the worker reads
+              // requestedRevision.{observationRevision,ruleRevision}. Emit it
+              // explicitly (post-increment values just upserted above) so
+              // supersession/idempotency compare true revisions, not 0/0.
+              // sourceRevision/ruleRevision kept for backward compatibility.
+              requestedRevision: {
+                observationRevision: dayState.currentObservationRevision,
+                ruleRevision: dayState.currentRuleRevision,
+                semanticVersion: "3b.0.1",
+              },
               scope: {
                 start: scope.start.toISOString(),
                 end: scope.end.toISOString(),
               },
               reason: "telemetry_ingested",
               ruleRevision: dayState.currentRuleRevision,
+              jobCorrelationId: correlationId,
+              queuedAt: new Date().toISOString(),
             },
             correlationId,
             causationId: null,
@@ -281,7 +330,10 @@ export const handleTelemetryBatch: RequestHandler = async (request, response, ne
       }
     }
 
-    if (newEvents.length > 0) {
+    // Phase 5 phantom-row fix: gate post-commit side effects on rows PG
+    // actually inserted (skipDuplicates losers must not reach DuckDB or the
+    // live socket), and report the accepted count the response uses.
+    if (actuallyInsertedCount > 0) {
       try {
         const duckdb = await getDuckDB();
         await ingestTelemetryEvents(duckdb, userId, newEvents);
@@ -290,8 +342,12 @@ export const handleTelemetryBatch: RequestHandler = async (request, response, ne
         console.error("[DuckDB Ingest Projection Error]: Projection invalidated:", duckdbErr);
       }
 
-      // Broadcast live telemetry update to active Web UI clients
-      const latestEvent = newEvents[newEvents.length - 1];
+      // Broadcast live telemetry update to active Web UI clients.
+      // Prefer the latest row PG actually inserted over the latest candidate.
+      const latestEvent =
+        (lastInsertedRow &&
+          newEvents.find((e) => e.eventId === (lastInsertedRow as { externalId: string }).externalId)) ||
+        newEvents[newEvents.length - 1];
       wsManager.broadcastToUser(userId, {
         type: "telemetry:event",
         source: batch.source,
@@ -301,7 +357,7 @@ export const handleTelemetryBatch: RequestHandler = async (request, response, ne
       wsManager.broadcastToUser(userId, {
         type: "device:sync",
         source: batch.source,
-        accepted: newEvents.length,
+        accepted: actuallyInsertedCount + updateEvents.length,
         timestamp: new Date().toISOString(),
       });
     }

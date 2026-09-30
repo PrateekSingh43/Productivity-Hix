@@ -33,6 +33,15 @@ export function setTestDb(mockDb: any) {
         create: async () => ({ id: "mock-outbox-id" }),
       };
     }
+    if (!(mockDb as any).timelineWork) {
+      (mockDb as any).timelineWork = {
+        upsert: async () => ({ id: "mock-work-id", status: "PENDING" }),
+        findMany: async () => [],
+        updateMany: async () => ({ count: 0 }),
+        update: async () => ({}),
+        deleteMany: async () => ({ count: 0 }),
+      };
+    }
   }
   testDbOverride = mockDb as Database;
 }

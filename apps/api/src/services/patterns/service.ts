@@ -1,8 +1,8 @@
 import type {
-  AnalyticalWindow, BehavioralPatternOutput, CheckIn, EarlySignal, EvidenceTimeline, WorkSession,
+  AnalyticalWindow, BehavioralPatternOutput, CheckIn, EarlySignal, EvidenceTimeline, InsightOutput, WorkSession,
 } from "@repo/types";
 import { resolveProductiveDay } from "@repo/types";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   collectEarlySignals,
   composeInsights,
@@ -424,6 +424,63 @@ export async function runPatternPipeline(userId: string, window: AnalyticalWindo
   });
 }
 
+function insightContentHash(userId: string, window: AnalyticalWindow, insight: InsightOutput): string {
+  const patternIds = insight.inputs
+    .flatMap((ref) => ("patternId" in ref && ref.patternId ? [ref.patternId] : []))
+    .sort();
+  return createHash("sha256")
+    .update(JSON.stringify([userId, window.start, window.end, insight.status, insight.claim, patternIds]))
+    .digest("hex");
+}
+
+/**
+ * Phase 6 durability: persists DETECTED insights as immutable rows,
+ * deduplicated by content hash so re-running a window never duplicates.
+ * Guarded for clients without the Insight model (older generated clients,
+ * unit fakes) — returns 0 instead of throwing.
+ */
+export async function persistInsightsForWindow(
+  userId: string,
+  window: AnalyticalWindow,
+  insights: InsightOutput[],
+  createdFromRunId: string | null = null
+): Promise<number> {
+  const client = getDb() as any;
+  if (typeof client.insight?.findFirst !== "function") return 0;
+  let written = 0;
+  for (const insight of insights) {
+    if (insight.status !== "DETECTED") continue;
+    const contentHash = insightContentHash(userId, window, insight);
+    const existing = await client.insight.findFirst({
+      where: { userId, contentHash },
+      select: { id: true },
+    });
+    if (existing) continue;
+    const patternIds = [
+      ...new Set(
+        insight.inputs.flatMap((ref) => ("patternId" in ref && ref.patternId ? [ref.patternId] : []))
+      ),
+    ].sort();
+    await client.insight.create({
+      data: {
+        userId,
+        windowStart: new Date(window.start),
+        windowEnd: new Date(window.end),
+        contentHash,
+        patternIds,
+        claim: insight.claim,
+        claimLevel: insight.claimLevel,
+        headline: insight.headline ?? null,
+        supportingLine: insight.supportingLine ?? null,
+        status: insight.status,
+        createdFromRunId,
+      },
+    });
+    written++;
+  }
+  return written;
+}
+
 export async function runInsightPipeline(userId: string, window: AnalyticalWindow): Promise<InsightsResponse> {
   const data = await readData(userId, window);
   const result = evaluatePatterns({
@@ -452,6 +509,14 @@ export async function runInsightPipeline(userId: string, window: AnalyticalWindo
   const inputs = (result.patterns as any[]).map((pattern) => ({ patterns: [{ pattern }], reflections, outcomes: data.outcomes, window }));
   const composed = composeInsights(inputs.length ? inputs : [{ patterns: [], reflections, outcomes: data.outcomes, window }]);
   const insights = composed.filter((insight) => insight.status === "DETECTED");
+  // Phase 6 durability: persist DETECTED insights (hash-deduped) so they
+  // survive beyond this response. Best-effort by design — persistence must
+  // never fail the read.
+  try {
+    await persistInsightsForWindow(userId, window, insights);
+  } catch (err) {
+    console.error("[Insights] persistence failed, serving computed result:", err instanceof Error ? err.message : String(err));
+  }
   return { state: insights.length ? "ok" : result.state === "ok" || result.state === "no-findings" ? "no-findings" : result.state,
     window, insights, diagnostics: result.diagnostics };
 }

@@ -18,6 +18,7 @@ describe("Timeline Part A: Telemetry Ingestion, Revisions & Concurrent Duplicate
   it("Scenario 6: Telemetry insert in user timezone advances correct local day observation revision", async () => {
     const upsertedDayStates: any[] = [];
     const createdOutboxEvents: any[] = [];
+    const upsertedWork: any[] = [];
 
     const mockDb: any = {
       userPreference: {
@@ -53,6 +54,12 @@ describe("Timeline Part A: Telemetry Ingestion, Revisions & Concurrent Duplicate
         create: vi.fn().mockImplementation(({ data }) => {
           createdOutboxEvents.push(data);
           return Promise.resolve({ id: "outbox_001", ...data });
+        }),
+      },
+      timelineWork: {
+        upsert: vi.fn().mockImplementation(({ create }) => {
+          upsertedWork.push(create);
+          return Promise.resolve({ id: "work_001", ...create });
         }),
       },
       $transaction: vi.fn().mockImplementation(async (callback: any) => callback(mockDb)),
@@ -92,6 +99,17 @@ describe("Timeline Part A: Telemetry Ingestion, Revisions & Concurrent Duplicate
     expect(createdOutboxEvents).toHaveLength(1);
     expect(createdOutboxEvents[0].eventType).toBe("telemetry.ingested");
     expect(createdOutboxEvents[0].payload.localDate).toBe("2026-09-23");
+    // Phase 2 coalescing: exactly one work row for the single touched day.
+    expect(upsertedWork).toHaveLength(1);
+    // Phase 1 revision contract: the worker reads requestedRevision, so the
+    // producer must emit the post-increment values explicitly.
+    expect(createdOutboxEvents[0].payload.requestedRevision).toEqual({
+      observationRevision: 1,
+      ruleRevision: 0,
+      semanticVersion: "3b.0.1",
+    });
+    expect(typeof createdOutboxEvents[0].payload.jobCorrelationId).toBe("string");
+    expect(typeof createdOutboxEvents[0].payload.queuedAt).toBe("string");
   });
 
   it("Scenario 7: Pure duplicate batch (actual mutations = 0) does NOT advance revision or emit outbox event", async () => {
@@ -178,6 +196,9 @@ describe("Timeline Part A: Telemetry Ingestion, Revisions & Concurrent Duplicate
           return Promise.resolve(state);
         }),
       },
+      timelineWork: {
+        upsert: vi.fn().mockResolvedValue({ id: "work_001" }),
+      },
       outboxEvent: {
         create: vi.fn().mockImplementation(({ data }) => {
           createdOutboxEvents.push(data);
@@ -259,6 +280,9 @@ describe("Timeline Part A: Telemetry Ingestion, Revisions & Concurrent Duplicate
           return Promise.resolve(state);
         }),
       },
+      timelineWork: {
+        upsert: vi.fn().mockResolvedValue({ id: "work_001" }),
+      },
       outboxEvent: {
         create: vi.fn().mockResolvedValue({ id: "outbox_001" }),
       },
@@ -319,6 +343,9 @@ describe("Timeline Part A: Telemetry Ingestion, Revisions & Concurrent Duplicate
           return Promise.resolve({ currentObservationRevision: 1 });
         }),
       },
+      timelineWork: {
+        upsert: vi.fn().mockResolvedValue({ id: "work_001" }),
+      },
       outboxEvent: { create: vi.fn().mockResolvedValue({}) },
       $transaction: vi.fn().mockImplementation(async (callback: any) => callback(mockDb1)),
     };
@@ -370,6 +397,9 @@ describe("Timeline Part A: Telemetry Ingestion, Revisions & Concurrent Duplicate
           upsertedDayStates2.push(where.userId_localDate.localDate);
           return Promise.resolve({ currentObservationRevision: 1 });
         }),
+      },
+      timelineWork: {
+        upsert: vi.fn().mockResolvedValue({ id: "work_001" }),
       },
       outboxEvent: { create: vi.fn().mockResolvedValue({}) },
       $transaction: vi.fn().mockImplementation(async (callback: any) => callback(mockDb2)),
@@ -429,6 +459,9 @@ describe("Timeline Part A: Telemetry Ingestion, Revisions & Concurrent Duplicate
           upsertedDayStates.push(where.userId_localDate.localDate);
           return Promise.resolve({ currentObservationRevision: 2 });
         }),
+      },
+      timelineWork: {
+        upsert: vi.fn().mockResolvedValue({ id: "work_001" }),
       },
       outboxEvent: {
         create: vi.fn().mockResolvedValue({}),

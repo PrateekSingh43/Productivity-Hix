@@ -18,6 +18,7 @@ describe("Timeline Part A: Rule Effective Scope & Non-Destructive Invalidation",
   it("Scenario 12 & 13: Global rule creation marks bounded retention window STALE and emits rule.changed events", async () => {
     const upsertedDayStates: any[] = [];
     const createdOutboxEvents: any[] = [];
+    const upsertedWork: any[] = [];
 
     const mockDb: any = {
       userPreference: {
@@ -39,6 +40,12 @@ describe("Timeline Part A: Rule Effective Scope & Non-Destructive Invalidation",
           };
           upsertedDayStates.push(state);
           return Promise.resolve(state);
+        }),
+      },
+      timelineWork: {
+        upsert: vi.fn().mockImplementation(({ create }) => {
+          upsertedWork.push(create);
+          return Promise.resolve({ id: "work_001", ...create });
         }),
       },
       outboxEvent: {
@@ -79,6 +86,13 @@ describe("Timeline Part A: Rule Effective Scope & Non-Destructive Invalidation",
       expect(ev.payload.reason).toBe("rule_changed");
     }
 
+    // Phase 2 coalescing: one work row per touched day, carrying the latest rule revision.
+    expect(upsertedWork).toHaveLength(14);
+    for (const w of upsertedWork) {
+      expect(w.status).toBe("PENDING");
+      expect(w.requestedRuleRevision).toBe(1);
+    }
+
     // Invariant: Non-destructive! No TemporalActivityBlock rows are deleted synchronously
     expect(mockDb.temporalActivityBlock.deleteMany).not.toHaveBeenCalled();
   });
@@ -105,6 +119,9 @@ describe("Timeline Part A: Rule Effective Scope & Non-Destructive Invalidation",
           upsertedDayStates.push(state);
           return Promise.resolve(state);
         }),
+      },
+      timelineWork: {
+        upsert: vi.fn().mockResolvedValue({ id: "work_001" }),
       },
       outboxEvent: {
         create: vi.fn().mockImplementation(({ data }) => {

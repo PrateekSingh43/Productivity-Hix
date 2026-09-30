@@ -59,6 +59,35 @@ async function emitGlobalRuleChangedTx(
       },
     });
 
+    // Phase 2 coalescing: same per-(user, day) work row as telemetry.ts.
+    await tx.timelineWork.upsert({
+      where: { userId_localDate: { userId: params.userId, localDate } },
+      create: {
+        userId: params.userId,
+        localDate,
+        status: "PENDING",
+        requestedObservationRevision: dayState.currentObservationRevision,
+        requestedRuleRevision: dayState.currentRuleRevision,
+        attempts: 0,
+        maxAttempts: 5,
+        availableAt: now,
+      },
+      update: {
+        status: "PENDING",
+        requestedObservationRevision: dayState.currentObservationRevision,
+        requestedRuleRevision: dayState.currentRuleRevision,
+        attempts: 0,
+        maxAttempts: 5,
+        availableAt: now,
+        claimedBy: null,
+        claimExpiresAt: null,
+        lastError: null,
+        updatedAt: now,
+      },
+    });
+
+    if (process.env.TIMELINE_WORK_DISPATCH === "true") continue;
+
     await tx.outboxEvent.create({
       data: {
         eventType: "rule.changed",
@@ -68,12 +97,21 @@ async function emitGlobalRuleChangedTx(
           userId: params.userId,
           localDate,
           sourceRevision: dayState.currentObservationRevision,
+          // Phase 1 revision contract: explicit requestedRevision so the
+          // worker compares true revisions (see telemetry.ts).
+          requestedRevision: {
+            observationRevision: dayState.currentObservationRevision,
+            ruleRevision: dayState.currentRuleRevision,
+            semanticVersion: "3b.0.1",
+          },
           scope: {
             start: dayInterval.startIso,
             end: dayInterval.endIso,
           },
           reason: "rule_changed",
           ruleRevision: dayState.currentRuleRevision,
+          jobCorrelationId: params.correlationId,
+          queuedAt: now.toISOString(),
         },
         correlationId: params.correlationId,
         causationId: null,
@@ -136,6 +174,35 @@ async function emitOverrideRuleChangedTx(
       },
     });
 
+    // Phase 2 coalescing: same per-(user, day) work row as telemetry.ts.
+    await tx.timelineWork.upsert({
+      where: { userId_localDate: { userId: params.userId, localDate } },
+      create: {
+        userId: params.userId,
+        localDate,
+        status: "PENDING",
+        requestedObservationRevision: dayState.currentObservationRevision,
+        requestedRuleRevision: dayState.currentRuleRevision,
+        attempts: 0,
+        maxAttempts: 5,
+        availableAt: now,
+      },
+      update: {
+        status: "PENDING",
+        requestedObservationRevision: dayState.currentObservationRevision,
+        requestedRuleRevision: dayState.currentRuleRevision,
+        attempts: 0,
+        maxAttempts: 5,
+        availableAt: now,
+        claimedBy: null,
+        claimExpiresAt: null,
+        lastError: null,
+        updatedAt: now,
+      },
+    });
+
+    if (process.env.TIMELINE_WORK_DISPATCH === "true") continue;
+
     await tx.outboxEvent.create({
       data: {
         eventType: "rule.changed",
@@ -145,9 +212,18 @@ async function emitOverrideRuleChangedTx(
           userId: params.userId,
           localDate,
           sourceRevision: dayState.currentObservationRevision,
+          // Phase 1 revision contract: explicit requestedRevision so the
+          // worker compares true revisions (see telemetry.ts).
+          requestedRevision: {
+            observationRevision: dayState.currentObservationRevision,
+            ruleRevision: dayState.currentRuleRevision,
+            semanticVersion: "3b.0.1",
+          },
           scope,
           reason: "rule_changed",
           ruleRevision: dayState.currentRuleRevision,
+          jobCorrelationId: params.correlationId,
+          queuedAt: now.toISOString(),
         },
         correlationId: params.correlationId,
         causationId: null,
