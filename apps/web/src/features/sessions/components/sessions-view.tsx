@@ -28,6 +28,7 @@ import type { WorkSession, SessionRangePreset, SessionListFilters } from "../typ
 import type { Task } from "@repo/types";
 import { format } from "date-fns";
 import { resolveSessionStartInput } from "../lib/session-start";
+import { resolveSessionFilters } from "../lib/session-filters";
 
 const RANGE_OPTIONS: { id: SessionRangePreset; label: string }[] = [
   { id: "today", label: "Today" },
@@ -48,34 +49,10 @@ export function SessionsView() {
   const [visibleDaysCount, setVisibleDaysCount] = useState(15);
 
   // Compute date filter boundary based on rangePreset
-  const activeFilters = useMemo<SessionListFilters>(() => {
-    const filters: SessionListFilters = {
-      rangePreset,
-      limit: rangePreset === "all" ? 500 : 200,
-    };
-
-    if (selectedTaskId !== "all") {
-      filters.taskId = selectedTaskId;
-    }
-
-    if (searchQuery.trim()) {
-      filters.search = searchQuery.trim();
-    }
-
-    const now = new Date();
-    if (rangePreset === "today") {
-      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-      filters.from = startOfDay.toISOString();
-    } else if (rangePreset === "7d") {
-      filters.from = new Date(now.getTime() - 7 * 86400000).toISOString();
-    } else if (rangePreset === "30d") {
-      filters.from = new Date(now.getTime() - 30 * 86400000).toISOString();
-    } else if (rangePreset === "90d") {
-      filters.from = new Date(now.getTime() - 90 * 86400000).toISOString();
-    }
-
-    return filters;
-  }, [rangePreset, selectedTaskId, searchQuery]);
+  const activeFilters = useMemo<SessionListFilters>(
+    () => resolveSessionFilters(rangePreset, selectedTaskId, searchQuery),
+    [rangePreset, selectedTaskId, searchQuery]
+  );
 
   // 2. Data fetching
   const { data: tasks = [] } = useQuery(taskQueries.list());
@@ -357,92 +334,6 @@ export function SessionsView() {
         />
       </Section>
 
-      {/* 2. DYNAMIC FILTER CONTROLS & RANGE SELECTOR */}
-      <Section>
-        <div className="rounded-xl border border-border-subtle bg-bg-card p-4 space-y-3">
-          <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
-            {/* Range Preset Pills */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0">
-              <span className="text-xs text-text-muted flex items-center gap-1 mr-1 shrink-0 font-medium">
-                <Calendar size={13} />
-                <span>Range:</span>
-              </span>
-              {RANGE_OPTIONS.map((opt) => (
-                <button
-                  key={opt.id}
-                  type="button"
-                  onClick={() => {
-                    setRangePreset(opt.id);
-                    setVisibleDaysCount(15);
-                  }}
-                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer shrink-0 ${
-                    rangePreset === opt.id
-                      ? "bg-text-primary text-bg-default font-semibold shadow-xs"
-                      : "bg-bg-secondary text-text-muted hover:text-text-primary border border-border-subtle hover:border-border-hover"
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Task Filter & Search */}
-            <div className="flex flex-wrap items-center gap-2">
-              {/* Task Selector */}
-              <div className="relative">
-                <select
-                  value={selectedTaskId}
-                  onChange={(e) => setSelectedTaskId(e.target.value)}
-                  className="appearance-none bg-bg-secondary text-text-primary text-xs border border-border-subtle hover:border-border-hover rounded-md pl-3 pr-8 py-1.5 outline-none cursor-pointer"
-                >
-                  <option value="all">All Tasks</option>
-                  {tasks.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.title.length > 28 ? `${t.title.substring(0, 28)}...` : t.title}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown
-                  size={12}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none"
-                />
-              </div>
-
-              {/* Text Search Input */}
-              <div className="relative flex-1 sm:w-56">
-                <Search
-                  size={12}
-                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none"
-                />
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Filter sessions or notes..."
-                  className="w-full bg-bg-secondary text-text-primary text-xs placeholder:text-text-muted border border-border-subtle focus:border-border-strong rounded-md pl-8 pr-3 py-1.5 outline-none"
-                />
-              </div>
-
-              {hasActiveFilters && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setRangePreset("all");
-                    setSelectedTaskId("all");
-                    setSearchQuery("");
-                  }}
-                  className="inline-flex items-center gap-1 text-xs text-text-muted hover:text-text-primary px-2 py-1.5 rounded-md hover:bg-bg-secondary transition-colors cursor-pointer"
-                  title="Reset all filters"
-                >
-                  <RotateCcw size={11} />
-                  <span>Reset</span>
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      </Section>
-
       {/* 3. METRIC SUMMARY RIBBON (Calculated over filtered horizon) */}
       <Section>
         {isLoadingSessions ? (
@@ -505,14 +396,100 @@ export function SessionsView() {
 
       {/* 4. SESSION HISTORY STREAM (Grouped by day, scalable for 100+ days) */}
       <Section>
-        <div className="flex items-center justify-between mb-3">
-          <SectionHeader
-            title="Session History"
-            description="Chronological log of deliberate focus blocks"
-          />
-          <span className="text-xs font-mono text-text-muted">
-            {sessions.length} {sessions.length === 1 ? "session" : "sessions"} loaded
-          </span>
+        <div className="mb-3 space-y-3">
+          <div className="flex items-center justify-between">
+            <SectionHeader
+              title="Session History"
+              description="Chronological log of deliberate focus blocks"
+            />
+            <span className="text-xs font-mono text-text-muted">
+              {sessions.length} {sessions.length === 1 ? "session" : "sessions"} loaded
+            </span>
+          </div>
+
+          {/* History range + filters (relocated from standalone section; same behavior) */}
+          <div className="rounded-xl border border-border-subtle bg-bg-card p-4 space-y-3">
+            <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+              {/* Range Preset Pills */}
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0">
+                <span className="text-xs text-text-muted flex items-center gap-1 mr-1 shrink-0 font-medium">
+                  <Calendar size={13} />
+                  <span>Range:</span>
+                </span>
+                {RANGE_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => {
+                      setRangePreset(opt.id);
+                      setVisibleDaysCount(15);
+                    }}
+                    className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer shrink-0 ${
+                      rangePreset === opt.id
+                        ? "bg-text-primary text-bg-default font-semibold shadow-xs"
+                        : "bg-bg-secondary text-text-muted hover:text-text-primary border border-border-subtle hover:border-border-hover"
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Task Filter & Search */}
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Task Selector */}
+                <div className="relative">
+                  <select
+                    value={selectedTaskId}
+                    onChange={(e) => setSelectedTaskId(e.target.value)}
+                    className="appearance-none bg-bg-secondary text-text-primary text-xs border border-border-subtle hover:border-border-hover rounded-md pl-3 pr-8 py-1.5 outline-none cursor-pointer"
+                  >
+                    <option value="all">All Tasks</option>
+                    {tasks.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.title.length > 28 ? `${t.title.substring(0, 28)}...` : t.title}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown
+                    size={12}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none"
+                  />
+                </div>
+
+                {/* Text Search Input */}
+                <div className="relative flex-1 sm:w-56">
+                  <Search
+                    size={12}
+                    className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none"
+                  />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Filter sessions or notes..."
+                    className="w-full bg-bg-secondary text-text-primary text-xs placeholder:text-text-muted border border-border-subtle focus:border-border-strong rounded-md pl-8 pr-3 py-1.5 outline-none"
+                  />
+                </div>
+
+                {hasActiveFilters && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRangePreset("all");
+                      setSelectedTaskId("all");
+                      setSearchQuery("");
+                    }}
+                    className="inline-flex items-center gap-1 text-xs text-text-muted hover:text-text-primary px-2 py-1.5 rounded-md hover:bg-bg-secondary transition-colors cursor-pointer"
+                    title="Reset all filters"
+                  >
+                    <RotateCcw size={11} />
+                    <span>Reset</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
 
         {isLoadingSessions ? (
