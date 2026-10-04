@@ -5,3 +5,4 @@ export * from "./api/mutations";
 export * from "./components/sessions-view";
 export * from "./components/current-focus-card";
 export * from "./hooks/use-realtime-session-sync";
+export * from "./lib/session-start";

@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import type { Task } from "@repo/types";
 import { PriorityBadge } from "@shared/components/primitives";
+import { PlannedFocusPicker } from "@features/tasks";
 import Link from "next/link";
 
 export interface CurrentFocusCardProps {
@@ -45,8 +46,6 @@ function formatElapsed(seconds: number): string {
   const s = seconds % 60;
   return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
 }
-
-const DURATION_PRESETS = [15, 25, 45, 60, 90];
 
 export function CurrentFocusCard({
   isActive = false,
@@ -255,9 +254,21 @@ export function CurrentFocusCard({
         </div>
 
         <div className="pt-3 border-t border-border-subtle flex items-center justify-between gap-3">
-          <span className="text-xs text-text-muted">
-            Deliberate focus session linked to task
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-text-muted">
+              Linked to task
+            </span>
+            <span className="text-xs text-text-muted">·</span>
+            <button
+              type="button"
+              onClick={() => onSelectTask?.(null)}
+              disabled={isPending}
+              className="text-xs text-text-muted hover:text-text-primary underline underline-offset-2 transition-colors cursor-pointer"
+              title="Clear selection and start an independent focus session instead"
+            >
+              Independent focus
+            </button>
+          </div>
           <button
             type="button"
             onClick={() => onStartFocus?.({ taskId: selectedTask.id, durationMinutes: planned })}
@@ -318,21 +329,12 @@ export function CurrentFocusCard({
             placeholder="What are you focusing on right now? (e.g. Code review, Deep study)"
             className="flex-1 bg-bg-secondary/60 border border-border-subtle focus:border-border-strong text-text-primary placeholder:text-text-muted px-3.5 py-2 rounded-md text-xs outline-none transition-colors"
           />
-          <div className="flex items-center gap-1.5 self-end sm:self-auto">
-            {DURATION_PRESETS.map((mins) => (
-              <button
-                key={mins}
-                type="button"
-                onClick={() => setSelectedDuration(mins)}
-                className={`px-2.5 py-1.5 rounded text-xs font-mono transition-colors cursor-pointer ${
-                  selectedDuration === mins
-                    ? "bg-text-primary text-bg-default font-medium"
-                    : "bg-bg-secondary text-text-muted hover:text-text-primary border border-border-subtle"
-                }`}
-              >
-                {mins}m
-              </button>
-            ))}
+          <div className="flex items-center gap-1.5 self-end sm:self-auto shrink-0">
+            <PlannedFocusPicker
+              value={selectedDuration}
+              onChange={setSelectedDuration}
+              disabled={isPending}
+            />
             <button
               type="button"
               onClick={() => {

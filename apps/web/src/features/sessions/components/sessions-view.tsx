@@ -27,6 +27,7 @@ import { planQueries } from "@features/today";
 import type { WorkSession, SessionRangePreset, SessionListFilters } from "../types";
 import type { Task } from "@repo/types";
 import { format } from "date-fns";
+import { resolveSessionStartInput } from "../lib/session-start";
 
 const RANGE_OPTIONS: { id: SessionRangePreset; label: string }[] = [
   { id: "today", label: "Today" },
@@ -137,15 +138,7 @@ export function SessionsView() {
     };
   }, [sessionActive]);
 
-  // Default selection to first incomplete task if none selected and not focusing
-  useEffect(() => {
-    if (!selectedTask && tasks.length > 0 && !sessionActive && !currentActive) {
-      const topTodo = tasks.find((t) => t.status === "in_progress") || tasks.find((t) => t.status === "todo");
-      if (topTodo) setSelectedTask(topTodo);
-    }
-  }, [tasks, selectedTask, sessionActive, currentActive]);
-
-  // Session Handlers
+  // Session Handlers (launchpad opens independent-first; no auto-link to top task)
   const handleStartFocus = async (params?: {
     taskId?: string | null;
     notes?: string | null;
@@ -155,9 +148,19 @@ export function SessionsView() {
     setSessionError(null);
     setSessionPending(true);
 
-    const targetTaskId = params?.taskId ?? selectedTask?.id ?? null;
-    const targetNotes = params?.notes ?? (selectedTask ? `Focus on ${selectedTask.title}` : "Deliberate focus session");
-    const targetMins = params?.durationMinutes ?? selectedTask?.plannedDurationMinutes ?? 25;
+    // Explicit independent mode (params.taskId === null) must stay null even
+    // when a task is selected — `??` alone would re-link the selected task.
+    const requestedTaskId =
+      params?.taskId !== undefined ? (params.taskId ?? null) : (selectedTask?.id ?? null);
+    const startInput = resolveSessionStartInput(
+      requestedTaskId,
+      params?.notes ?? "",
+      params?.durationMinutes ?? 0,
+      selectedTask?.plannedDurationMinutes ?? 25
+    );
+    const targetTaskId = startInput.taskId;
+    const targetNotes = startInput.notes;
+    const targetMins = startInput.durationMinutes;
 
     try {
       const session = await createSession({
@@ -606,6 +609,11 @@ export function SessionsView() {
                               {isLive && (
                                 <span className="text-[10px] font-mono uppercase tracking-wider text-text-primary bg-bg-secondary border border-border-strong px-1.5 py-0.2 rounded">
                                   Live
+                                </span>
+                              )}
+                              {!sess.taskId && !isLive && (
+                                <span className="text-[10px] font-mono uppercase tracking-wider text-text-muted bg-bg-secondary border border-border-subtle px-1.5 py-0.2 rounded">
+                                  Independent
                                 </span>
                               )}
                               {goalTitle && (
