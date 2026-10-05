@@ -29,6 +29,7 @@ import Link from "next/link";
 import { resolveProductiveDay, type Task, type TaskPriority, type TaskStatus } from "@repo/types";
 import { dueDateKey } from "../lib/task-scopes";
 import { formatTaskProvenance } from "../lib/task-provenance";
+import { resolveRescheduleDate } from "../lib/task-reschedule";
 import { useTaskDetail, useTaskActivity, useTaskScheduleHistory } from "../api/queries";
 import { useTodayPlan } from "@features/today";
 import { useUpdateTaskMutation, useDeleteTaskMutation } from "../api/mutations";
@@ -437,6 +438,7 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
                   </div>
                 </div>
               </div>
+              <div className="flex flex-wrap items-center justify-end gap-1.5 shrink-0">
               <button
                 type="button"
                 onClick={handleScheduleToToday}
@@ -447,6 +449,66 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
                 <RotateCcw size={12} />
                 <span>To Today</span>
               </button>
+              <button
+                type="button"
+                onClick={() =>
+                  updateTaskMutation.mutate({
+                    id: currentTask.id,
+                    input: { productiveDate: resolveRescheduleDate("tomorrow", localToday) },
+                  })
+                }
+                disabled={updateTaskMutation.isPending}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-rose-500/15 border border-rose-500/30 text-xs font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-500/25 transition-colors shrink-0 cursor-pointer"
+                title="Reschedule to Tomorrow"
+              >
+                <span>Tomorrow</span>
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  updateTaskMutation.mutate({
+                    id: currentTask.id,
+                    input: { productiveDate: resolveRescheduleDate("next-week", localToday) },
+                  })
+                }
+                disabled={updateTaskMutation.isPending}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-rose-500/15 border border-rose-500/30 text-xs font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-500/25 transition-colors shrink-0 cursor-pointer"
+                title="Reschedule to Next week"
+              >
+                <span>Next week</span>
+              </button>
+              <input
+                type="date"
+                aria-label="Custom reschedule date"
+                min={localToday}
+                disabled={updateTaskMutation.isPending}
+                onChange={(e) => {
+                  if (!e.target.value) return;
+                  updateTaskMutation.mutate({
+                    id: currentTask.id,
+                    input: {
+                      productiveDate: resolveRescheduleDate({ custom: e.target.value }, localToday),
+                    },
+                  });
+                }}
+                className="px-2 py-1.5 rounded-md bg-rose-500/15 border border-rose-500/30 text-xs font-medium text-rose-600 dark:text-rose-400 shrink-0 cursor-pointer"
+                title="Custom reschedule date"
+              />
+              <button
+                type="button"
+                onClick={() =>
+                  updateTaskMutation.mutate({
+                    id: currentTask.id,
+                    input: { productiveDate: resolveRescheduleDate("backlog", localToday) },
+                  })
+                }
+                disabled={updateTaskMutation.isPending}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-border-subtle text-xs font-medium text-text-muted hover:text-text-primary transition-colors shrink-0 cursor-pointer"
+                title="Move to Backlog (unschedule)"
+              >
+                <span>Backlog</span>
+              </button>
+              </div>
             </div>
           )}
 

@@ -184,12 +184,16 @@ export function TaskPageClient() {
     return `${h}h ${m}m`;
   };
 
-  // Actions to reschedule overdue or backlog tasks to today
-  const handleRescheduleToToday = (task: Task) => {
+  const handleRescheduleTo = (task: Task, date: string | null) => {
     updateTaskMutation.mutate({
       id: task.id,
-      input: { productiveDate: todayDate },
+      input: { productiveDate: date },
     });
+  };
+
+  // Actions to reschedule overdue or backlog tasks to today
+  const handleRescheduleToToday = (task: Task) => {
+    handleRescheduleTo(task, todayDate);
   };
 
   const handleRescheduleAllOverdue = async () => {

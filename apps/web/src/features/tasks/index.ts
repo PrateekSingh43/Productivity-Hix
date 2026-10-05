@@ -1,6 +1,7 @@
 export * from "./types";
 export * from "./lib/task-scopes";
 export * from "./lib/task-provenance";
+export * from "./lib/task-reschedule";
 export * from "./api/client";
 export * from "./api/queries";
 export * from "./api/mutations";
