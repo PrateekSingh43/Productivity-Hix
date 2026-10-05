@@ -15,7 +15,6 @@ import {
   Clock,
   Target,
   ChevronDown,
-  Flame,
   RotateCcw,
 } from "lucide-react";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
@@ -28,6 +27,11 @@ import type { WorkSession, SessionRangePreset, SessionListFilters } from "../typ
 import { format } from "date-fns";
 import { resolveSessionFilters } from "../lib/session-filters";
 import { resolveFocusPayload, type FocusTarget } from "../lib/focus-target";
+import {
+  formatSessionDuration,
+  formatSessionDurationExact,
+  formatTargetVariance,
+} from "../lib/duration";
 
 const RANGE_OPTIONS: { id: SessionRangePreset; label: string }[] = [
   { id: "today", label: "Today" },
@@ -215,29 +219,25 @@ export function SessionsView() {
     }
   };
 
-  // Metric summaries over the currently filtered sessions
+  // Metric summaries over the currently filtered sessions (all floored
+  // through the shared session-duration formatter — see lib/duration.ts).
   const completedSessions = useMemo(() => {
     return sessions.filter((s) => Boolean(s.endedAt));
   }, [sessions]);
 
-  const totalMinutes = useMemo(() => {
-    return Math.round(
-      completedSessions.reduce((acc, s) => acc + (s.durationSeconds || 0), 0) / 60
-    );
+  const totalSeconds = useMemo(() => {
+    return completedSessions.reduce((acc, s) => acc + (s.durationSeconds || 0), 0);
   }, [completedSessions]);
 
-  const formattedTotalTime = useMemo(() => {
-    if (totalMinutes === 0) return "0m";
-    const hours = Math.floor(totalMinutes / 60);
-    const mins = totalMinutes % 60;
-    if (hours === 0) return `${mins}m`;
-    return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
-  }, [totalMinutes]);
+  const formattedTotalTime = useMemo(
+    () => formatSessionDuration(totalSeconds),
+    [totalSeconds]
+  );
 
-  const avgMinutes = useMemo(() => {
-    if (completedSessions.length === 0) return 0;
-    return Math.round(totalMinutes / completedSessions.length);
-  }, [completedSessions, totalMinutes]);
+  const avgLabel = useMemo(() => {
+    if (completedSessions.length === 0) return "—";
+    return formatSessionDuration(Math.floor(totalSeconds / completedSessions.length));
+  }, [completedSessions, totalSeconds]);
 
   const taskLinkedSessions = useMemo(() => {
     return completedSessions.filter((s) => Boolean(s.taskId)).length;
@@ -277,14 +277,12 @@ export function SessionsView() {
           label = dayKey;
         }
 
-        const dayTotalMins = Math.round(
-          list.reduce((acc, s) => acc + (s.durationSeconds || 0), 0) / 60
-        );
+        const dayTotalSecs = list.reduce((acc, s) => acc + (s.durationSeconds || 0), 0);
 
         return {
           dayKey,
           label,
-          dayTotalMins,
+          dayTotalSecs,
           sessions: [...list].sort((a, b) => b.startedAt.localeCompare(a.startedAt)),
         };
       });
@@ -380,7 +378,7 @@ export function SessionsView() {
             <div className="p-4 sm:p-5">
               <span className="text-xs text-text-muted block mb-1">Avg Duration</span>
               <div className="text-xl sm:text-2xl font-semibold font-mono tabular-nums text-text-primary">
-                {avgMinutes > 0 ? `${avgMinutes}m` : "—"}
+                {avgLabel}
               </div>
               <p className="text-[11px] text-text-muted mt-0.5">
                 Per completed session
@@ -533,11 +531,12 @@ export function SessionsView() {
                     <span className="text-xs font-semibold text-text-primary">
                       {group.label}
                     </span>
-                    {group.dayTotalMins > 0 && (
-                      <span className="text-[11px] font-mono text-text-muted bg-bg-secondary px-1.5 py-0.5 rounded border border-border-subtle">
-                        {group.dayTotalMins >= 60
-                          ? `${Math.floor(group.dayTotalMins / 60)}h ${group.dayTotalMins % 60}m`
-                          : `${group.dayTotalMins}m`}
+                    {group.dayTotalSecs > 0 && (
+                      <span
+                        className="text-[11px] font-mono text-text-muted bg-bg-secondary px-1.5 py-0.5 rounded border border-border-subtle"
+                        title={formatSessionDurationExact(group.dayTotalSecs)}
+                      >
+                        {formatSessionDuration(group.dayTotalSecs)}
                       </span>
                     )}
                   </div>
@@ -560,12 +559,18 @@ export function SessionsView() {
                   {group.sessions.map((sess) => {
                     const linkedTask = tasks.find((t) => t.id === sess.taskId);
                     const isLive = !sess.endedAt;
-                    const durationMins = Math.round((sess.durationSeconds || 0) / 60);
+                    const actualLabel = formatSessionDuration(sess.durationSeconds);
+                    const actualTitle = formatSessionDurationExact(sess.durationSeconds);
                     const title =
                       sess.taskTitle ?? linkedTask?.title ?? sess.notes ?? "Intentional Focus Session";
                     const goalTitle = sess.goalTitle ?? linkedTask?.goalTitle ?? null;
-                    const plannedMins = sess.targetDurationMinutes ?? linkedTask?.plannedDurationMinutes ?? null;
-                    const isOvertime = plannedMins && durationMins > plannedMins;
+                    // Session target ONLY: never fall back to the task's planned
+                    // duration here. A null target renders honestly as unset.
+                    const targetMins = sess.targetDurationMinutes ?? null;
+                    const variance =
+                      targetMins != null && !isLive
+                        ? formatTargetVariance(sess.durationSeconds ?? 0, targetMins)
+                        : null;
 
                     return (
                       <div
@@ -642,23 +647,40 @@ export function SessionsView() {
                           </div>
                         </div>
 
-                        {/* Benchmark & Duration Display */}
+                        {/* Target vs actual execution for this block */}
                         <div className="flex items-center gap-2 shrink-0 font-mono text-xs text-text-muted sm:self-auto self-end">
                           {isLive ? (
                             <>
                               <span className="text-text-primary font-semibold font-sans">Running</span>
-                              {plannedMins != null && <span>· Planned {plannedMins}m</span>}
+                              {targetMins != null && <span>· Target {targetMins}m</span>}
+                            </>
+                          ) : targetMins != null ? (
+                            <>
+                              <span>Target {targetMins}m ·</span>
+                              <span
+                                className="text-text-primary font-medium"
+                                title={actualTitle}
+                              >
+                                Actual {actualLabel}
+                              </span>
+                              {variance && variance !== "on target" && (
+                                <span
+                                  className="inline-flex items-center gap-0.5 px-1 py-0.2 rounded text-[10px] bg-bg-secondary text-text-muted border border-border-subtle"
+                                  title="Actual minus target for this session only"
+                                >
+                                  <span>{variance}</span>
+                                </span>
+                              )}
                             </>
                           ) : (
                             <>
-                              {plannedMins != null && <span>Planned {plannedMins}m ·</span>}
-                              <span className="text-text-primary font-medium">Actual {durationMins}m</span>
-                              {isOvertime && (
-                                <span className="inline-flex items-center gap-0.5 px-1 py-0.2 rounded text-[10px] bg-bg-secondary text-text-primary border border-border-strong">
-                                  <Flame size={9} />
-                                  <span>+{durationMins - plannedMins}m</span>
-                                </span>
-                              )}
+                              <span>Target not set ·</span>
+                              <span
+                                className="text-text-primary font-medium"
+                                title={actualTitle}
+                              >
+                                Actual {actualLabel}
+                              </span>
                             </>
                           )}
                         </div>

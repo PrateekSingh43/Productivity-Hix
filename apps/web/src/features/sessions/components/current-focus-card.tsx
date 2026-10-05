@@ -9,7 +9,6 @@ import {
   Target,
   Clock,
   Radio,
-  Flame,
 } from "lucide-react";
 import type { Task } from "@repo/types";
 import { PriorityBadge } from "@shared/components/primitives";
@@ -151,9 +150,11 @@ export function CurrentFocusCard({
               <div className="flex items-center gap-2 text-xs font-mono">
                 <span className="text-text-muted">Target: {targetMins}m</span>
                 {isOvertime && (
-                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] uppercase font-mono bg-bg-secondary text-text-primary border border-border-strong">
-                    <Flame size={10} />
-                    <span>+{overtimeMins}m Flow Overtime</span>
+                  <span
+                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono bg-bg-secondary text-text-muted border border-border-subtle"
+                    title="Elapsed time beyond this session's target (plain variance, not a judgment)"
+                  >
+                    <span>+{overtimeMins}m over target</span>
                   </span>
                 )}
               </div>

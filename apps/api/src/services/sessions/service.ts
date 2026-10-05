@@ -25,10 +25,12 @@ function serializeSession(session: {
     } | null;
   } | null;
 }): WorkSession {
-  const targetDuration =
-    session.targetDurationMinutes ??
-    session.task?.plannedDurationMinutes ??
-    null;
+  // A session target is the target chosen for THIS execution block. It is
+  // deliberately NOT inherited from the task's planned duration: the task
+  // plan describes the size of the whole unit of work, the session target
+  // describes one sitting. An omitted target persists as null so history
+  // can honestly render "Target not set" instead of a fabricated number.
+  const targetDuration = session.targetDurationMinutes ?? null;
 
   let effectiveStart = session.startedAt;
   if (session.createdAt && session.startedAt.getTime() > session.createdAt.getTime() + 5000) {
@@ -157,18 +159,9 @@ export async function createSession(
   },
 ) {
   const db = getDb();
-  let targetMins = input.targetDurationMinutes ?? null;
-
-  // Inherit task plannedDurationMinutes if not explicitly passed
-  if (!targetMins && input.taskId) {
-    const task = await db.task.findFirst({
-      where: { id: input.taskId, userId },
-      select: { plannedDurationMinutes: true },
-    });
-    if (task?.plannedDurationMinutes) {
-      targetMins = task.plannedDurationMinutes;
-    }
-  }
+  // No inheritance from the linked task's planned duration (see note above):
+  // what is stored is exactly what the caller set, or null.
+  const targetMins = input.targetDurationMinutes ?? null;
 
   const startedAt = input.startedAt ?? new Date();
   const endedAt = input.endedAt ?? null;
