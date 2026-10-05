@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 import { CheckCircle2, Sparkles, X, Battery, BatteryCharging, BatteryLow } from "lucide-react";
-import { createCheckIn } from "@features/sessions";
+import { createCheckIn, sessionQueries } from "@features/sessions";
+import { taskQueries } from "../api/queries";
+import { analyticsQueries } from "@features/analytics";
 import { useQueryClient } from "@tanstack/react-query";
 
 interface FocusReflectionModalProps {
@@ -54,10 +56,12 @@ export function FocusReflectionModal({ isOpen, onClose, session }: FocusReflecti
         outcome: outcome.trim() || null,
         source: "web_focus_ended",
       });
-      queryClient.invalidateQueries({ queryKey: ["analytics"] });
-      queryClient.invalidateQueries({ queryKey: ["check-ins"] });
-      queryClient.invalidateQueries({ queryKey: ["tasks"] });
-      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      // Invalidation through feature factories (never ad-hoc key strings):
+      // sessions.all() covers lists + active + check-ins/amendments.
+      queryClient.invalidateQueries({ queryKey: analyticsQueries.all() });
+      queryClient.invalidateQueries({ queryKey: sessionQueries.all() });
+      queryClient.invalidateQueries({ queryKey: taskQueries.lists() });
+      queryClient.invalidateQueries({ queryKey: taskQueries.details() });
       onClose();
     } catch (err) {
       console.error("Failed to save focus reflection:", err);

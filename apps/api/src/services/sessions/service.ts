@@ -1,5 +1,9 @@
 import type { WorkSession } from "@repo/types";
 import type { SessionListQueryInput } from "@repo/validation";
+import {
+  normalizeRawActivityEvents,
+  normalizeIntervals,
+} from "@repo/analytics";
 import { getDb } from "../../lib/prisma";
 import { wsManager } from "../websocket/server";
 
@@ -441,4 +445,123 @@ export async function deleteSession(userId: string, id: string): Promise<{ succe
   });
 
   return { success: true };
+}
+
+export interface SessionObservedSummary {
+  /** Top applications observed during the session window (max 3, each ≥5s). */
+  apps: string[];
+  /** Total non-AFK observed seconds attributed to the session window. */
+  observedSeconds: number;
+}
+
+/**
+ * Compact per-session observation summaries for a batch of session ids.
+ *
+ * Each session contributes its own window (with the same historic
+ * wall-clock recovery used by the task activity read path). Telemetry is
+ * fetched once over the union range, normalized once, then attributed per
+ * session by interval midpoint. Overlapping windows (possible only when the
+ * one-active invariant was bypassed) may attribute an interval twice; the
+ * rule is documented here rather than hidden.
+ *
+ * The output is strictly observational — application names and seconds.
+ * No productivity labels, no coverage percentages: pause-interval history
+ * is not retained precisely enough to support them.
+ */
+export async function getSessionsObservedActivity(
+  userId: string,
+  sessionIds: string[],
+): Promise<Record<string, SessionObservedSummary>> {
+  const empty: Record<string, SessionObservedSummary> = {};
+  const ids = [...new Set(sessionIds)].slice(0, 50);
+  if (ids.length === 0) return empty;
+
+  const db = getDb();
+  const sessions = await db.workSession.findMany({
+    where: { id: { in: ids }, userId },
+    select: { id: true, startedAt: true, endedAt: true, durationSeconds: true },
+  });
+  if (sessions.length === 0) return empty;
+
+  const windows = sessions.map((s) => {
+    const end = s.endedAt ?? new Date();
+    let start = s.startedAt;
+    if (s.endedAt && s.durationSeconds) {
+      const wallClockSec = Math.round((s.endedAt.getTime() - s.startedAt.getTime()) / 1000);
+      if (wallClockSec < s.durationSeconds) {
+        start = new Date(Math.min(s.startedAt.getTime(), s.endedAt.getTime() - s.durationSeconds * 1000));
+      }
+    }
+    return { id: s.id, start, end };
+  });
+
+  const minStart = new Date(Math.min(...windows.map((w) => w.start.getTime())));
+  const maxEnd = new Date(Math.max(...windows.map((w) => w.end.getTime())));
+
+  const activities = await db.normalizedActivity.findMany({
+    where: {
+      userId,
+      timestamp: { gte: minStart, lte: maxEnd },
+    },
+    select: {
+      id: true,
+      externalId: true,
+      timestamp: true,
+      source: true,
+      watcher: true,
+      duration: true,
+      data: true,
+    },
+    orderBy: { timestamp: "asc" },
+  });
+
+  const result: Record<string, SessionObservedSummary> = {};
+  for (const w of windows) {
+    result[w.id] = { apps: [], observedSeconds: 0 };
+  }
+  if (activities.length === 0) return result;
+
+  const canonical = normalizeRawActivityEvents(
+    activities.map((a) => ({
+      id: a.id,
+      externalId: a.externalId,
+      timestamp: a.timestamp,
+      duration: a.duration,
+      source: a.source,
+      watcher: a.watcher,
+      data: a.data,
+    })),
+  );
+  const normalized = normalizeIntervals(canonical);
+
+  const perSession = new Map<string, { total: number; apps: Map<string, number> }>();
+  for (const n of normalized) {
+    if (n.isAfk) continue;
+    const durSec = Math.max(0, Math.round(n.durationMs / 1000));
+    if (durSec < 1) continue;
+    const mid = n.start + n.durationMs / 2;
+    for (const w of windows) {
+      if (mid >= w.start.getTime() && mid <= w.end.getTime()) {
+        let entry = perSession.get(w.id);
+        if (!entry) {
+          entry = { total: 0, apps: new Map() };
+          perSession.set(w.id, entry);
+        }
+        entry.total += durSec;
+        entry.apps.set(n.application, (entry.apps.get(n.application) ?? 0) + durSec);
+      }
+    }
+  }
+
+  for (const [id, entry] of perSession) {
+    result[id] = {
+      apps: Array.from(entry.apps.entries())
+        .filter(([, secs]) => secs >= 5)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([app]) => app),
+      observedSeconds: entry.total,
+    };
+  }
+  return result;
 }

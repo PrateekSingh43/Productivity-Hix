@@ -1,5 +1,13 @@
 import { z } from "zod";
 
+/**
+ * Canonical activity assessments shared by web and extension reflection
+ * surfaces. `blocked` (hit a technical wall/bottleneck) is deliberately
+ * canonical — distinct from `distracted` (attention state) — because web
+ * debriefs derive `progress: false` + blocker text from it and historical
+ * rows already store it. Unknown strings still parse (back-compat) but no
+ * UI may introduce new ids without adding them here first.
+ */
 export const activityAssessmentSchema = z.enum([
   "productive",
   "learning",
@@ -7,6 +15,7 @@ export const activityAssessmentSchema = z.enum([
   "useful_not_productive",
   "distracted",
   "break",
+  "blocked",
 ]);
 
 export const checkInAlignmentSchema = z.enum(["yes", "partly", "no"]);

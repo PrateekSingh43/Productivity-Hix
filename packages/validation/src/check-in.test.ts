@@ -70,3 +70,8 @@ test("checkInCreateSchema handles adaptive blocker reasons and deeper answers", 
   assert.equal(parsed.deeperAnswers?.q_starting_difficulty, "task_felt_too_large");
   assert.equal(parsed.questionVersion, "v1");
 });
+
+test("activityAssessment accepts canonical 'blocked' (web debriefs store it)", () => {
+  const parsed = checkInCreateSchema.parse({ activityAssessment: "blocked" });
+  assert.equal(parsed.activityAssessment, "blocked");
+});

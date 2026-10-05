@@ -8,6 +8,7 @@ import type {
   CreateCheckInInput,
   AmendCheckInInput,
   SessionListFilters,
+  SessionObservedSummary,
 } from "../types";
 
 export function getSessions(filters?: SessionListFilters) {
@@ -26,6 +27,14 @@ export function getSessions(filters?: SessionListFilters) {
 
 export function getActiveSession() {
   return apiFetch<WorkSession | null>("/api/sessions/active");
+}
+
+export function getSessionsObserved(ids: string[]) {
+  if (ids.length === 0) return Promise.resolve<Record<string, SessionObservedSummary>>({});
+  const params = new URLSearchParams({ ids: ids.join(",") });
+  return apiFetch<Record<string, SessionObservedSummary>>(
+    `/api/sessions/observed?${params.toString()}`
+  );
 }
 
 function notifyExtensionSessionUpdate(action: "start" | "pause" | "resume" | "end", session?: WorkSession | null) {

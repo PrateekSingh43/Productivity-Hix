@@ -20,7 +20,7 @@ import {
 import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { taskQueries, updateTask, FocusReflectionModal, TaskDetailDrawer } from "@features/tasks";
 import { useUserPreferences } from "@features/settings";
-import { sessionQueries, useSessionsList, useActiveSession } from "../api/queries";
+import { sessionQueries, useSessionsList, useActiveSession, useSessionsObserved } from "../api/queries";
 import { createSession, finishSession, pauseSession, resumeSession } from "../api/client";
 import { useLiveTelemetry } from "@features/timeline";
 import { planQueries } from "@features/today";
@@ -73,6 +73,10 @@ interface SessionRowProps {
   /** Day prefix for compact rows ("Sep 29"). */
   datePrefix?: string | null;
   showTimelineLink?: boolean;
+  /** Batched observation summary for this session (apps + seconds only). */
+  observation?: { apps: string[]; observedSeconds: number } | null;
+  /** False while the observation batch is still loading (renders nothing, not a claim). */
+  observationLoaded?: boolean;
 }
 
 /**
@@ -88,6 +92,8 @@ function SessionRow({
   compact = false,
   datePrefix = null,
   showTimelineLink = false,
+  observation = null,
+  observationLoaded = false,
 }: SessionRowProps) {
   const linkedTask = tasks.find((t) => t.id === sess.taskId) ?? null;
   const isLive = !sess.endedAt;
@@ -173,6 +179,21 @@ function SessionRow({
             )}
           </div>
           <div className="flex items-center gap-2 flex-wrap pt-0.5">
+            {observationLoaded && !isLive && (
+              observation && (observation.apps.length > 0 || observation.observedSeconds > 0) ? (
+                <span
+                  className="text-[10px] text-text-secondary bg-bg-secondary px-1.5 py-0.5 rounded border border-border-subtle truncate max-w-55"
+                  title={`${observation.observedSeconds}s of telemetry during this session`}
+                >
+                  Observed{" "}
+                  {observation.apps.length > 0
+                    ? observation.apps.join(" · ")
+                    : `${formatSessionDuration(observation.observedSeconds)} telemetry`}
+                </span>
+              ) : (
+                <span className="text-[10px] text-text-muted">Observation unavailable</span>
+              )
+            )}
             {sess.hasReflection ? (
               <span className="text-[10px] text-text-secondary bg-bg-secondary px-1.5 py-0.5 rounded border border-border-subtle">
                 Reflection recorded
@@ -531,6 +552,19 @@ export function SessionsView() {
   const visibleTaskGroups = useMemo(() => {
     return taskGroups.slice(0, visibleGroupsCount);
   }, [taskGroups, visibleGroupsCount]);
+
+  // Batched observation summaries for currently visible ended sessions
+  // (one request per visible set, 60s stale). Live sessions are excluded:
+  // their telemetry window is still open.
+  const visibleSessionIds = useMemo(() => {
+    const list =
+      historyView === "timeline"
+        ? visibleTimelineGroups.flatMap((g) => g.sessions)
+        : visibleTaskGroups.flatMap((g) => g.sessions);
+    return [...new Set(list.filter((s) => s.endedAt).map((s) => s.id))].slice(0, 50);
+  }, [historyView, visibleTimelineGroups, visibleTaskGroups]);
+  const { data: observedMap } = useSessionsObserved(visibleSessionIds);
+  const observationLoaded = observedMap != null;
 
   // Collapse defaults resolve once groups first load; user toggles win after.
   const isGroupCollapsed = (key: string): boolean => {
@@ -952,6 +986,8 @@ export function SessionsView() {
                       tasks={tasks}
                       timelineDate={group.dayKey}
                       onInspectTask={(t) => setDrawerTask(t)}
+                      observation={observedMap?.[sess.id] ?? null}
+                      observationLoaded={observationLoaded}
                     />
                   ))}
                 </div>
@@ -1070,6 +1106,8 @@ export function SessionsView() {
                             "MMM d"
                           )}
                           showTimelineLink
+                          observation={observedMap?.[sess.id] ?? null}
+                          observationLoaded={observationLoaded}
                         />
                       ))}
                       {linkedTask && (

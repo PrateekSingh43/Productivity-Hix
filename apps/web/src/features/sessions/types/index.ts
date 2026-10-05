@@ -43,6 +43,12 @@ export interface AmendCheckInInput {
   outcome?: string | null;
 }
 
+/** Compact per-session observation summary (apps + seconds, never judgments). */
+export interface SessionObservedSummary {
+  apps: string[];
+  observedSeconds: number;
+}
+
 export type SessionRangePreset = "today" | "7d" | "30d" | "90d" | "custom" | "all";
 
 /** Structural session filter: both kinds, task-linked only, or independent only. */

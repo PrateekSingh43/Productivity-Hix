@@ -12,6 +12,7 @@ import {
 } from "./client";
 import { sessionQueries } from "./queries";
 import { taskQueries } from "@features/tasks/api/queries";
+import { analyticsQueries } from "@features/analytics";
 import type { AmendCheckInInput, CreateCheckInInput, CreateSessionInput } from "../types";
 
 export function useStartTaskSessionMutation() {
@@ -79,8 +80,7 @@ export function useCreateCheckInMutation() {
       queryClient.invalidateQueries({ queryKey: taskQueries.lists() });
       queryClient.invalidateQueries({ queryKey: taskQueries.details() });
       queryClient.invalidateQueries({ queryKey: sessionQueries.all() });
-      queryClient.invalidateQueries({ queryKey: ["analytics"] });
-      queryClient.invalidateQueries({ queryKey: ["check-ins"] });
+      queryClient.invalidateQueries({ queryKey: analyticsQueries.all() });
     },
   });
 }
@@ -98,8 +98,7 @@ export function useAmendCheckInMutation() {
       queryClient.invalidateQueries({ queryKey: taskQueries.lists() });
       queryClient.invalidateQueries({ queryKey: taskQueries.details() });
       queryClient.invalidateQueries({ queryKey: sessionQueries.all() });
-      queryClient.invalidateQueries({ queryKey: ["analytics"] });
-      queryClient.invalidateQueries({ queryKey: ["check-ins"] });
+      queryClient.invalidateQueries({ queryKey: analyticsQueries.all() });
     },
   });
 }

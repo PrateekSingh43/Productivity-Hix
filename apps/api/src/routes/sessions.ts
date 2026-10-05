@@ -1,10 +1,16 @@
 import { Router } from "express";
-import { sessionCreateSchema, sessionUpdateSchema, sessionListQuerySchema } from "@repo/validation";
+import {
+  sessionCreateSchema,
+  sessionUpdateSchema,
+  sessionListQuerySchema,
+  sessionObservedQuerySchema,
+} from "@repo/validation";
 import { requireAuth, userIdFrom } from "../middleware/auth";
 import {
   createSession,
   listSessions,
   getActiveSession,
+  getSessionsObservedActivity,
   pauseSession,
   resumeSession,
   updateSession,
@@ -27,6 +33,19 @@ sessionsRouter.get("/active", async (request, response, next) => {
   try {
     const active = await getActiveSession(userIdFrom(request));
     response.json(active);
+  } catch (error) {
+    next(error);
+  }
+});
+
+sessionsRouter.get("/observed", async (request, response, next) => {
+  try {
+    const query = sessionObservedQuerySchema.parse(request.query);
+    const ids = query.ids
+      .split(",")
+      .map((part) => part.trim())
+      .filter(Boolean);
+    response.json(await getSessionsObservedActivity(userIdFrom(request), ids));
   } catch (error) {
     next(error);
   }
