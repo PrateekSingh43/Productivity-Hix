@@ -6,10 +6,12 @@ import type { Task } from "@repo/types";
 import { resolveProductiveDay } from "@repo/types";
 import { dueDateKey } from "../lib/task-scopes";
 import { useUpdateTaskMutation } from "../api/mutations";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   useStartTaskSessionMutation,
   useEndTaskSessionMutation,
   useSessionsList,
+  sessionQueries,
 } from "@features/sessions";
 import { useTodayPlan } from "@features/today";
 import { PriorityBadge } from "@shared/components/primitives/data-badge";
@@ -22,6 +24,7 @@ interface TaskItemProps {
 }
 
 export function TaskItem({ task, onSelect, isPrioritySection, onRescheduleToday }: TaskItemProps) {
+  const queryClient = useQueryClient();
   const updateTaskMutation = useUpdateTaskMutation();
   const startSessionMutation = useStartTaskSessionMutation();
   const endSessionMutation = useEndTaskSessionMutation();
@@ -50,6 +53,13 @@ export function TaskItem({ task, onSelect, isPrioritySection, onRescheduleToday 
     e.stopPropagation();
     if (hasActiveSession && activeSession) {
       endSessionMutation.mutate(activeSession.id);
+    } else if (hasActiveSession) {
+      // The task reports an active session that is not in this list's cache
+      // (started elsewhere / filter-scoped). Never start a second session:
+      // refresh session state and open the drawer, whose detail query holds
+      // the authoritative per-task session.
+      queryClient.invalidateQueries({ queryKey: sessionQueries.all() });
+      onSelect(task);
     } else {
       startSessionMutation.mutate(task.id);
     }
@@ -228,7 +238,7 @@ export function TaskItem({ task, onSelect, isPrioritySection, onRescheduleToday 
         {/* Start / End Session CTA */}
         {!isDone && (
           <div className="flex items-center">
-            {hasActiveSession ? (
+            {hasActiveSession && activeSession ? (
               <button
                 type="button"
                 onClick={handleSessionAction}
@@ -239,7 +249,7 @@ export function TaskItem({ task, onSelect, isPrioritySection, onRescheduleToday 
                 <Square size={11} />
                 <span>End</span>
               </button>
-            ) : (
+            ) : !hasActiveSession ? (
               <button
                 type="button"
                 onClick={handleSessionAction}
@@ -250,7 +260,7 @@ export function TaskItem({ task, onSelect, isPrioritySection, onRescheduleToday 
                 <Play size={10} className="fill-current" />
                 <span>Focus</span>
               </button>
-            )}
+            ) : null}
           </div>
         )}
 

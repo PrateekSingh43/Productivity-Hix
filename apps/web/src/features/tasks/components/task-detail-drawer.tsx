@@ -188,18 +188,60 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
     }
   }, [task, lastLoadedId]);
 
-  // If taskDetail arrives with richer description (e.g. if initial task object had none)
+  // Authoritative hydration: when task detail arrives (richer than the list
+  // object the drawer opened with), adopt any field the user has NOT edited.
+  // Edited fields (local !== baseline) are never overwritten, so detail can
+  // correct stale list data (e.g. a due date set elsewhere) without
+  // clobbering an in-progress draft. Saving therefore persists detail truth
+  // for untouched fields, never stale list snapshots.
   useEffect(() => {
-    if (taskDetail && taskDetail.id === lastLoadedId && !description && taskDetail.description) {
-      setDescription(taskDetail.description);
-      setBaseline((prev) => ({ ...prev, description: taskDetail.description || "" }));
-    }
-  }, [taskDetail, lastLoadedId, description]);
+    if (!taskDetail || taskDetail.id !== lastLoadedId) return;
+    setBaseline((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      const adopt = <K extends keyof typeof prev>(
+        key: K,
+        localValue: string | number,
+        detailValue: string | number,
+        apply: (v: string | number) => void,
+      ) => {
+        if (localValue === prev[key] && detailValue !== prev[key]) {
+          apply(detailValue);
+          (next as Record<string, string | number>)[key as string] = detailValue;
+          changed = true;
+        }
+      };
+      const detailDue = dueDateKey(taskDetail.dueAt) ?? "";
+      const detailPlanned = taskDetail.plannedDurationMinutes || 30;
+      adopt("title", title, taskDetail.title || "", (v) => setTitle(String(v)));
+      adopt("description", description, taskDetail.description || "", (v) =>
+        setDescription(String(v)),
+      );
+      adopt("priority", priority, taskDetail.priority || "medium", (v) =>
+        setPriority(v as TaskPriority),
+      );
+      adopt("status", status, taskDetail.status || "todo", (v) =>
+        setStatus(v as TaskStatus),
+      );
+      adopt("goalId", goalId, taskDetail.goalId || "", (v) => setGoalId(String(v)));
+      adopt("dueDate", dueDate, detailDue, (v) => setDueDate(String(v)));
+      if (plannedDuration === prev.plannedDuration && detailPlanned !== prev.plannedDuration) {
+        setPlannedDuration(detailPlanned);
+        setDurationInput(String(detailPlanned));
+        next.plannedDuration = detailPlanned;
+        changed = true;
+      }
+      return changed ? next : prev;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [taskDetail, lastLoadedId]);
 
   if (!task) return null;
 
   const currentTask = taskDetail || task;
-  const isDone = status === "done";
+  // Lifecycle gates always reflect PERSISTED status, never the unsaved draft:
+  // toggling the Status select to Done must not hide Start Focus until saved.
+  const isDone = currentTask.status === "done";
   const actualSeconds = currentTask.actualDurationSeconds || 0;
   const actualMinutes = Math.round(actualSeconds / 60);
 

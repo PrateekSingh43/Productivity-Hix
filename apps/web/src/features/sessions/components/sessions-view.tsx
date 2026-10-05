@@ -25,10 +25,9 @@ import { createSession, finishSession, pauseSession, resumeSession } from "../ap
 import { useLiveTelemetry } from "@features/timeline";
 import { planQueries } from "@features/today";
 import type { WorkSession, SessionRangePreset, SessionListFilters } from "../types";
-import type { Task } from "@repo/types";
 import { format } from "date-fns";
-import { resolveSessionStartInput } from "../lib/session-start";
 import { resolveSessionFilters } from "../lib/session-filters";
+import { resolveFocusPayload, type FocusTarget } from "../lib/focus-target";
 
 const RANGE_OPTIONS: { id: SessionRangePreset; label: string }[] = [
   { id: "today", label: "Today" },
@@ -59,8 +58,11 @@ export function SessionsView() {
   const { data: serverActiveSession, isLoading: isLoadingActive } = useActiveSession();
   const { data: sessions = [], isLoading: isLoadingSessions } = useSessionsList(activeFilters);
 
-  // 3. Local operational session state
-  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  // 3. Local operational session state.
+  // The focus target is the ONLY source of linking intent: an explicit
+  // {kind:"task"} choice or an explicit independent topic. It stores an id,
+  // never a full Task object, so a stale object can never corrupt attribution.
+  const [focusTarget, setFocusTarget] = useState<FocusTarget | null>(null);
   const [sessionActive, setSessionActive] = useState(false);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -79,7 +81,16 @@ export function SessionsView() {
     return sessions.find((s) => !s.endedAt) ?? null;
   }, [serverActiveSession, sessions]);
 
-  // Sync active session state
+  // Authoritative task object for a task focus target, resolved fresh from
+  // query data on every render — never a retained stale object.
+  const focusTask =
+    focusTarget?.kind === "task"
+      ? (tasks.find((t) => t.id === focusTarget.taskId) ?? null)
+      : null;
+
+  // Sync active session state. Display only — this effect never writes
+  // linking intent. Attribution always comes from the authoritative session
+  // record (currentActive / server responses), never from local selection.
   useEffect(() => {
     if (currentActive) {
       setActiveSessionId(currentActive.id);
@@ -91,16 +102,12 @@ export function SessionsView() {
           ? accumulated
           : accumulated + Math.max(0, Math.floor((Date.now() - startMs) / 1000))
       );
-      if (currentActive.taskId) {
-        const found = tasks.find((t) => t.id === currentActive.taskId);
-        if (found) setSelectedTask(found);
-      }
     } else if (activeSessionId && !currentActive) {
       setSessionActive(false);
       setActiveSessionId(null);
       setElapsedSeconds(0);
     }
-  }, [currentActive, tasks, activeSessionId]);
+  }, [currentActive, activeSessionId]);
 
   // Count-up timer tick
   useEffect(() => {
@@ -115,35 +122,21 @@ export function SessionsView() {
     };
   }, [sessionActive]);
 
-  // Session Handlers (launchpad opens independent-first; no auto-link to top task)
-  const handleStartFocus = async (params?: {
-    taskId?: string | null;
-    notes?: string | null;
-    durationMinutes?: number | null;
-  }) => {
+  // Session Handlers. Linking comes ONLY from the explicit FocusTarget
+  // passed by the caller — never from ambient local selection state.
+  const handleStartFocus = async (target: FocusTarget, durationMinutes?: number | null) => {
     if (activeSessionId || sessionPending) return;
     setSessionError(null);
     setSessionPending(true);
 
-    // Explicit independent mode (params.taskId === null) must stay null even
-    // when a task is selected — `??` alone would re-link the selected task.
-    const requestedTaskId =
-      params?.taskId !== undefined ? (params.taskId ?? null) : (selectedTask?.id ?? null);
-    const startInput = resolveSessionStartInput(
-      requestedTaskId,
-      params?.notes ?? "",
-      params?.durationMinutes ?? 0,
-      selectedTask?.plannedDurationMinutes ?? 25
-    );
+    const startInput = resolveFocusPayload(target, durationMinutes ?? null);
     const targetTaskId = startInput.taskId;
-    const targetNotes = startInput.notes;
-    const targetMins = startInput.durationMinutes;
 
     try {
       const session = await createSession({
         taskId: targetTaskId,
-        targetDurationMinutes: targetMins,
-        notes: targetNotes,
+        targetDurationMinutes: startInput.targetDurationMinutes,
+        notes: startInput.notes,
       });
       setActiveSessionId(session.id);
       setSessionActive(true);
@@ -155,7 +148,13 @@ export function SessionsView() {
       }
       queryClient.invalidateQueries({ queryKey: sessionQueries.all() });
     } catch {
-      setSessionError("The session could not be started. Please try again.");
+      // Another client (extension, other tab) may hold the active session:
+      // refresh the authoritative active record so the UI converges instead
+      // of letting the user start a duplicate.
+      queryClient.invalidateQueries({ queryKey: sessionQueries.active().queryKey });
+      setSessionError(
+        "The session could not be started. Another focus session may already be active."
+      );
     } finally {
       setSessionPending(false);
       queryClient.invalidateQueries({ queryKey: sessionQueries.all() });
@@ -168,10 +167,15 @@ export function SessionsView() {
     setSessionPending(true);
     try {
       const session = await (pause ? pauseSession(activeSessionId) : resumeSession(activeSessionId));
+      // Patch every cached sessions list (keys carry filters) plus the
+      // authoritative active record, then invalidate for convergence.
       await queryClient.cancelQueries({ queryKey: sessionQueries.all() });
-      queryClient.setQueryData<WorkSession[]>(sessionQueries.lists(), (current) =>
-        current?.map((item) => (item.id === session.id ? session : item))
+      queryClient.setQueriesData<WorkSession[]>(
+        { queryKey: sessionQueries.lists() },
+        (current) =>
+          current?.map((item) => (item.id === session.id ? session : item))
       );
+      queryClient.setQueryData(sessionQueries.active().queryKey, session);
       setSessionActive(!session.isPaused);
       queryClient.invalidateQueries({ queryKey: sessionQueries.all() });
     } catch {
@@ -186,18 +190,19 @@ export function SessionsView() {
     setSessionError(null);
     setSessionPending(true);
     try {
-      const finishedId = activeSessionId;
-      const finishedDuration = elapsedSeconds;
-      const finishedTask = selectedTask;
-      await finishSession(activeSessionId, "Completed intentional focus block");
+      // The finished session returned by the API is authoritative for
+      // reflection attribution: its id, taskId, taskTitle and duration are
+      // what the reflection belongs to — never local selection state.
+      const finished = await finishSession(activeSessionId, "Completed intentional focus block");
       setSessionActive(false);
       setActiveSessionId(null);
       setElapsedSeconds(0);
+      setFocusTarget(null);
       setReflectionSession({
-        id: finishedId,
-        taskId: finishedTask?.id ?? null,
-        taskTitle: finishedTask?.title ?? currentActive?.taskTitle ?? currentActive?.notes ?? null,
-        durationSeconds: finishedDuration,
+        id: finished.id,
+        taskId: finished.taskId ?? null,
+        taskTitle: finished.taskTitle ?? finished.notes ?? null,
+        durationSeconds: finished.durationSeconds ?? 0,
       });
       queryClient.invalidateQueries({ queryKey: taskQueries.lists() });
       queryClient.invalidateQueries({ queryKey: sessionQueries.all() });
@@ -289,8 +294,10 @@ export function SessionsView() {
     return historyDayGroups.slice(0, visibleDaysCount);
   }, [historyDayGroups, visibleDaysCount]);
 
+  // Reset appears only when filters differ from the page defaults
+  // (range 30d, all tasks, empty search) — never on plain load.
   const hasActiveFilters =
-    rangePreset !== "all" || selectedTaskId !== "all" || searchQuery.trim().length > 0;
+    rangePreset !== "30d" || selectedTaskId !== "all" || searchQuery.trim().length > 0;
 
   return (
     <PageContainer>
@@ -320,13 +327,15 @@ export function SessionsView() {
           activeSessionTitle={currentActive?.taskTitle ?? currentActive?.notes ?? null}
           activeSessionGoalTitle={currentActive?.goalTitle ?? null}
           activeSessionTargetMinutes={currentActive?.targetDurationMinutes ?? null}
-          selectedTask={selectedTask}
+          activeSessionTaskId={currentActive?.taskId ?? null}
+          focusTarget={focusTarget}
+          focusTask={focusTask}
           availableTasks={tasks}
           elapsedSeconds={elapsedSeconds}
           observedApplication={telemetry.activeApp || undefined}
           observedDomain={telemetry.activeDomain || undefined}
           observedTitle={telemetry.windowTitle || undefined}
-          onSelectTask={(task) => setSelectedTask(task)}
+          onTargetChange={(target) => setFocusTarget(target)}
           onStartFocus={handleStartFocus}
           onPause={() => void handlePauseResume(true)}
           onResume={() => void handlePauseResume(false)}
@@ -476,7 +485,7 @@ export function SessionsView() {
                   <button
                     type="button"
                     onClick={() => {
-                      setRangePreset("all");
+                      setRangePreset("30d");
                       setSelectedTaskId("all");
                       setSearchQuery("");
                     }}
