@@ -43,13 +43,21 @@ export interface AmendCheckInInput {
   outcome?: string | null;
 }
 
-export type SessionRangePreset = "today" | "7d" | "30d" | "90d" | "all";
+export type SessionRangePreset = "today" | "7d" | "30d" | "90d" | "custom" | "all";
+
+/** Structural session filter: both kinds, task-linked only, or independent only. */
+export type SessionLinkedFilter = "all" | "linked" | "independent";
+
+/** History organization: chronological truth, or repeated work grouped by task. */
+export type SessionHistoryView = "timeline" | "by-task";
 
 export interface SessionListFilters {
   rangePreset?: SessionRangePreset;
   from?: string;
   to?: string;
   taskId?: string | null;
+  /** Server-known values only; the "all" UI state omits the param. */
+  linked?: Exclude<SessionLinkedFilter, "all">;
   search?: string;
   limit?: number;
 }

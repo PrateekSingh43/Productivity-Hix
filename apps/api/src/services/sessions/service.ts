@@ -24,7 +24,7 @@ function serializeSession(session: {
       title: string;
     } | null;
   } | null;
-}): WorkSession {
+}, hasReflection = false): WorkSession {
   // A session target is the target chosen for THIS execution block. It is
   // deliberately NOT inherited from the task's planned duration: the task
   // plan describes the size of the whole unit of work, the session target
@@ -59,6 +59,7 @@ function serializeSession(session: {
     notes: session.notes,
     taskTitle: session.task?.title ?? null,
     goalTitle: session.task?.goal?.title ?? null,
+    hasReflection,
   };
 }
 
@@ -71,6 +72,12 @@ export async function listSessions(
   if (options) {
     if ("taskId" in options && options.taskId) {
       where.taskId = options.taskId;
+    }
+
+    if ("linked" in options && options.linked === "linked") {
+      where.taskId = { not: null };
+    } else if ("linked" in options && options.linked === "independent") {
+      where.taskId = null;
     }
 
     if ("search" in options && options.search) {
@@ -125,7 +132,29 @@ export async function listSessions(
     orderBy: [{ startedAt: "desc" }, { id: "asc" }],
     ...(limit !== undefined ? { take: limit } : {}),
   });
-  return sessions.map(serializeSession);
+  // Reflection presence per session (one query for the whole page, not N+1).
+  // A missing checkIn delegate (older test mocks) means "none recorded".
+  const reflectedIds = new Set<string>();
+  try {
+    const checkInDelegate = (getDb() as unknown as Record<string, unknown>).checkIn as
+      | { findMany: (args: unknown) => Promise<Array<{ workSessionId: string | null }>> }
+      | undefined;
+    if (checkInDelegate) {
+      const rows = await checkInDelegate.findMany({
+        where: {
+          userId,
+          workSessionId: { in: sessions.map((s) => s.id) },
+        },
+        select: { workSessionId: true },
+      });
+      for (const row of rows) {
+        if (row.workSessionId) reflectedIds.add(row.workSessionId);
+      }
+    }
+  } catch {
+    // Reflection presence is advisory display state; never fail the list.
+  }
+  return sessions.map((s) => serializeSession(s, reflectedIds.has(s.id)));
 }
 
 export async function getActiveSession(userId: string): Promise<WorkSession | null> {

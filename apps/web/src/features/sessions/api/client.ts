@@ -15,6 +15,9 @@ export function getSessions(filters?: SessionListFilters) {
   if (filters?.from) params.set("from", filters.from);
   if (filters?.to) params.set("to", filters.to);
   if (filters?.taskId) params.set("taskId", filters.taskId);
+  if (filters?.linked === "linked" || filters?.linked === "independent") {
+    params.set("linked", filters.linked);
+  }
   if (filters?.search) params.set("search", filters.search);
   if (filters?.limit) params.set("limit", String(filters.limit));
   const query = params.toString() ? `?${params.toString()}` : "";

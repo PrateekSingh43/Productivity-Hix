@@ -21,6 +21,10 @@ export const sessionListQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(500).optional(),
   taskId: z.string().min(1).optional(),
   search: z.string().trim().optional(),
+  // Structural filter: "linked" = task-linked only, "independent" = task-less
+  // only. Omitted = both. Kept as an explicit enum (never coerce booleans
+  // from query strings — "false" is truthy and would invert the filter).
+  linked: z.enum(["linked", "independent"]).optional(),
 });
 
 export type SessionListQueryInput = z.infer<typeof sessionListQuerySchema>;

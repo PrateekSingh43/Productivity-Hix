@@ -8,3 +8,5 @@ export * from "./hooks/use-realtime-session-sync";
 export * from "./lib/focus-target";
 export * from "./lib/session-filters";
 export * from "./lib/duration";
+export * from "./lib/date-range";
+export * from "./lib/session-groups";

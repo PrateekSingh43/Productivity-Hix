@@ -18,43 +18,282 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
-import { taskQueries, updateTask, FocusReflectionModal } from "@features/tasks";
+import { taskQueries, updateTask, FocusReflectionModal, TaskDetailDrawer } from "@features/tasks";
+import { useUserPreferences } from "@features/settings";
 import { sessionQueries, useSessionsList, useActiveSession } from "../api/queries";
 import { createSession, finishSession, pauseSession, resumeSession } from "../api/client";
 import { useLiveTelemetry } from "@features/timeline";
 import { planQueries } from "@features/today";
-import type { WorkSession, SessionRangePreset, SessionListFilters } from "../types";
+import type {
+  WorkSession,
+  SessionRangePreset,
+  SessionListFilters,
+  SessionLinkedFilter,
+  SessionHistoryView,
+} from "../types";
+import type { Task } from "@repo/types";
 import { format } from "date-fns";
-import { resolveSessionFilters } from "../lib/session-filters";
+import { resolveSessionFilters, sessionFiltersDifferFromDefaults } from "../lib/session-filters";
 import { resolveFocusPayload, type FocusTarget } from "../lib/focus-target";
 import {
   formatSessionDuration,
   formatSessionDurationExact,
   formatTargetVariance,
 } from "../lib/duration";
+import { groupSessionsByDay, groupSessionsByTask, sessionDayKey } from "../lib/session-groups";
 
 const RANGE_OPTIONS: { id: SessionRangePreset; label: string }[] = [
   { id: "today", label: "Today" },
-  { id: "7d", label: "Last 7 Days" },
-  { id: "30d", label: "Last 30 Days" },
-  { id: "90d", label: "Last 90 Days" },
-  { id: "all", label: "All Time" },
+  { id: "7d", label: "7 days" },
+  { id: "30d", label: "30 days" },
+  { id: "90d", label: "90 days" },
+  { id: "custom", label: "Custom" },
+  { id: "all", label: "All time" },
 ];
+
+const VIEW_OPTIONS: { id: SessionHistoryView; label: string }[] = [
+  { id: "timeline", label: "Timeline" },
+  { id: "by-task", label: "By Task" },
+];
+
+const LINKED_OPTIONS: { id: SessionLinkedFilter; label: string }[] = [
+  { id: "all", label: "All sessions" },
+  { id: "linked", label: "Task-linked" },
+  { id: "independent", label: "Independent" },
+];
+
+interface SessionRowProps {
+  sess: WorkSession;
+  tasks: Task[];
+  /** Productive day key for the timeline deep-link. */
+  timelineDate: string;
+  onInspectTask: (task: Task) => void;
+  /** Compact rows inside a task group: date-led instead of title-led. */
+  compact?: boolean;
+  /** Day prefix for compact rows ("Sep 29"). */
+  datePrefix?: string | null;
+  showTimelineLink?: boolean;
+}
+
+/**
+ * One execution block: what happened during it. Title/context on the left,
+ * Target · Actual · Variance on the right, evidence chips beneath.
+ * The Task Details drawer (not this row) owns deep inspection.
+ */
+function SessionRow({
+  sess,
+  tasks,
+  timelineDate,
+  onInspectTask,
+  compact = false,
+  datePrefix = null,
+  showTimelineLink = false,
+}: SessionRowProps) {
+  const linkedTask = tasks.find((t) => t.id === sess.taskId) ?? null;
+  const isLive = !sess.endedAt;
+  const actualLabel = formatSessionDuration(sess.durationSeconds);
+  const actualTitle = formatSessionDurationExact(sess.durationSeconds);
+  const title =
+    sess.taskTitle ?? linkedTask?.title ?? sess.notes ?? "Intentional Focus Session";
+  const goalTitle = sess.goalTitle ?? linkedTask?.goalTitle ?? null;
+  // Session target ONLY — a null target renders honestly as unset.
+  const targetMins = sess.targetDurationMinutes ?? null;
+  const variance =
+    targetMins != null && !isLive
+      ? formatTargetVariance(sess.durationSeconds ?? 0, targetMins)
+      : null;
+
+  const timeRange = (() => {
+    let startDate = new Date(sess.startedAt);
+    if (sess.endedAt && sess.durationSeconds) {
+      const endDate = new Date(sess.endedAt);
+      const wallClockSec = Math.round((endDate.getTime() - startDate.getTime()) / 1000);
+      if (wallClockSec < sess.durationSeconds) {
+        startDate = new Date(endDate.getTime() - sess.durationSeconds * 1000);
+      }
+    }
+    const start = format(startDate, "h:mm a");
+    return sess.endedAt ? `${start} – ${format(new Date(sess.endedAt), "h:mm a")}` : `${start} · Running now`;
+  })();
+
+  return (
+    <div className="px-4 sm:px-5 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 hover:bg-bg-secondary/40 transition-colors">
+      <div className="flex items-start sm:items-center gap-3 min-w-0">
+        <div
+          className={`h-7 w-7 rounded-full flex items-center justify-center shrink-0 mt-0.5 sm:mt-0 ${
+            isLive
+              ? "bg-bg-secondary text-text-primary border border-border-strong"
+              : "bg-bg-secondary text-text-muted border border-border-subtle"
+          }`}
+        >
+          {isLive ? (
+            <Play size={11} className="fill-current animate-pulse" />
+          ) : (
+            <CheckCircle2 size={13} />
+          )}
+        </div>
+
+        <div className="min-w-0 space-y-0.5">
+          <div className="flex items-center gap-2 flex-wrap">
+            {compact && datePrefix ? (
+              <span className="text-xs font-mono text-text-muted shrink-0">
+                {datePrefix}
+              </span>
+            ) : (
+              <span className="text-sm font-medium text-text-primary truncate">
+                {title}
+              </span>
+            )}
+            {isLive && (
+              <span className="text-[10px] font-mono uppercase tracking-wider text-text-primary bg-bg-secondary border border-border-strong px-1.5 py-0.2 rounded">
+                Live
+              </span>
+            )}
+            {!sess.taskId && !isLive && (
+              <span className="text-[10px] font-mono uppercase tracking-wider text-text-muted bg-bg-secondary border border-border-subtle px-1.5 py-0.2 rounded">
+                Independent
+              </span>
+            )}
+            {goalTitle && !compact && (
+              <span className="inline-flex items-center gap-1 text-[10px] text-text-muted bg-bg-secondary px-1.5 py-0.5 rounded border border-border-subtle truncate">
+                <Target size={10} className="shrink-0" />
+                <span>{goalTitle}</span>
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2 text-xs text-text-muted font-mono flex-wrap">
+            <span>{timeRange}</span>
+            {sess.notes && sess.notes !== title && (
+              <>
+                <span>·</span>
+                <span className="italic text-text-muted truncate max-w-xs font-sans">
+                  &ldquo;{sess.notes}&rdquo;
+                </span>
+              </>
+            )}
+          </div>
+          <div className="flex items-center gap-2 flex-wrap pt-0.5">
+            {sess.hasReflection ? (
+              <span className="text-[10px] text-text-secondary bg-bg-secondary px-1.5 py-0.5 rounded border border-border-subtle">
+                Reflection recorded
+              </span>
+            ) : (
+              !isLive && (
+                <span className="text-[10px] text-text-muted">Not reflected</span>
+              )
+            )}
+            {linkedTask && (
+              <button
+                type="button"
+                onClick={() => onInspectTask(linkedTask)}
+                className="inline-flex items-center gap-0.5 text-[11px] text-text-muted hover:text-text-primary transition-colors cursor-pointer"
+                title={`Open ${linkedTask.title} in task details`}
+              >
+                <span>Inspect task</span>
+                <ArrowRight size={11} />
+              </button>
+            )}
+            {showTimelineLink && (
+              <Link
+                href={`/timeline?date=${timelineDate}`}
+                className="inline-flex items-center gap-0.5 text-[11px] text-text-muted hover:text-text-primary transition-colors cursor-pointer"
+              >
+                <span>Timeline</span>
+                <ArrowRight size={11} />
+              </Link>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Target · Actual · Variance for this execution block only */}
+      <div className="flex items-center gap-2 shrink-0 font-mono text-xs text-text-muted sm:self-auto self-end">
+        {isLive ? (
+          <>
+            <span className="text-text-primary font-semibold font-sans">Running</span>
+            {targetMins != null && <span>· Target {targetMins}m</span>}
+          </>
+        ) : targetMins != null ? (
+          <>
+            <span>Target {targetMins}m ·</span>
+            <span className="text-text-primary font-medium" title={actualTitle}>
+              Actual {actualLabel}
+            </span>
+            {variance && variance !== "on target" && (
+              <span
+                className="inline-flex items-center gap-0.5 px-1 py-0.2 rounded text-[10px] bg-bg-secondary text-text-muted border border-border-subtle"
+                title="Actual minus target for this session only"
+              >
+                <span>{variance}</span>
+              </span>
+            )}
+          </>
+        ) : (
+          <>
+            <span>Target not set ·</span>
+            <span className="text-text-primary font-medium" title={actualTitle}>
+              Actual {actualLabel}
+            </span>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export function SessionsView() {
   const queryClient = useQueryClient();
   const telemetry = useLiveTelemetry();
 
-  // 1. Filter state for scalable 100+ day history
+  // 1. History controls: DATE RANGE = what dataset; VIEW = how organized;
+  // FILTERS = what subset; SEARCH = textual narrowing. Each layer is
+  // visually and semantically separate (see the History section below).
   const [rangePreset, setRangePreset] = useState<SessionRangePreset>("30d");
+  const [historyView, setHistoryView] = useState<SessionHistoryView>("by-task");
   const [selectedTaskId, setSelectedTaskId] = useState<string>("all");
+  const [linkedFilter, setLinkedFilter] = useState<SessionLinkedFilter>("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [customDraft, setCustomDraft] = useState({ from: "", to: "" });
+  const [customApplied, setCustomApplied] = useState<{ from: string; to: string } | null>(null);
+  const [customError, setCustomError] = useState<string | null>(null);
   const [visibleDaysCount, setVisibleDaysCount] = useState(15);
+  const [visibleGroupsCount, setVisibleGroupsCount] = useState(20);
+  // Task groups default collapsed so long histories stay scannable.
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string> | null>(null);
+  const [drawerTask, setDrawerTask] = useState<Task | null>(null);
 
-  // Compute date filter boundary based on rangePreset
+  // Canonical timezone + day boundary for ranges and grouping. While
+  // preferences load, helpers fall back to browser timezone / midnight.
+  const { data: preferences } = useUserPreferences();
+  const groupingTimezone = preferences?.timezone ?? undefined;
+  const groupingBoundary = preferences?.dayBoundary ?? undefined;
+
+  // A Custom preset with nothing applied yet shows the default window until
+  // the user picks dates and presses Apply — never a throwing query.
+  const effectivePreset: SessionRangePreset =
+    rangePreset === "custom" && !customApplied ? "30d" : rangePreset;
+
   const activeFilters = useMemo<SessionListFilters>(
-    () => resolveSessionFilters(rangePreset, selectedTaskId, searchQuery),
-    [rangePreset, selectedTaskId, searchQuery]
+    () =>
+      resolveSessionFilters({
+        rangePreset: effectivePreset,
+        selectedTaskId,
+        linkedFilter,
+        searchQuery,
+        customFrom: customApplied?.from ?? "",
+        customTo: customApplied?.to ?? "",
+        timezone: groupingTimezone,
+        boundary: groupingBoundary,
+      }),
+    [
+      effectivePreset,
+      selectedTaskId,
+      linkedFilter,
+      searchQuery,
+      customApplied,
+      groupingTimezone,
+      groupingBoundary,
+    ]
   );
 
   // 2. Data fetching
@@ -248,54 +487,101 @@ export function SessionsView() {
     return Math.round((taskLinkedSessions / completedSessions.length) * 100);
   }, [completedSessions, taskLinkedSessions]);
 
-  // Scalable Day-grouped history (Newest day first, sessions newest first)
-  const historyDayGroups = useMemo(() => {
-    const groupsMap = new Map<string, WorkSession[]>();
-    for (const sess of sessions) {
-      const dayKey = format(new Date(sess.startedAt), "yyyy-MM-dd");
-      const list = groupsMap.get(dayKey) ?? [];
-      list.push(sess);
-      groupsMap.set(dayKey, list);
-    }
+  // Grouping uses the same productive-day semantics as the date range so a
+  // session can never land on a different day in groups than in the query.
+  const groupingOptions = useMemo(
+    () => ({ timezone: groupingTimezone, boundary: groupingBoundary }),
+    [groupingTimezone, groupingBoundary]
+  );
 
+  const formatDayLabel = (dayKey: string): string => {
     const todayKey = format(new Date(), "yyyy-MM-dd");
     const yesterdayKey = format(new Date(Date.now() - 86400000), "yyyy-MM-dd");
+    try {
+      if (dayKey === todayKey) {
+        return `Today · ${format(new Date(`${dayKey}T12:00:00`), "EEEE, MMM d")}`;
+      } else if (dayKey === yesterdayKey) {
+        return `Yesterday · ${format(new Date(`${dayKey}T12:00:00`), "EEEE, MMM d")}`;
+      }
+      return format(new Date(`${dayKey}T12:00:00`), "EEEE, MMMM d, yyyy");
+    } catch {
+      return dayKey;
+    }
+  };
 
-    return Array.from(groupsMap.entries())
-      .sort((a, b) => b[0].localeCompare(a[0]))
-      .map(([dayKey, list]) => {
-        let label: string;
-        try {
-          if (dayKey === todayKey) {
-            label = `Today · ${format(new Date(`${dayKey}T12:00:00`), "EEEE, MMM d")}`;
-          } else if (dayKey === yesterdayKey) {
-            label = `Yesterday · ${format(new Date(`${dayKey}T12:00:00`), "EEEE, MMM d")}`;
-          } else {
-            label = format(new Date(`${dayKey}T12:00:00`), "EEEE, MMMM d, yyyy");
-          }
-        } catch {
-          label = dayKey;
-        }
+  // VIEW A — Timeline: chronological truth, days newest-first.
+  const timelineGroups = useMemo(() => {
+    return groupSessionsByDay(sessions, groupingOptions).map((g) => ({
+      ...g,
+      label: formatDayLabel(g.dayKey),
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessions, groupingTimezone, groupingBoundary]);
 
-        const dayTotalSecs = list.reduce((acc, s) => acc + (s.durationSeconds || 0), 0);
+  // VIEW B — By Task: repeated work grouped, sessions individually preserved.
+  const taskGroups = useMemo(() => {
+    return groupSessionsByTask(sessions, tasks, groupingOptions);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessions, tasks, groupingTimezone, groupingBoundary]);
 
-        return {
-          dayKey,
-          label,
-          dayTotalSecs,
-          sessions: [...list].sort((a, b) => b.startedAt.localeCompare(a.startedAt)),
-        };
-      });
-  }, [sessions]);
+  const visibleTimelineGroups = useMemo(() => {
+    return timelineGroups.slice(0, visibleDaysCount);
+  }, [timelineGroups, visibleDaysCount]);
 
-  const visibleDayGroups = useMemo(() => {
-    return historyDayGroups.slice(0, visibleDaysCount);
-  }, [historyDayGroups, visibleDaysCount]);
+  const visibleTaskGroups = useMemo(() => {
+    return taskGroups.slice(0, visibleGroupsCount);
+  }, [taskGroups, visibleGroupsCount]);
 
-  // Reset appears only when filters differ from the page defaults
-  // (range 30d, all tasks, empty search) — never on plain load.
-  const hasActiveFilters =
-    rangePreset !== "30d" || selectedTaskId !== "all" || searchQuery.trim().length > 0;
+  // Collapse defaults resolve once groups first load; user toggles win after.
+  const isGroupCollapsed = (key: string): boolean => {
+    if (collapsedGroups == null) return true;
+    return collapsedGroups.has(key);
+  };
+  const toggleGroupCollapsed = (key: string) => {
+    setCollapsedGroups((prev) => {
+      const base = prev ?? new Set(taskGroups.map((g) => g.key));
+      const next = new Set(base);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const hasActiveFilters = sessionFiltersDifferFromDefaults({
+    rangePreset,
+    selectedTaskId,
+    linkedFilter,
+    searchQuery,
+    customFrom: customApplied?.from ?? "",
+    customTo: customApplied?.to ?? "",
+  });
+
+  const resetFilters = () => {
+    setRangePreset("30d");
+    setSelectedTaskId("all");
+    setLinkedFilter("all");
+    setSearchQuery("");
+    setCustomDraft({ from: "", to: "" });
+    setCustomApplied(null);
+    setCustomError(null);
+    setVisibleDaysCount(15);
+    setVisibleGroupsCount(20);
+  };
+
+  const applyCustomRange = () => {
+    setCustomError(null);
+    if (!customDraft.from || !customDraft.to) {
+      setCustomError("Choose both From and To dates.");
+      return;
+    }
+    if (customDraft.from > customDraft.to) {
+      setCustomError("From must not be after To.");
+      return;
+    }
+    setCustomApplied({ from: customDraft.from, to: customDraft.to });
+    setVisibleDaysCount(15);
+    setVisibleGroupsCount(20);
+  };
 
   return (
     <PageContainer>
@@ -401,100 +687,195 @@ export function SessionsView() {
         )}
       </Section>
 
-      {/* 4. SESSION HISTORY STREAM (Grouped by day, scalable for 100+ days) */}
+      {/* 4. SESSION HISTORY.
+          CURRENT EXECUTION (card above) → HOW DO I WANT TO LOOK AT HISTORY?
+          (controls below) → HISTORY (views below). */}
       <Section>
         <div className="mb-3 space-y-3">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
             <SectionHeader
               title="Session History"
-              description="Chronological log of deliberate focus blocks"
+              description={
+                historyView === "timeline"
+                  ? "Chronological execution record, newest first"
+                  : "Repeated work grouped by task — sessions stay individual"
+              }
             />
-            <span className="text-xs font-mono text-text-muted">
-              {sessions.length} {sessions.length === 1 ? "session" : "sessions"} loaded
-            </span>
-          </div>
-
-          {/* History range + filters (relocated from standalone section; same behavior) */}
-          <div className="rounded-xl border border-border-subtle bg-bg-card p-4 space-y-3">
-            <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
-              {/* Range Preset Pills */}
-              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0">
-                <span className="text-xs text-text-muted flex items-center gap-1 mr-1 shrink-0 font-medium">
-                  <Calendar size={13} />
-                  <span>Range:</span>
-                </span>
-                {RANGE_OPTIONS.map((opt) => (
+            <div className="flex items-center gap-2">
+              {/* VIEW = how the dataset is organized */}
+              <div
+                className="bg-bg-secondary p-1 rounded-lg border border-border-subtle inline-flex items-center gap-1"
+                role="tablist"
+                aria-label="History organization"
+              >
+                {VIEW_OPTIONS.map((opt) => (
                   <button
                     key={opt.id}
                     type="button"
-                    onClick={() => {
-                      setRangePreset(opt.id);
-                      setVisibleDaysCount(15);
-                    }}
-                    className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer shrink-0 ${
-                      rangePreset === opt.id
-                        ? "bg-text-primary text-bg-default font-semibold shadow-xs"
-                        : "bg-bg-secondary text-text-muted hover:text-text-primary border border-border-subtle hover:border-border-hover"
+                    role="tab"
+                    aria-selected={historyView === opt.id}
+                    onClick={() => setHistoryView(opt.id)}
+                    className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer whitespace-nowrap ${
+                      historyView === opt.id
+                        ? "bg-bg-card text-text-primary border border-border-subtle/60 shadow-2xs font-semibold"
+                        : "text-text-muted hover:text-text-primary"
                     }`}
                   >
                     {opt.label}
                   </button>
                 ))}
               </div>
+              <span className="text-xs font-mono text-text-muted">
+                {sessions.length} {sessions.length === 1 ? "session" : "sessions"}
+              </span>
+            </div>
+          </div>
 
-              {/* Task Filter & Search */}
-              <div className="flex flex-wrap items-center gap-2">
-                {/* Task Selector */}
-                <div className="relative">
-                  <select
-                    value={selectedTaskId}
-                    onChange={(e) => setSelectedTaskId(e.target.value)}
-                    className="appearance-none bg-bg-secondary text-text-primary text-xs border border-border-subtle hover:border-border-hover rounded-md pl-3 pr-8 py-1.5 outline-none cursor-pointer"
-                  >
-                    <option value="all">All Tasks</option>
-                    {tasks.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.title.length > 28 ? `${t.title.substring(0, 28)}...` : t.title}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown
-                    size={12}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none"
-                  />
-                </div>
+          {/* History controls: DATE RANGE → FILTERS → SEARCH, each separate. */}
+          <div className="rounded-xl border border-border-subtle bg-bg-card p-4 space-y-3">
+            {/* DATE RANGE = what dataset is being viewed */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+              <span className="text-xs text-text-muted flex items-center gap-1 mr-1 shrink-0 font-medium">
+                <Calendar size={13} />
+                <span>Date range:</span>
+              </span>
+              {RANGE_OPTIONS.map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => {
+                    setRangePreset(opt.id);
+                    setVisibleDaysCount(15);
+                    setVisibleGroupsCount(20);
+                  }}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer shrink-0 ${
+                    rangePreset === opt.id
+                      ? "bg-text-primary text-bg-default font-semibold shadow-xs"
+                      : "bg-bg-secondary text-text-muted hover:text-text-primary border border-border-subtle hover:border-border-hover"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
 
-                {/* Text Search Input */}
-                <div className="relative flex-1 sm:w-56">
-                  <Search
-                    size={12}
-                    className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none"
-                  />
+            {/* Custom range picker (date-based; instants resolve productive-day aware) */}
+            {rangePreset === "custom" && (
+              <div className="flex items-end gap-2 flex-wrap pt-1 border-t border-border-subtle">
+                <label className="flex flex-col gap-1 text-xs text-text-muted">
+                  <span>From</span>
                   <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Filter sessions or notes..."
-                    className="w-full bg-bg-secondary text-text-primary text-xs placeholder:text-text-muted border border-border-subtle focus:border-border-strong rounded-md pl-8 pr-3 py-1.5 outline-none"
-                  />
-                </div>
-
-                {hasActiveFilters && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setRangePreset("30d");
-                      setSelectedTaskId("all");
-                      setSearchQuery("");
+                    type="date"
+                    value={customDraft.from}
+                    max={customDraft.to || undefined}
+                    onChange={(e) => {
+                      setCustomDraft((d) => ({ ...d, from: e.target.value }));
+                      setCustomError(null);
                     }}
-                    className="inline-flex items-center gap-1 text-xs text-text-muted hover:text-text-primary px-2 py-1.5 rounded-md hover:bg-bg-secondary transition-colors cursor-pointer"
-                    title="Reset all filters"
-                  >
-                    <RotateCcw size={11} />
-                    <span>Reset</span>
-                  </button>
+                    className="bg-bg-secondary text-text-primary text-xs border border-border-subtle rounded-md px-2.5 py-1.5 outline-none cursor-pointer"
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-xs text-text-muted">
+                  <span>To</span>
+                  <input
+                    type="date"
+                    value={customDraft.to}
+                    min={customDraft.from || undefined}
+                    onChange={(e) => {
+                      setCustomDraft((d) => ({ ...d, to: e.target.value }));
+                      setCustomError(null);
+                    }}
+                    className="bg-bg-secondary text-text-primary text-xs border border-border-subtle rounded-md px-2.5 py-1.5 outline-none cursor-pointer"
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={applyCustomRange}
+                  className="px-3 py-1.5 rounded-md bg-text-primary text-bg-default text-xs font-medium hover:opacity-90 transition-opacity cursor-pointer"
+                >
+                  Apply
+                </button>
+                {customApplied && (
+                  <span className="text-xs font-mono text-text-muted pb-1.5">
+                    Showing {customApplied.from} → {customApplied.to}
+                  </span>
+                )}
+                {customError && (
+                  <span role="alert" className="text-xs text-rose-600 dark:text-rose-400 pb-1.5">
+                    {customError}
+                  </span>
                 )}
               </div>
+            )}
+
+            <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-border-subtle">
+              {/* FILTERS = what subset is shown */}
+              <span className="text-xs text-text-muted font-medium mr-1">Filters:</span>
+              <div className="relative">
+                <span className="text-xs text-text-muted mr-1.5">Task</span>
+                <select
+                  value={selectedTaskId}
+                  onChange={(e) => setSelectedTaskId(e.target.value)}
+                  className="appearance-none bg-bg-secondary text-text-primary text-xs border border-border-subtle hover:border-border-hover rounded-md pl-3 pr-8 py-1.5 outline-none cursor-pointer"
+                >
+                  <option value="all">All tasks</option>
+                  {tasks.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.title.length > 28 ? `${t.title.substring(0, 28)}...` : t.title}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown
+                  size={12}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none"
+                />
+              </div>
+
+              <div className="relative">
+                <span className="text-xs text-text-muted mr-1.5">Session</span>
+                <select
+                  value={linkedFilter}
+                  onChange={(e) => setLinkedFilter(e.target.value as SessionLinkedFilter)}
+                  className="appearance-none bg-bg-secondary text-text-primary text-xs border border-border-subtle hover:border-border-hover rounded-md pl-3 pr-8 py-1.5 outline-none cursor-pointer"
+                >
+                  {LINKED_OPTIONS.map((opt) => (
+                    <option key={opt.id} value={opt.id}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown
+                  size={12}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none"
+                />
+              </div>
+
+              {/* SEARCH = textual narrowing (server-side: notes, task, goal) */}
+              <div className="relative flex-1 min-w-52">
+                <Search
+                  size={12}
+                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none"
+                />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search sessions, tasks, goals, notes..."
+                  className="w-full bg-bg-secondary text-text-primary text-xs placeholder:text-text-muted border border-border-subtle focus:border-border-strong rounded-md pl-8 pr-3 py-1.5 outline-none"
+                />
+              </div>
+
+              {hasActiveFilters && (
+                <button
+                  type="button"
+                  onClick={resetFilters}
+                  className="inline-flex items-center gap-1 text-xs text-text-muted hover:text-text-primary px-2 py-1.5 rounded-md hover:bg-bg-secondary transition-colors cursor-pointer"
+                  title="Reset filters to defaults"
+                >
+                  <RotateCcw size={11} />
+                  <span>Reset</span>
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -511,16 +892,24 @@ export function SessionsView() {
           </div>
         ) : sessions.length === 0 ? (
           <EmptyState
-            title={hasActiveFilters ? "No Sessions Match Filters" : "No Sessions Recorded Yet"}
+            title={
+              rangePreset === "custom" && !customApplied
+                ? "Choose a Custom Range"
+                : hasActiveFilters
+                  ? "No Sessions Match Filters"
+                  : "No Sessions Recorded Yet"
+            }
             description={
-              hasActiveFilters
-                ? "No deliberate focus sessions found for the selected time range or search criteria. Try selecting 'All Time' or resetting filters."
-                : "Start a focus block above or from the browser extension to begin capturing deliberate work periods."
+              rangePreset === "custom" && !customApplied
+                ? "Pick From and To dates above, then press Apply to view that window."
+                : hasActiveFilters
+                  ? "No deliberate focus sessions found for the selected range, filters, or search. Adjust or reset them."
+                  : "Start a focus block above or from the browser extension to begin capturing deliberate work periods."
             }
           />
-        ) : (
+        ) : historyView === "timeline" ? (
           <div className="space-y-5">
-            {visibleDayGroups.map((group) => (
+            {visibleTimelineGroups.map((group) => (
               <div
                 key={group.dayKey}
                 className="rounded-xl border border-border-subtle bg-bg-card overflow-hidden"
@@ -531,12 +920,12 @@ export function SessionsView() {
                     <span className="text-xs font-semibold text-text-primary">
                       {group.label}
                     </span>
-                    {group.dayTotalSecs > 0 && (
+                    {group.totalSecs > 0 && (
                       <span
                         className="text-[11px] font-mono text-text-muted bg-bg-secondary px-1.5 py-0.5 rounded border border-border-subtle"
-                        title={formatSessionDurationExact(group.dayTotalSecs)}
+                        title={formatSessionDurationExact(group.totalSecs)}
                       >
-                        {formatSessionDuration(group.dayTotalSecs)}
+                        {formatSessionDuration(group.totalSecs)}
                       </span>
                     )}
                   </div>
@@ -556,143 +945,21 @@ export function SessionsView() {
 
                 {/* Day Sessions List */}
                 <div className="divide-y divide-border-subtle">
-                  {group.sessions.map((sess) => {
-                    const linkedTask = tasks.find((t) => t.id === sess.taskId);
-                    const isLive = !sess.endedAt;
-                    const actualLabel = formatSessionDuration(sess.durationSeconds);
-                    const actualTitle = formatSessionDurationExact(sess.durationSeconds);
-                    const title =
-                      sess.taskTitle ?? linkedTask?.title ?? sess.notes ?? "Intentional Focus Session";
-                    const goalTitle = sess.goalTitle ?? linkedTask?.goalTitle ?? null;
-                    // Session target ONLY: never fall back to the task's planned
-                    // duration here. A null target renders honestly as unset.
-                    const targetMins = sess.targetDurationMinutes ?? null;
-                    const variance =
-                      targetMins != null && !isLive
-                        ? formatTargetVariance(sess.durationSeconds ?? 0, targetMins)
-                        : null;
-
-                    return (
-                      <div
-                        key={sess.id}
-                        className="px-4 sm:px-5 py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-bg-secondary/40 transition-colors"
-                      >
-                        <div className="flex items-start sm:items-center gap-3 min-w-0">
-                          <div
-                            className={`h-7 w-7 rounded-full flex items-center justify-center shrink-0 mt-0.5 sm:mt-0 ${
-                              isLive
-                                ? "bg-bg-secondary text-text-primary border border-border-strong"
-                                : "bg-bg-secondary text-text-muted border border-border-subtle"
-                            }`}
-                          >
-                            {isLive ? (
-                              <Play size={11} className="fill-current animate-pulse" />
-                            ) : (
-                              <CheckCircle2 size={13} />
-                            )}
-                          </div>
-
-                          <div className="min-w-0 space-y-0.5">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-sm font-medium text-text-primary truncate">
-                                {title}
-                              </span>
-                              {isLive && (
-                                <span className="text-[10px] font-mono uppercase tracking-wider text-text-primary bg-bg-secondary border border-border-strong px-1.5 py-0.2 rounded">
-                                  Live
-                                </span>
-                              )}
-                              {!sess.taskId && !isLive && (
-                                <span className="text-[10px] font-mono uppercase tracking-wider text-text-muted bg-bg-secondary border border-border-subtle px-1.5 py-0.2 rounded">
-                                  Independent
-                                </span>
-                              )}
-                              {goalTitle && (
-                                <span className="inline-flex items-center gap-1 text-[10px] text-text-muted bg-bg-secondary px-1.5 py-0.5 rounded border border-border-subtle truncate">
-                                  <Target size={10} className="shrink-0" />
-                                  <span>{goalTitle}</span>
-                                </span>
-                              )}
-                            </div>
-                            <div className="flex items-center gap-2 text-xs text-text-muted font-mono flex-wrap">
-                              <span>
-                                {(() => {
-                                  let startDate = new Date(sess.startedAt);
-                                  if (sess.endedAt && sess.durationSeconds) {
-                                    const endDate = new Date(sess.endedAt);
-                                    const wallClockSec = Math.round(
-                                      (endDate.getTime() - startDate.getTime()) / 1000
-                                    );
-                                    if (wallClockSec < sess.durationSeconds) {
-                                      startDate = new Date(endDate.getTime() - sess.durationSeconds * 1000);
-                                    }
-                                  }
-                                  return format(startDate, "h:mm a");
-                                })()}
-                                {sess.endedAt ? (
-                                  <> – {format(new Date(sess.endedAt), "h:mm a")}</>
-                                ) : (
-                                  " · Running now"
-                                )}
-                              </span>
-                              {sess.notes && sess.notes !== title && (
-                                <>
-                                  <span>·</span>
-                                  <span className="italic text-text-muted truncate max-w-xs font-sans">
-                                    "{sess.notes}"
-                                  </span>
-                                </>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Target vs actual execution for this block */}
-                        <div className="flex items-center gap-2 shrink-0 font-mono text-xs text-text-muted sm:self-auto self-end">
-                          {isLive ? (
-                            <>
-                              <span className="text-text-primary font-semibold font-sans">Running</span>
-                              {targetMins != null && <span>· Target {targetMins}m</span>}
-                            </>
-                          ) : targetMins != null ? (
-                            <>
-                              <span>Target {targetMins}m ·</span>
-                              <span
-                                className="text-text-primary font-medium"
-                                title={actualTitle}
-                              >
-                                Actual {actualLabel}
-                              </span>
-                              {variance && variance !== "on target" && (
-                                <span
-                                  className="inline-flex items-center gap-0.5 px-1 py-0.2 rounded text-[10px] bg-bg-secondary text-text-muted border border-border-subtle"
-                                  title="Actual minus target for this session only"
-                                >
-                                  <span>{variance}</span>
-                                </span>
-                              )}
-                            </>
-                          ) : (
-                            <>
-                              <span>Target not set ·</span>
-                              <span
-                                className="text-text-primary font-medium"
-                                title={actualTitle}
-                              >
-                                Actual {actualLabel}
-                              </span>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
+                  {group.sessions.map((sess) => (
+                    <SessionRow
+                      key={sess.id}
+                      sess={sess}
+                      tasks={tasks}
+                      timelineDate={group.dayKey}
+                      onInspectTask={(t) => setDrawerTask(t)}
+                    />
+                  ))}
                 </div>
               </div>
             ))}
 
-            {/* Pagination / "Load More Days" for 100+ day history */}
-            {historyDayGroups.length > visibleDaysCount && (
+            {/* Pagination for large histories (server-scoped pages) */}
+            {timelineGroups.length > visibleDaysCount && (
               <div className="pt-2 text-center">
                 <button
                   type="button"
@@ -701,7 +968,136 @@ export function SessionsView() {
                 >
                   <Clock size={12} />
                   <span>
-                    Show Earlier Days ({historyDayGroups.length - visibleDaysCount} remaining)
+                    Show Earlier Days ({timelineGroups.length - visibleDaysCount} remaining)
+                  </span>
+                </button>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {visibleTaskGroups.map((group) => {
+              const collapsed = isGroupCollapsed(group.key);
+              const linkedTask = group.taskId
+                ? (tasks.find((t) => t.id === group.taskId) ?? null)
+                : null;
+              const spanLabel =
+                group.firstDay === group.lastDay
+                  ? format(new Date(`${group.firstDay}T12:00:00`), "MMM d")
+                  : `${format(new Date(`${group.firstDay}T12:00:00`), "MMM d")} – ${format(new Date(`${group.lastDay}T12:00:00`), "MMM d")}`;
+              // Variance is actual-minus-targets for THESE sessions only.
+              // It is never "task overtime": the task may carry more targets.
+              const varianceLabel =
+                group.varianceSecs == null
+                  ? "—"
+                  : group.varianceSecs === 0
+                    ? "on target"
+                    : `${group.varianceSecs > 0 ? "+" : ""}${Math.round(group.varianceSecs / 60)}m`;
+              return (
+                <div
+                  key={group.key}
+                  className="rounded-xl border border-border-subtle bg-bg-card overflow-hidden"
+                >
+                  <button
+                    type="button"
+                    onClick={() => toggleGroupCollapsed(group.key)}
+                    aria-expanded={!collapsed}
+                    className="w-full px-4 sm:px-5 py-3 flex items-center justify-between gap-3 hover:bg-bg-secondary/40 transition-colors text-left cursor-pointer"
+                  >
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-sm font-medium text-text-primary truncate">
+                          {group.title}
+                        </span>
+                        {group.taskId == null ? (
+                          <span className="text-[10px] font-mono uppercase tracking-wider text-text-muted bg-bg-secondary border border-border-subtle px-1.5 py-0.2 rounded">
+                            Independent
+                          </span>
+                        ) : (
+                          group.goalTitle && (
+                            <span className="inline-flex items-center gap-1 text-[10px] text-text-muted bg-bg-secondary px-1.5 py-0.5 rounded border border-border-subtle truncate">
+                              <Target size={10} className="shrink-0" />
+                              <span>{group.goalTitle}</span>
+                            </span>
+                          )
+                        )}
+                      </div>
+                      <div className="text-xs text-text-muted font-mono mt-0.5">
+                        {group.sessionCount} {group.sessionCount === 1 ? "session" : "sessions"} · {spanLabel}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3 shrink-0 font-mono text-xs text-text-muted">
+                      <span title={`Summed recorded durations (${group.sessionCount} sessions)`}>
+                        Total {formatSessionDuration(group.totalActualSecs)}
+                      </span>
+                      <span
+                        title={
+                          group.totalTargetSecs != null
+                            ? "Summed session targets (every session has one)"
+                            : "Some sessions in this group have no target — total withheld"
+                        }
+                      >
+                        Targets{" "}
+                        {group.totalTargetSecs != null
+                          ? formatSessionDuration(group.totalTargetSecs)
+                          : "—"}
+                      </span>
+                      <span
+                        className="text-text-primary font-medium"
+                        title="Summed actuals minus summed targets, for these sessions only"
+                      >
+                        {varianceLabel}
+                      </span>
+                      <ChevronDown
+                        size={14}
+                        className={`text-text-muted transition-transform ${collapsed ? "" : "rotate-180"}`}
+                      />
+                    </div>
+                  </button>
+
+                  {!collapsed && (
+                    <div className="divide-y divide-border-subtle border-t border-border-subtle">
+                      {group.sessions.map((sess) => (
+                        <SessionRow
+                          key={sess.id}
+                          sess={sess}
+                          tasks={tasks}
+                          timelineDate={sessionDayKey(sess.startedAt, groupingOptions)}
+                          onInspectTask={(t) => setDrawerTask(t)}
+                          compact
+                          datePrefix={format(
+                            new Date(`${sessionDayKey(sess.startedAt, groupingOptions)}T12:00:00`),
+                            "MMM d"
+                          )}
+                          showTimelineLink
+                        />
+                      ))}
+                      {linkedTask && (
+                        <button
+                          type="button"
+                          onClick={() => setDrawerTask(linkedTask)}
+                          className="w-full inline-flex items-center justify-center gap-1 px-4 py-2.5 text-xs text-text-muted hover:text-text-primary hover:bg-bg-secondary/40 transition-colors cursor-pointer"
+                        >
+                          <span>Inspect task — full history, reflections & telemetry</span>
+                          <ArrowRight size={12} />
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {taskGroups.length > visibleGroupsCount && (
+              <div className="pt-2 text-center">
+                <button
+                  type="button"
+                  onClick={() => setVisibleGroupsCount((prev) => prev + 20)}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-bg-secondary hover:bg-bg-tertiary border border-border-subtle text-xs font-medium text-text-primary transition-colors cursor-pointer"
+                >
+                  <Clock size={12} />
+                  <span>
+                    Show More Groups ({taskGroups.length - visibleGroupsCount} remaining)
                   </span>
                 </button>
               </div>
@@ -715,6 +1111,7 @@ export function SessionsView() {
         onClose={() => setReflectionSession(null)}
         session={reflectionSession}
       />
+      <TaskDetailDrawer task={drawerTask} onClose={() => setDrawerTask(null)} />
     </PageContainer>
   );
 }

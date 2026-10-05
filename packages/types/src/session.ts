@@ -13,4 +13,6 @@ export type WorkSession = {
   notes?: string | null;
   taskTitle?: string | null;
   goalTitle?: string | null;
+  /** True when at least one CheckIn references this session. Advisory display state. */
+  hasReflection?: boolean;
 };
