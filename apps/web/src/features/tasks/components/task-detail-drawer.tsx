@@ -28,6 +28,7 @@ import {
 import Link from "next/link";
 import { resolveProductiveDay, type Task, type TaskPriority, type TaskStatus } from "@repo/types";
 import { dueDateKey } from "../lib/task-scopes";
+import { formatTaskProvenance } from "../lib/task-provenance";
 import { useTaskDetail, useTaskActivity, useTaskScheduleHistory } from "../api/queries";
 import { useTodayPlan } from "@features/today";
 import { useUpdateTaskMutation, useDeleteTaskMutation } from "../api/mutations";
@@ -1067,14 +1068,11 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
         {/* Footer info (actions removed per request) */}
         <div className="px-5 py-3.5 border-t border-border-subtle bg-bg-card flex items-center justify-between gap-3">
           <div className="flex flex-col text-[11px] text-text-muted">
-            <span>
-              Created: {format(new Date(currentTask.createdAt), "MMM d, h:mm a")}
-            </span>
-            {currentTask.completedAt && (
-              <span className="text-text-primary">
-                Completed: {format(new Date(currentTask.completedAt), "MMM d, h:mm a")}
+            {formatTaskProvenance(currentTask).map((t) => (
+              <span key={t} className={t.startsWith("Completed:") ? "text-text-primary" : undefined}>
+                {t}
               </span>
-            )}
+            ))}
           </div>
         </div>
       </div>
