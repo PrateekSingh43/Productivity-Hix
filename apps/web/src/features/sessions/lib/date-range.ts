@@ -50,6 +50,26 @@ function shiftDay(day: string, deltaDays: number): string {
   return `${dt.getUTCFullYear()}-${mm}-${dd}`;
 }
 
+export { shiftDay };
+
+/**
+ * The last N productive days ending today, oldest-first. Backs the
+ * descriptive 7-day focus rhythm strip (presence per day, never a
+ * consecutive-day streak counter).
+ */
+export function lastProductiveDays(
+  count: number,
+  options: SessionRangeOptions = {},
+): string[] {
+  const timezone =
+    options.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC";
+  const boundary = options.boundary ?? DEFAULT_PRODUCTIVE_DAY_BOUNDARY;
+  const today = resolveProductiveDay(options.now ?? new Date(), { timezone, boundary });
+  const days: string[] = [];
+  for (let i = count - 1; i >= 0; i--) days.push(shiftDay(today, -i));
+  return days;
+}
+
 /** Start instant (UTC) of productive day `day` under the given boundary. */
 export function productiveDayStart(
   day: string,

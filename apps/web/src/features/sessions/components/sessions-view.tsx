@@ -34,6 +34,7 @@ import type {
 import type { Task } from "@repo/types";
 import { format } from "date-fns";
 import { resolveSessionFilters, sessionFiltersDifferFromDefaults } from "../lib/session-filters";
+import { lastProductiveDays, resolveSessionDateRange } from "../lib/date-range";
 import { resolveFocusPayload, type FocusTarget } from "../lib/focus-target";
 import {
   formatSessionDuration,
@@ -553,6 +554,40 @@ export function SessionsView() {
     return taskGroups.slice(0, visibleGroupsCount);
   }, [taskGroups, visibleGroupsCount]);
 
+  // 7-day focus rhythm: descriptive presence per productive day (dots for
+  // days with at least one ended session). Never a consecutive-day streak:
+  // a 5-minute block and a 3-hour day both mark presence, and a gap breaks
+  // nothing. Scoped to Sessions only — Today/Home must not duplicate it.
+  const rhythmRange = useMemo(
+    () => resolveSessionDateRange("7d", { timezone: groupingTimezone, boundary: groupingBoundary }),
+    [groupingTimezone, groupingBoundary]
+  );
+  const rhythmFilters = useMemo<SessionListFilters>(
+    () => ({
+      limit: 200,
+      ...(rhythmRange.from ? { from: rhythmRange.from } : {}),
+      ...(rhythmRange.to ? { to: rhythmRange.to } : {}),
+    }),
+    [rhythmRange]
+  );
+  const { data: rhythmSessions = [], isLoading: isLoadingRhythm } =
+    useSessionsList(rhythmFilters);
+  const rhythmDays = useMemo(
+    () => lastProductiveDays(7, { timezone: groupingTimezone, boundary: groupingBoundary }),
+    [groupingTimezone, groupingBoundary]
+  );
+  const rhythmStats = useMemo(() => {
+    const ended = rhythmSessions.filter((s) => s.endedAt);
+    const daySet = new Set(ended.map((s) => sessionDayKey(s.startedAt, groupingOptions)));
+    return {
+      daySet,
+      focusDays: daySet.size,
+      sessionCount: ended.length,
+      totalSecs: ended.reduce((acc, s) => acc + Math.max(0, s.durationSeconds ?? 0), 0),
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rhythmSessions, groupingTimezone, groupingBoundary]);
+
   // Batched observation summaries for currently visible ended sessions
   // (one request per visible set, 60s stale). Live sessions are excluded:
   // their telemetry window is still open.
@@ -717,6 +752,44 @@ export function SessionsView() {
                 Sessions tied to strategic tasks
               </p>
             </div>
+          </div>
+        )}
+
+        {/* 7-day focus rhythm: descriptive presence, never a streak. */}
+        {!isLoadingRhythm && (
+          <div className="mt-3 rounded-xl border border-border-subtle bg-bg-card px-4 py-3 flex items-center gap-4 flex-wrap">
+            <div className="min-w-40">
+              <span className="text-xs font-medium text-text-primary block">
+                7-day focus rhythm
+              </span>
+              <span className="text-[11px] text-text-muted block">
+                Presence per productive day — a gap breaks nothing.
+              </span>
+            </div>
+            <div className="flex items-center gap-2.5" aria-label="Focus days in the last 7 productive days">
+              {rhythmDays.map((day) => {
+                const active = rhythmStats.daySet.has(day);
+                return (
+                  <div key={day} className="flex flex-col items-center gap-1" title={day}>
+                    <span className="text-[10px] font-mono text-text-muted">
+                      {format(new Date(`${day}T12:00:00`), "EEEEE")}
+                    </span>
+                    <span
+                      className={`h-2 w-2 rounded-full ${
+                        active ? "bg-text-primary" : "bg-border-subtle"
+                      }`}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+            <span className="text-xs font-mono text-text-muted">
+              {rhythmStats.focusDays === 0 ? (
+                "No focus days in the last 7 days yet."
+              ) : (
+                `${rhythmStats.focusDays} focus ${rhythmStats.focusDays === 1 ? "day" : "days"} · ${rhythmStats.sessionCount} ${rhythmStats.sessionCount === 1 ? "session" : "sessions"} · ${formatSessionDuration(rhythmStats.totalSecs)}`
+              )}
+            </span>
           </div>
         )}
       </Section>
@@ -1062,7 +1135,7 @@ export function SessionsView() {
                         {group.sessionCount} {group.sessionCount === 1 ? "session" : "sessions"} · {spanLabel}
                       </div>
                     </div>
-                    <div className="flex items-center gap-3 shrink-0 font-mono text-xs text-text-muted">
+                    <div className="flex items-center justify-end gap-x-3 gap-y-1 flex-wrap shrink-0 font-mono text-xs text-text-muted">
                       <span title={`Summed recorded durations (${group.sessionCount} sessions)`}>
                         Total {formatSessionDuration(group.totalActualSecs)}
                       </span>

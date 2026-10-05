@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { resolveSessionDateRange } from "./date-range";
+import { lastProductiveDays, resolveSessionDateRange } from "./date-range";
 
 const KOLKATA = { timezone: "Asia/Kolkata", boundary: "04:00" };
 
@@ -62,5 +62,19 @@ describe("resolveSessionDateRange", () => {
 
   it("all returns an unbounded range", () => {
     expect(resolveSessionDateRange("all", { ...KOLKATA })).toEqual({});
+  });
+
+  it("lastProductiveDays returns 7 days ending today, oldest first", () => {
+    expect(
+      lastProductiveDays(7, { ...KOLKATA, now: new Date("2026-10-04T01:30:00.000Z") }),
+    ).toEqual([
+      "2026-09-28",
+      "2026-09-29",
+      "2026-09-30",
+      "2026-10-01",
+      "2026-10-02",
+      "2026-10-03",
+      "2026-10-04",
+    ]);
   });
 });
