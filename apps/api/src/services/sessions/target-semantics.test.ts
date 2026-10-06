@@ -14,6 +14,8 @@ afterEach(resetTestDb);
 function mockDb(captured: { data?: Record<string, unknown> }) {
   setTestDb({
     workSession: {
+      // No active session: the one-active guard passes through to create.
+      findFirst: async () => null,
       create: async ({ data }: { data: Record<string, unknown> }) => {
         captured.data = data;
         return {

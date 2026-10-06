@@ -192,6 +192,21 @@ export async function createSession(
   },
 ) {
   const db = getDb();
+  // One-active-session invariant: a second concurrent session would fork
+  // timers no client can pause or discard coherently (duplicate rows, split
+  // durations, 404s on stale ids). Fail loudly with 409 so every client —
+  // web, extension, desktop — converges on the existing session instead.
+  const alreadyActive = await db.workSession.findFirst({
+    where: { userId, endedAt: null },
+    orderBy: { startedAt: "desc" },
+  });
+  if (alreadyActive) {
+    const error = new Error("A focus session is already active") as Error & {
+      statusCode?: number;
+    };
+    error.statusCode = 409;
+    throw error;
+  }
   // No inheritance from the linked task's planned duration (see note above):
   // what is stored is exactly what the caller set, or null.
   const targetMins = input.targetDurationMinutes ?? null;

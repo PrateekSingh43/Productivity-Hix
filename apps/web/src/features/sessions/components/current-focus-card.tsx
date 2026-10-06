@@ -9,6 +9,7 @@ import {
   Target,
   Clock,
   Radio,
+  Trash2,
 } from "lucide-react";
 import type { Task } from "@repo/types";
 import { PriorityBadge } from "@shared/components/primitives";
@@ -37,6 +38,7 @@ export interface CurrentFocusCardProps {
   onPause?: () => void;
   onResume?: () => void;
   onComplete?: () => void;
+  onDiscard?: () => void;
   className?: string;
 }
 
@@ -66,6 +68,7 @@ export function CurrentFocusCard({
   onPause,
   onResume,
   onComplete,
+  onDiscard,
   className = "",
 }: CurrentFocusCardProps) {
   const [isChoosing, setIsChoosing] = useState(false);
@@ -190,6 +193,18 @@ export function CurrentFocusCard({
 
         {/* Execution Actions */}
         <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-border-subtle">
+          {onDiscard && (
+            <button
+              type="button"
+              onClick={onDiscard}
+              disabled={isPending}
+              className="inline-flex items-center gap-1.5 text-xs text-text-muted hover:text-rose-500 hover:bg-rose-500/10 border border-transparent hover:border-rose-500/30 px-3 py-2 rounded-md transition-colors cursor-pointer mr-auto"
+              title="Discard this session (removes it permanently)"
+            >
+              <Trash2 size={12} />
+              <span>Discard</span>
+            </button>
+          )}
           {onPause && (
             <button
               type="button"

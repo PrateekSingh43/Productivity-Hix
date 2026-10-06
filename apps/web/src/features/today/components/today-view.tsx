@@ -25,12 +25,14 @@ import { EmptyState, PriorityBadge } from "@shared/components/primitives";
 import { TaskDetailDrawer, ConfirmDiscardModal, FocusReflectionModal, PlannedFocusPicker, useTasksList, createTask, updateTask } from "@features/tasks";
 import {
   useActiveSession,
+  sessionQueries,
   createSession,
   finishSession,
   pauseSession,
   resumeSession,
   deleteSession,
 } from "@features/sessions";
+import { ApiClientError } from "@shared/api/client";
 import { useTodayPlan } from "../api/queries";
 import { useSavePlan, useUpdateGoalOutcome } from "../api/mutations";
 import { useLiveTelemetry } from "@features/timeline";
@@ -61,6 +63,8 @@ export function TodayView() {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [sessionPending, setSessionPending] = useState(false);
+  const [sessionError, setSessionError] = useState<string | null>(null);
   const [reflectionSession, setReflectionSession] = useState<{
     id: string;
     taskId?: string | null;
@@ -120,7 +124,9 @@ export function TodayView() {
     queryClient.invalidateQueries({ queryKey: ["plans"] });
   };
 
-  // Sync with server active session state (cross-synced with extension)
+  // Sync with server active session state (cross-synced with extension).
+  // Display only: linking/attribution always derive from serverActiveSession
+  // at use time, never from retained selection state.
   useEffect(() => {
     if (serverActiveSession && !serverActiveSession.endedAt) {
       setSessionActive(true);
@@ -130,6 +136,8 @@ export function TodayView() {
       if (serverActiveSession.taskId) {
         const found = rawTasks.find((t) => t.id === serverActiveSession.taskId);
         if (found) setSelectedTask(found);
+      } else {
+        setSelectedTask(null);
       }
 
       if (serverActiveSession.isPaused) {
@@ -149,6 +157,42 @@ export function TodayView() {
       setIsPaused(false);
     }
   }, [serverActiveSession, rawTasks]);
+
+  // Authoritative task for the live session, resolved fresh from query
+  // data — the retained selectedTask may be stale (or belong to a previous
+  // session) and must never decide attribution or lifecycle writes.
+  const serverTask = serverActiveSession?.taskId
+    ? (rawTasks.find((t) => t.id === serverActiveSession.taskId) ?? null)
+    : null;
+
+  // Session target for display: server target, else the linked task's plan,
+  // else unset. Never invent 25m.
+  const displayTargetMinutes =
+    serverActiveSession?.targetDurationMinutes ?? serverTask?.plannedDurationMinutes ?? null;
+
+  // Wake resync: refresh authoritative session state when the tab becomes
+  // visible or connectivity returns, so a pre-sleep frozen display converges
+  // on server truth immediately instead of lingering until the next poll.
+  useEffect(() => {
+    const resync = () => {
+      queryClient.invalidateQueries({ queryKey: sessionQueries.active().queryKey });
+      queryClient.invalidateQueries({ queryKey: sessionQueries.lists() });
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") resync();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("online", resync);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("online", resync);
+    };
+  }, [queryClient]);
+
+  // Restoring state: while the active query never resolved, a live session
+  // may exist. Never render "Up next" as "no session" here.
+  const isRestoringToday =
+    activeSessionQuery.isLoading && !serverActiveSession && !activeSessionId;
 
   // Elapsed timer ticker (only ticks when active and not paused)
   useEffect(() => {
@@ -275,21 +319,21 @@ export function TodayView() {
   // Trigger web notification when target is reached
   useEffect(() => {
     if (!sessionActive || isPaused) return;
-    const targetMinutes = serverActiveSession?.targetDurationMinutes ?? selectedTask?.plannedDurationMinutes ?? 25;
-    const targetSec = targetMinutes * 60;
+    if (displayTargetMinutes == null) return;
+    const targetSec = displayTargetMinutes * 60;
     if (elapsedSeconds >= targetSec && activeSessionId && hasNotifiedRef.current !== activeSessionId) {
       hasNotifiedRef.current = activeSessionId;
       if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted") {
-        const title = selectedTask?.title || "Focus Session";
+        const title = serverTask?.title || serverActiveSession?.taskTitle || "Focus Session";
         try {
           new Notification("Focus Target Reached!", {
-            body: `Completed planned ${targetMinutes}m on "${title}". Continue in flow or wrap up & reflect.`,
+            body: `Completed planned ${displayTargetMinutes}m on "${title}". Continue in flow or wrap up & reflect.`,
             icon: "/icon.png",
           });
         } catch {}
       }
     }
-  }, [sessionActive, isPaused, elapsedSeconds, activeSessionId, serverActiveSession, selectedTask]);
+  }, [sessionActive, isPaused, elapsedSeconds, activeSessionId, serverActiveSession, serverTask, displayTargetMinutes]);
 
   // Handler to toggle task done/todo
   const handleToggleTask = async (task: Task) => {
@@ -301,7 +345,10 @@ export function TodayView() {
 
   // Handler to start focus on a specific task
   const handleStartTaskFocus = async (task: Task) => {
+    if (activeSessionId || sessionPending) return;
     setSelectedTask(task);
+    setSessionError(null);
+    setSessionPending(true);
     try {
       const targetDurationMinutes = task.plannedDurationMinutes ?? 30;
       const session = await createSession({
@@ -317,58 +364,85 @@ export function TodayView() {
       await updateTask(task.id, { status: "in_progress" });
       queryClient.invalidateQueries({ queryKey: ["tasks"] });
       queryClient.invalidateQueries({ queryKey: ["sessions"] });
-    } catch {
-      // Stay inactive on failure: server sync will surface the session if one
-      // was actually created. Showing active UI with no session id breaks
-      // pause/complete controls.
+    } catch (err) {
+      // 409 = live session already held elsewhere: converge on it instead of
+      // forking a duplicate. Any other failure leaves us inactive; the sync
+      // effect surfaces a server session if one was actually created.
+      queryClient.invalidateQueries({ queryKey: sessionQueries.active().queryKey });
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      if (err instanceof ApiClientError && err.status === 409) {
+        setSessionError("A focus session is already active — showing it instead.");
+      }
       setSessionActive(false);
+    } finally {
+      setSessionPending(false);
     }
   };
 
-  // Handler to pause focus
+  // Handler to pause focus. Local state flips ONLY after the server confirms:
+  // flipping first and failing silently is what desyncs the timer display.
   const handlePauseFocus = async () => {
-    if (!activeSessionId) return;
-    setIsPaused(true);
-    await pauseSession(activeSessionId);
-    queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    if (!activeSessionId || sessionPending) return;
+    setSessionError(null);
+    setSessionPending(true);
+    try {
+      await pauseSession(activeSessionId);
+      setIsPaused(true);
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    } catch {
+      setSessionError("The session could not be paused. Please try again.");
+    } finally {
+      setSessionPending(false);
+    }
   };
 
-  // Handler to resume focus
+  // Handler to resume focus (same confirm-then-flip discipline as pause).
   const handleResumeFocus = async () => {
-    if (!activeSessionId) return;
-    setIsPaused(false);
-    await resumeSession(activeSessionId);
-    queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    if (!activeSessionId || sessionPending) return;
+    setSessionError(null);
+    setSessionPending(true);
+    try {
+      await resumeSession(activeSessionId);
+      setIsPaused(false);
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    } catch {
+      setSessionError("The session could not be resumed. Please try again.");
+    } finally {
+      setSessionPending(false);
+    }
   };
 
-  // Handler to complete focus session
+  // Handler to complete focus session.
+  // Completing a session NEVER completes the task: a focus block is one
+  // execution unit, the task is the larger unit of work. Reflection
+  // attribution comes from the authoritative finished record, never from
+  // retained local selection.
   const handleCompleteFocus = async () => {
-    const finishedId = activeSessionId;
-    const finishedDuration = elapsedSeconds;
-    const finishedTask = selectedTask;
-    if (activeSessionId) {
-      await finishSession(activeSessionId, "Completed intentional focus block");
-    }
-    if (selectedTask) {
-      await updateTask(selectedTask.id, { status: "done" });
-    }
-    if (finishedId) {
+    if (!activeSessionId || sessionPending) return;
+    setSessionError(null);
+    setSessionPending(true);
+    try {
+      const finished = await finishSession(activeSessionId, "Completed intentional focus block");
       setReflectionSession({
-        id: finishedId,
-        taskId: finishedTask?.id ?? null,
-        taskTitle: finishedTask?.title ?? null,
-        durationSeconds: finishedDuration,
+        id: finished.id,
+        taskId: finished.taskId ?? null,
+        taskTitle: finished.taskTitle ?? finished.notes ?? null,
+        durationSeconds: finished.durationSeconds ?? 0,
       });
+      setSessionActive(false);
+      setActiveSessionId(null);
+      setSelectedTask(null);
+      setIsPaused(false);
+      setElapsedSeconds(0);
+      queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      queryClient.invalidateQueries({ queryKey: ["plans"] });
+      queryClient.invalidateQueries({ queryKey: ["activity"] });
+    } catch {
+      setSessionError("The session could not be completed. Please try again.");
+    } finally {
+      setSessionPending(false);
     }
-    setSessionActive(false);
-    setActiveSessionId(null);
-    setSelectedTask(null);
-    setIsPaused(false);
-    setElapsedSeconds(0);
-    queryClient.invalidateQueries({ queryKey: ["tasks"] });
-    queryClient.invalidateQueries({ queryKey: ["sessions"] });
-    queryClient.invalidateQueries({ queryKey: ["plans"] });
-    queryClient.invalidateQueries({ queryKey: ["activity"] });
   };
 
   // Handler to prompt discard focus session
@@ -488,7 +562,30 @@ export function TodayView() {
       </Section>
 
       {/* 3. EXECUTION STRIP (Active Focus Session or Next Up Quick Focus) */}
-      {sessionActive ? (
+      {sessionError && (
+        <div
+          role="alert"
+          className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-xs text-red-600 dark:text-red-400"
+        >
+          {sessionError}
+        </div>
+      )}
+      {isRestoringToday ? (
+        <Section>
+          <div
+            className="rounded-xl border border-border-subtle bg-bg-card p-5 space-y-2 animate-pulse"
+            role="status"
+            aria-label="Restoring focus session"
+          >
+            <span className="text-xs font-medium text-text-muted">
+              Restoring focus session…
+            </span>
+            <p className="text-[11px] text-text-muted">
+              Checking whether a live session exists before offering controls.
+            </p>
+          </div>
+        </Section>
+      ) : sessionActive ? (
         <Section>
           <div className="rounded-xl border border-border-strong bg-bg-secondary p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div className="flex items-center gap-3 min-w-0">
@@ -501,17 +598,17 @@ export function TodayView() {
                   <span className="text-xs font-semibold text-text-primary">
                     Focus Session Active
                   </span>
-                  {selectedTask && (
+                  {serverTask && (
                     <span className="text-xs text-text-muted">·</span>
                   )}
-                  {selectedTask?.goalId && (
+                  {serverTask?.goalId && (
                     <span className="text-[11px] font-medium px-2 py-0.5 rounded bg-bg-secondary text-text-secondary border border-border-subtle truncate max-w-[180px]">
-                      {goals.find((g) => g.id === selectedTask.goalId)?.title ?? "Goal"}
+                      {goals.find((g) => g.id === serverTask.goalId)?.title ?? "Goal"}
                     </span>
                   )}
                 </div>
                 <h3 className="text-base font-semibold text-text-primary tracking-tight mt-0.5 truncate">
-                  {selectedTask ? selectedTask.title : "Intentional Focus Block"}
+                  {serverTask ? serverTask.title : (serverActiveSession?.taskTitle ?? serverActiveSession?.notes ?? "Intentional Focus Block")}
                 </h3>
                 {(telemetry.activeDomain || telemetry.activeApp) && (
                   <div className="flex items-center gap-1.5 text-xs text-text-muted mt-1">
@@ -527,24 +624,28 @@ export function TodayView() {
                 <span className={`text-[11px] font-mono block ${
                   isPaused
                     ? "text-amber-500"
-                    : elapsedSeconds > ((serverActiveSession?.targetDurationMinutes ?? selectedTask?.plannedDurationMinutes ?? 25) * 60)
+                    : displayTargetMinutes != null && elapsedSeconds > displayTargetMinutes * 60
                     ? "text-amber-400 font-semibold"
                     : "text-text-muted"
                 }`}>
                   {(() => {
-                    const targetSec = (serverActiveSession?.targetDurationMinutes ?? selectedTask?.plannedDurationMinutes ?? 25) * 60;
-                    const targetMins = serverActiveSession?.targetDurationMinutes ?? selectedTask?.plannedDurationMinutes ?? 25;
-                    if (isPaused) return `Paused · Target ${targetMins}m`;
-                    if (elapsedSeconds > targetSec) {
-                      return `Flow Overtime (+${formatElapsed(elapsedSeconds - targetSec)}) · Target ${targetMins}m`;
+                    if (isPaused) {
+                      return displayTargetMinutes != null
+                        ? `Paused · Target ${displayTargetMinutes}m`
+                        : "Paused";
                     }
-                    return `Target ${targetMins}m`;
+                    if (displayTargetMinutes == null) return "Target not set";
+                    const targetSec = displayTargetMinutes * 60;
+                    if (elapsedSeconds > targetSec) {
+                      return `+${formatElapsed(elapsedSeconds - targetSec)} over target · Target ${displayTargetMinutes}m`;
+                    }
+                    return `Target ${displayTargetMinutes}m`;
                   })()}
                 </span>
                 <span className={`text-2xl font-semibold font-mono tabular-nums ${
                   isPaused
                     ? "text-amber-500"
-                    : elapsedSeconds > ((serverActiveSession?.targetDurationMinutes ?? selectedTask?.plannedDurationMinutes ?? 25) * 60)
+                    : displayTargetMinutes != null && elapsedSeconds > displayTargetMinutes * 60
                     ? "text-amber-400"
                     : "text-text-primary"
                 }`}>
@@ -557,6 +658,7 @@ export function TodayView() {
                 <button
                   type="button"
                   onClick={handleResumeFocus}
+                  disabled={sessionPending}
                   className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md bg-amber-500/15 border border-amber-500/30 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 text-xs font-medium transition-colors cursor-pointer"
                   title="Resume focus session"
                 >
@@ -567,6 +669,7 @@ export function TodayView() {
                 <button
                   type="button"
                   onClick={handlePauseFocus}
+                  disabled={sessionPending}
                   className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md bg-bg-secondary border border-border-subtle hover:border-border-hover text-text-primary text-xs font-medium transition-colors cursor-pointer"
                   title="Pause focus session"
                 >
@@ -578,6 +681,7 @@ export function TodayView() {
               <button
                 type="button"
                 onClick={handleCompleteFocus}
+                disabled={sessionPending}
                 className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-md bg-text-primary hover:opacity-90 text-bg-default text-xs font-medium transition-colors cursor-pointer"
               >
                 <Check size={14} />

@@ -18,10 +18,17 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
-import { taskQueries, updateTask, FocusReflectionModal, TaskDetailDrawer } from "@features/tasks";
+import {
+  taskQueries,
+  updateTask,
+  FocusReflectionModal,
+  TaskDetailDrawer,
+  ConfirmDiscardModal,
+} from "@features/tasks";
+import { ApiClientError } from "@shared/api/client";
 import { useUserPreferences } from "@features/settings";
 import { sessionQueries, useSessionsList, useActiveSession, useSessionsObserved } from "../api/queries";
-import { createSession, finishSession, pauseSession, resumeSession } from "../api/client";
+import { createSession, finishSession, pauseSession, resumeSession, deleteSession } from "../api/client";
 import { useLiveTelemetry } from "@features/timeline";
 import { planQueries } from "@features/today";
 import type {
@@ -339,6 +346,52 @@ export function SessionsView() {
   } | null>(null);
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [sessionPending, setSessionPending] = useState(false);
+  const [showDiscardModal, setShowDiscardModal] = useState(false);
+
+  // Wake resync: after sleep/hibernate/offline the local timer is stale and
+  // polls may lag several seconds. On tab-visible and on reconnect, refresh
+  // authoritative session state immediately so the display converges on
+  // server truth instead of a frozen pre-sleep value.
+  useEffect(() => {
+    const resync = () => {
+      queryClient.invalidateQueries({ queryKey: sessionQueries.active().queryKey });
+      queryClient.invalidateQueries({ queryKey: sessionQueries.lists() });
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") resync();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("online", resync);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("online", resync);
+    };
+  }, [queryClient]);
+
+  // Restoring state: while the active-session query has never resolved we
+  // know NOTHING (a live session may exist). Never render the launchpad as
+  // "no session" here — that flash is what reads as "timer reset to zero".
+  const isRestoringActive = isLoadingActive && !serverActiveSession && !activeSessionId;
+
+  const handleDiscardActive = async () => {
+    if (!activeSessionId || sessionPending) return;
+    setSessionError(null);
+    setSessionPending(true);
+    try {
+      await deleteSession(activeSessionId);
+      setSessionActive(false);
+      setActiveSessionId(null);
+      setElapsedSeconds(0);
+      setFocusTarget(null);
+      setShowDiscardModal(false);
+      queryClient.invalidateQueries({ queryKey: taskQueries.lists() });
+      queryClient.invalidateQueries({ queryKey: sessionQueries.all() });
+    } catch {
+      setSessionError("The session could not be discarded. Please try again.");
+    } finally {
+      setSessionPending(false);
+    }
+  };
 
   // Authoritative live session resolution (prefer active endpoint, fallback to list)
   const currentActive = useMemo(() => {
@@ -412,14 +465,23 @@ export function SessionsView() {
         queryClient.invalidateQueries({ queryKey: taskQueries.lists() });
       }
       queryClient.invalidateQueries({ queryKey: sessionQueries.all() });
-    } catch {
-      // Another client (extension, other tab) may hold the active session:
-      // refresh the authoritative active record so the UI converges instead
-      // of letting the user start a duplicate.
-      queryClient.invalidateQueries({ queryKey: sessionQueries.active().queryKey });
-      setSessionError(
-        "The session could not be started. Another focus session may already be active."
-      );
+    } catch (err) {
+      // 409 = another client already holds the live session (the server
+      // enforces one-active). Adopt it instead of forking a duplicate:
+      // refresh authoritative state so the UI converges on the real session.
+      if (err instanceof ApiClientError && err.status === 409) {
+        queryClient.invalidateQueries({ queryKey: sessionQueries.active().queryKey });
+        queryClient.invalidateQueries({ queryKey: sessionQueries.all() });
+        setSessionError("A focus session is already active — showing it instead.");
+      } else {
+        // Another client (extension, other tab) may hold the active session:
+        // refresh the authoritative active record so the UI converges instead
+        // of letting the user start a duplicate.
+        queryClient.invalidateQueries({ queryKey: sessionQueries.active().queryKey });
+        setSessionError(
+          "The session could not be started. Another focus session may already be active."
+        );
+      }
     } finally {
       setSessionPending(false);
       queryClient.invalidateQueries({ queryKey: sessionQueries.all() });
@@ -673,6 +735,20 @@ export function SessionsView() {
             {sessionError}
           </div>
         )}
+        {isRestoringActive ? (
+          <div
+            className="rounded-xl border border-border-subtle bg-bg-card p-6 space-y-2 animate-pulse"
+            role="status"
+            aria-label="Restoring focus session"
+          >
+            <span className="text-xs font-medium text-text-muted">
+              Restoring focus session…
+            </span>
+            <p className="text-[11px] text-text-muted">
+              Checking whether a live session exists before offering controls.
+            </p>
+          </div>
+        ) : (
         <CurrentFocusCard
           isActive={sessionActive}
           isPaused={Boolean(activeSessionId) && !sessionActive}
@@ -693,7 +769,9 @@ export function SessionsView() {
           onPause={() => void handlePauseResume(true)}
           onResume={() => void handlePauseResume(false)}
           onComplete={handleCompleteFocus}
+          onDiscard={() => setShowDiscardModal(true)}
         />
+        )}
       </Section>
 
       {/* 3. METRIC SUMMARY RIBBON (Calculated over filtered horizon) */}
@@ -1221,6 +1299,14 @@ export function SessionsView() {
         isOpen={Boolean(reflectionSession)}
         onClose={() => setReflectionSession(null)}
         session={reflectionSession}
+      />
+      <ConfirmDiscardModal
+        isOpen={showDiscardModal}
+        onConfirm={() => void handleDiscardActive()}
+        onCancel={() => setShowDiscardModal(false)}
+        isPending={sessionPending}
+        title="Discard this focus session?"
+        description="The running session and its recorded time will be permanently removed. This cannot be undone."
       />
       <TaskDetailDrawer task={drawerTask} onClose={() => setDrawerTask(null)} />
     </PageContainer>

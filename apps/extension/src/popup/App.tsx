@@ -1346,7 +1346,9 @@ function FocusView({
     if (selectedTaskId) {
       return tasks.data?.find((item) => item.id === selectedTaskId) ?? null;
     }
-    return incompleteTasks.find((t) => t.status === "in_progress") || incompleteTasks[0] || null;
+    // Explicit choice only: never fall back to the first incomplete task.
+    // An unset picker means an independent focus block (taskId null).
+    return null;
   }, [activeSession, selectedTaskId, tasks.data, incompleteTasks]);
 
   const [preset, setPreset] = useState<25 | 50 | "custom">(25);
@@ -1375,6 +1377,12 @@ function FocusView({
       }
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });
       void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+    },
+    onError: () => {
+      // Most likely 409 (a live session is held elsewhere) or a transport
+      // blip after wake. Converge on authoritative state instead of leaving
+      // the popup on a stale idle screen that invites a duplicate start.
+      void queryClient.invalidateQueries({ queryKey: ["sessions"] });
     },
   });
 
@@ -2082,18 +2090,27 @@ function FocusView({
             </button>
           </div>
         ) : (
+          <>
           <button
             type="button"
             className="primary-button full"
             onClick={() => start.mutate()}
-            disabled={start.isPending || status?.trackingPaused}
+            disabled={start.isPending || status?.trackingPaused || (sessions.isLoading && !sessions.data)}
             style={{ marginTop: 12 }}
           >
             <Play size={13} fill="currentColor" />
             {status?.trackingPaused
               ? "Resume tracking first"
-              : `Start ${preset === "custom" ? customMins : preset}m Focus`}
+              : sessions.isLoading && !sessions.data
+                ? "Checking for active session…"
+                : `Start ${preset === "custom" ? customMins : preset}m Focus`}
           </button>
+          {sessions.isLoading && !sessions.data && !activeSession && (
+            <p style={{ margin: "6px 0 0", fontSize: 10.5, color: "var(--text-secondary)", textAlign: "center" }}>
+              Restoring session state — starting is paused until we know no live session exists.
+            </p>
+          )}
+          </>
         )}
       </section>
 
