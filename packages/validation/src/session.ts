@@ -28,5 +28,22 @@ export const sessionListQuerySchema = z.object({
 });
 
 export type SessionListQueryInput = z.infer<typeof sessionListQuerySchema>;
+
+export const sessionObservedQuerySchema = z.object({
+  ids: z
+    .string()
+    .trim()
+    .min(1)
+    .max(4000)
+    .refine((s) => {
+      const parts = s
+        .split(",")
+        .map((p) => p.trim())
+        .filter(Boolean);
+      return parts.length >= 1 && parts.length <= 50;
+    }, "ids must be 1-50 comma-separated session ids"),
+});
+
+export type SessionObservedQueryInput = z.infer<typeof sessionObservedQuerySchema>;
 export type SessionCreateInput = z.infer<typeof sessionCreateSchema>;
 export type SessionUpdateInput = z.infer<typeof sessionUpdateSchema>;
