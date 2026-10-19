@@ -215,7 +215,7 @@ export function DiagnosticsView({ status, onBack, onRefresh }: DiagnosticsViewPr
           <span className="diag-value">
             {scheduler?.devMode
               ? `${scheduler.activeSecondsInWindow}s / ${scheduler.devIntervalSeconds}s`
-              : `${Math.round((scheduler?.activeSecondsInWindow ?? 0) / 60)}m / 45m`}
+              : `${Math.round((scheduler?.activeSecondsInWindow ?? 0) / 60)}m / 50m`}
           </span>
         </div>
 

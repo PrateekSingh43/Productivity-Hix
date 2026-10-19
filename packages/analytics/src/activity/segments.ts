@@ -63,6 +63,27 @@ const DEFAULT_OPTIONS: Required<Omit<AggregationOptions, "sleepWindow">> & { sle
   sleepWindow: undefined,
 };
 
+/**
+ * Canonical human-scale timeline segmentation options (R4).
+ *
+ * Single source of truth shared by the API activity timeline, the worker
+ * block materialization path, and the evidence builder, so identical raw
+ * telemetry aggregates into identical timeline segments everywhere.
+ *
+ * - maxGapMs 120s: consecutive telemetry within 2 min bridges into one segment.
+ * - minBreakMs 180s: idle >= 3 min (ActivityWatch parity) becomes a real break.
+ * - transientThresholdMs 15s: incidental flaps up to 15s are absorbed.
+ * - maxBreakMs 2h: longer absences are system sleep / offline, never active breaks.
+ */
+export const TIMELINE_SEGMENTATION_OPTIONS: Required<
+  Pick<AggregationOptions, "maxGapMs" | "minBreakMs" | "transientThresholdMs" | "maxBreakMs">
+> = {
+  maxGapMs: 120_000,
+  minBreakMs: 180_000,
+  transientThresholdMs: 15_000,
+  maxBreakMs: 2 * 60 * 60 * 1000,
+};
+
 const LEISURE_PATTERNS: RegExp[] = [
   /chess\.com/i,
   /lichess/i,

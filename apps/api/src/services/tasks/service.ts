@@ -5,14 +5,8 @@ import {
   type TaskWithSessions,
   type TaskObservedActivityItem,
 } from "@repo/types";
-import {
-  normalizeAppName,
-  cleanWindowTitle,
-  inferSiteLabel,
-  normalizeRawActivityEvents,
-  normalizeIntervals,
-} from "@repo/analytics";
 import { getDb } from "../../lib/prisma";
+import { getTaskEvidence } from "../task-evidence/service";
 
 type TaskWithSessionRows = {
   id: string;
@@ -47,9 +41,12 @@ export function serializeTask(task: TaskWithSessionRows): Task {
   const actualDurationSeconds = sessions.reduce((sum, s) => sum + (s.durationSeconds ?? 0), 0);
   const hasActiveSession = sessions.some((s) => !s.endedAt);
 
-  const resolvedProductiveDate =
-    task.productiveDate ??
-    (task.dueAt ? resolveProductiveDay(task.dueAt) : resolveProductiveDay(task.createdAt));
+  // Preserve the authoritative schedule as-is (null = genuinely unscheduled
+  // Backlog). Fabricating a productiveDate from createdAt/dueAt here would
+  // violate Zero Fake Data and collapse the Upcoming/Backlog partition: every
+  // dateless task would masquerade as scheduled on its creation day and leak
+  // into Overdue/History instead of the unscheduled pile.
+  const resolvedProductiveDate = task.productiveDate ?? null;
 
   return {
     id: task.id,
@@ -258,47 +255,19 @@ export async function getTaskObservedActivity(
     return [];
   }
 
-  const orClauses = sessionRanges.map((r) => ({
-    timestamp: {
-      gte: r.start,
-      lte: r.end,
-    },
-  }));
-
-  const activities = await db.normalizedActivity.findMany({
-    where: {
-      userId,
-      OR: orClauses,
-    },
-    select: {
-      id: true,
-      externalId: true,
-      timestamp: true,
-      source: true,
-      watcher: true,
-      duration: true,
-      data: true,
-    },
-    orderBy: { timestamp: "asc" },
-  });
-
-  if (activities.length === 0) {
+  const from = new Date(Math.min(...sessionRanges.map((r) => r.start.getTime())));
+  const to = new Date(Math.max(...sessionRanges.map((r) => r.end.getTime())));
+  if (to.getTime() <= from.getTime()) {
     return [];
   }
 
-  const canonical = normalizeRawActivityEvents(activities.map((a) => ({
-    id: a.id,
-    externalId: a.externalId,
-    timestamp: a.timestamp,
-    duration: a.duration,
-    source: a.source,
-    watcher: a.watcher,
-    data: a.data,
-  })));
+  // Slice C: clustering runs over ATTRIBUTED evidence blocks (the pure
+  // builder), never over raw timestamp-in-range telemetry. A block counts
+  // only when the builder attributed it to this task; conflicting or
+  // corrected-away signals stay in the evidence endpoint instead of leaking
+  // into these totals.
+  const { evidence } = await getTaskEvidence(userId, taskId, { from, to });
 
-  const normalized = normalizeIntervals(canonical);
-
-  // Group by { application, domain, title } across all switches
   interface ClusterItem {
     application: string;
     domain: string | null;
@@ -309,14 +278,18 @@ export async function getTaskObservedActivity(
   const clusterMap = new Map<string, ClusterItem>();
   let totalTrackedSeconds = 0;
 
-  for (const n of normalized) {
-    if (n.isAfk) continue;
-    const durSec = Math.max(0, Math.round(n.durationMs / 1000));
+  for (const block of evidence.blocks) {
+    if (block.coverage !== "OBSERVED" && block.coverage !== "OBSERVED_REPORTED") continue;
+    const observation = block.observation;
+    if (!observation || observation.isAfk) continue;
+    if (block.intention?.taskId !== taskId) continue;
+
+    const durSec = Math.max(0, Math.round(block.durationSeconds));
     if (durSec < 1) continue;
 
-    const displayApp = n.application;
-    const displayTitle = n.title || displayApp;
-    const domain = n.domain || null;
+    const displayApp = observation.application;
+    const displayTitle = observation.title || displayApp;
+    const domain = observation.domain || null;
 
     const key = `${displayApp}:::${domain ?? ""}:::${displayTitle}`;
     totalTrackedSeconds += durSec;
@@ -383,6 +356,9 @@ export async function createTask(
   if (!productiveDate) {
     productiveDate = dueDateStr ?? resolveProductiveDay(new Date());
   }
+  if (dueDateStr && productiveDate && productiveDate > dueDateStr) {
+    productiveDate = dueDateStr;
+  }
 
   const created = await getDb().task.create({
     data: {
@@ -433,13 +409,30 @@ export async function updateTask(
   // unrecoverable. Every genuine productiveDate change appends one row to the
   // append-only task_schedule_history audit table (best-effort: an audit
   // failure must never break the user's update).
-  const previous =
-    input.productiveDate !== undefined
-      ? await db.task.findFirst({
-          where: { id, userId },
-          select: { productiveDate: true },
-        })
-      : null;
+  const needsPrevious =
+    input.productiveDate !== undefined || input.dueAt !== undefined;
+  const previous = needsPrevious
+    ? await db.task.findFirst({
+        where: { id, userId },
+        select: { productiveDate: true, dueAt: true },
+      })
+    : null;
+
+  // Safety net: keep schedule <= deadline. When the deadline moves earlier
+  // (e.g. Oct 1 → Sep 30) or any prospective schedule is after the new deadline,
+  // pull productiveDate forward to the new deadline so the task can
+  // surface in Today/Overdue instead of sticking in Upcoming forever.
+  if (input.dueAt !== undefined && input.dueAt !== null) {
+    const newDueKey = resolveProductiveDay(input.dueAt);
+    const prospectiveSchedule =
+      input.productiveDate !== undefined
+        ? (input.productiveDate as string | null)
+        : (previous?.productiveDate ?? null);
+
+    if (prospectiveSchedule && prospectiveSchedule > newDueKey) {
+      dataToUpdate.productiveDate = newDueKey;
+    }
+  }
 
   const updated = await db.task.update({
     where: { id, userId },
@@ -467,8 +460,11 @@ export async function updateTask(
   });
 
   const prevDate = previous?.productiveDate ?? null;
-  const nextDate = (input.productiveDate as string | null | undefined) ?? null;
-  if (previous && prevDate !== nextDate) {
+  const nextDate =
+    ("productiveDate" in dataToUpdate
+      ? (dataToUpdate.productiveDate as string | null | undefined)
+      : undefined) ?? null;
+  if (previous && "productiveDate" in dataToUpdate && prevDate !== nextDate) {
     try {
       const audit = (db as unknown as Record<string, unknown>).taskScheduleHistory as
         | { create: (args: unknown) => Promise<unknown> }

@@ -1,77 +1,40 @@
 /**
- * Worker Application Executable Bootstrap
- * 
- * Manages deterministic runtime initialization, worker registration,
- * outbox publisher startup, and graceful OS signal shutdown.
+ * Worker Application Executable Bootstrap (Redis-free)
+ *
+ * Initializes the Postgres-direct dispatcher: claims timeline_work rows and
+ * outbox events, executes them via TimelineWorker / PatternWorker through
+ * the shared BaseWorker.run engine. No Redis, no BullMQ — Postgres rows
+ * are the queue, so the free-tier managed-Redis limit is irrelevant.
  */
 
 import 'dotenv/config';
 import { getDb, disconnectDb } from '@repo/db';
-import {
-  createResilientRedisConnection,
-  closeRedisConnection,
-} from './runtime/redis';
-import { QueueManager } from './runtime/queue';
-import { WorkerRuntime } from './runtime/worker-runtime';
-import { TimelineWorker } from './timeline/timeline-worker';
-import { PatternWorker } from './pattern/pattern-worker';
 import { OutboxPublisher } from './outbox/publisher';
 import { MemoryWorkerMetricsCollector } from './shared/metrics';
 import { createConsoleWorkerLogger } from './shared/logging';
 
 export interface BootstrapResult {
-  runtime: WorkerRuntime;
-  queueManager: QueueManager;
   publisher: OutboxPublisher;
   metrics: MemoryWorkerMetricsCollector;
   shutdown: (signal?: string) => Promise<void>;
 }
 
 export async function bootstrap(): Promise<BootstrapResult> {
-  console.log('[WorkerBootstrap] Initializing ProductiveHix Dedicated Worker Runtime...');
+  console.log('[WorkerBootstrap] Initializing ProductiveHix Postgres-direct worker (no Redis)...');
 
-  // 1. Redis Connection (cloud-first, localhost fallback)
-  // Probes REDIS_URL / Upstash first; falls back to REDIS_LOCAL_* when the
-  // cloud is unreachable so local dev (127.0.0.1:6379) keeps working.
-  const { redis, selectedEndpoint, health } = await createResilientRedisConnection();
-  console.log(
-    `[WorkerBootstrap] Redis status: ${health.status} via ${selectedEndpoint} (${health.latencyMs}ms latency)`,
-  );
-
-  if (health.status === 'unhealthy') {
-    throw new Error(`Cannot start worker subsystem: Redis connection unhealthy. ${health.error ?? ''}`);
-  }
-
-  // 2. Metrics & Queue Infrastructure
+  // Metrics & durable dispatch (Postgres work-table + outbox, direct execution)
   const metrics = new MemoryWorkerMetricsCollector();
-  const queueManager = new QueueManager({ connection: redis, metrics });
-
-  // 3. Worker Runtime Layer
-  const runtime = new WorkerRuntime({
-    connection: redis,
-    metrics,
-  });
-
-  // 4. Outbox Publisher Layer
   const db = getDb();
   const publisher = new OutboxPublisher({
     db,
-    queueManager,
     metrics,
     logger: createConsoleWorkerLogger('OutboxPublisher'),
     pollIntervalMs: Number(process.env.OUTBOX_POLL_INTERVAL_MS ?? 500),
     batchSize: Number(process.env.OUTBOX_BATCH_SIZE ?? 25),
   });
 
-  // 5. Register domain workers, then start execution in deterministic order
-  runtime.registerWorker(new TimelineWorker(db, metrics));
-  runtime.registerWorker(new PatternWorker());
-
-  await runtime.start();
-  console.log('[WorkerBootstrap] Worker runtime started and listening for jobs.');
-
   publisher.start();
-  console.log('[WorkerBootstrap] Outbox publisher started and polling for events.');
+  console.log('[WorkerBootstrap] Publisher started: timeline_work + outbox → direct worker execution.');
 
   let isTerminating = false;
 
@@ -86,22 +49,13 @@ export async function bootstrap(): Promise<BootstrapResult> {
     }, 15_000);
 
     try {
-      // 1. Stop intake from outbox
+      // 1. Stop intake from Postgres
       await publisher.stop();
-      console.log('[WorkerBootstrap] Outbox publisher stopped.');
+      console.log('[WorkerBootstrap] Publisher stopped.');
 
-      // 2. Drain and stop BullMQ workers
-      await runtime.stop();
-      console.log('[WorkerBootstrap] Worker runtime stopped.');
-
-      // 3. Close BullMQ queues
-      await queueManager.closeAll();
-      console.log('[WorkerBootstrap] Queues closed.');
-
-      // 4. Disconnect databases
-      await closeRedisConnection(redis);
+      // 2. Disconnect database
       await disconnectDb();
-      console.log('[WorkerBootstrap] Database and Redis connections closed.');
+      console.log('[WorkerBootstrap] Database connection closed.');
 
       clearTimeout(shutdownTimeout);
       console.log('[WorkerBootstrap] Graceful shutdown completed. Exiting.');
@@ -116,8 +70,6 @@ export async function bootstrap(): Promise<BootstrapResult> {
   process.on('SIGINT', () => handleTermination('SIGINT'));
 
   return {
-    runtime,
-    queueManager,
     publisher,
     metrics,
     shutdown: handleTermination,

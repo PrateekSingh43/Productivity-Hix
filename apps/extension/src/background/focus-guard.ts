@@ -24,6 +24,7 @@ const EXEMPT_HOSTS = [
 ];
 
 export const FOCUS_SESSION_STORAGE_KEY = "productivehix_active_focus_session";
+export const FOCUS_GUARD_ALLOWED_TABS_KEY = "productivehix_focus_guard_allowed_tabs";
 
 /**
  * How long a locally-initiated session end suppresses the matching server
@@ -154,6 +155,26 @@ export class FocusGuardManager {
     return { enabled: this.enabled, limit: this.limit };
   }
 
+  private persistAllowedTabs(): void {
+    try {
+      if (typeof chrome !== "undefined" && chrome.storage?.local) {
+        void chrome.storage.local.set({ [FOCUS_GUARD_ALLOWED_TABS_KEY]: Array.from(this.allowedTabIds) });
+      }
+    } catch {}
+  }
+
+  private async restoreAllowedTabs(): Promise<void> {
+    try {
+      if (typeof chrome !== "undefined" && chrome.storage?.local) {
+        const stored = await chrome.storage.local.get(FOCUS_GUARD_ALLOWED_TABS_KEY);
+        const saved = stored[FOCUS_GUARD_ALLOWED_TABS_KEY] as number[] | null;
+        if (Array.isArray(saved)) {
+          this.allowedTabIds = new Set(saved.filter((id) => typeof id === "number"));
+        }
+      }
+    } catch {}
+  }
+
   async init(): Promise<void> {
     try {
       const settings = await getSettings();
@@ -176,10 +197,22 @@ export class FocusGuardManager {
       }
     } catch {}
 
+    // Restore the working set so an MV3 service-worker restart does not
+    // reshuffle which tabs are allowed (previously allowedTabIds was
+    // memory-only, so the first reload after a restart blocked at random).
+    await this.restoreAllowedTabs();
+
     await this.refreshSession();
     this.connectWebSocket();
     this.setupTabListeners();
     this.hasInitializedState = true;
+
+    // If a session is active but the working set is empty (fresh profile,
+    // storage cleared, or first run after update), audit now so the limit is
+    // enforced deterministically instead of on the next random tab event.
+    if (this.currentSession && !this.currentSession.isPaused && this.allowedTabIds.size === 0) {
+      void this.auditExistingTabs();
+    }
   }
 
   async refreshSession(): Promise<WorkSession | null> {
@@ -238,6 +271,11 @@ export class FocusGuardManager {
         this.hasNotifiedTargetSessionId = null;
         this.hasNotifiedStartupNudgeSessionId = null;
         this.allowedTabIds.clear();
+        this.persistAllowedTabs();
+        // Release tabs already parked on the guard page: without this they
+        // stay stuck on focus-guard.html after the session ends, since
+        // checkTabLimit() only gates *new* navigations.
+        void this.releaseGuardedTabs();
       }
     } else {
       this.isEnforcing = this.enabled;
@@ -248,28 +286,30 @@ export class FocusGuardManager {
         void this.auditExistingTabs();
       }
 
-      // Schedule second-precision notification alarm if not yet completed
-      const base = session.durationSeconds ?? 0;
-      const startMs = Date.parse(session.lastResumedAt ?? session.startedAt);
-      const currentSegment = Number.isFinite(startMs)
-        ? Math.max(0, Math.floor((Date.now() - startMs) / 1000))
-        : 0;
-      const elapsedSec = base + currentSegment;
-      const targetSec = (session.targetDurationMinutes ?? 25) * 60;
-      const remainingSec = targetSec - elapsedSec;
+      // Schedule the target-reached alarm only for sessions that explicitly
+      // declared a target. Open-ended sessions have none — never invent 25m.
+      if (session.targetDurationMinutes != null) {
+        const base = session.durationSeconds ?? 0;
+        const startMs = Date.parse(session.lastResumedAt ?? session.startedAt);
+        const currentSegment = Number.isFinite(startMs)
+          ? Math.max(0, Math.floor((Date.now() - startMs) / 1000))
+          : 0;
+        const elapsedSec = base + currentSegment;
+        const remainingSec = session.targetDurationMinutes * 60 - elapsedSec;
 
-      if (remainingSec > 0) {
-        if (typeof chrome !== "undefined" && chrome.alarms?.create) {
-          chrome.alarms.create("focus-target-alarm", {
-            when: Date.now() + remainingSec * 1000,
-          });
-        }
-        // Also set local timeout for immediate foreground trigger
-        this.targetTimer = setTimeout(() => {
-          this.checkTargetCompletion();
-        }, remainingSec * 1000);
-        if (typeof (this.targetTimer as any)?.unref === "function") {
-          (this.targetTimer as any).unref();
+        if (remainingSec > 0) {
+          if (typeof chrome !== "undefined" && chrome.alarms?.create) {
+            chrome.alarms.create("focus-target-alarm", {
+              when: Date.now() + remainingSec * 1000,
+            });
+          }
+          // Also set local timeout for immediate foreground trigger
+          this.targetTimer = setTimeout(() => {
+            this.checkTargetCompletion();
+          }, remainingSec * 1000);
+          if (typeof (this.targetTimer as any)?.unref === "function") {
+            (this.targetTimer as any).unref();
+          }
         }
       }
     }
@@ -285,35 +325,140 @@ export class FocusGuardManager {
     }
   }
 
+  /**
+   * Restores every tab currently parked on `focus-guard.html` to its original
+   * destination. Called when the focus session ends so stale guard pages do
+   * not remain blocked. New tabs opened after the session are already allowed
+   * (isEnforcing === false); this handles tabs intercepted *during* the
+   * session whose content is still the guard page.
+   */
+  async releaseGuardedTabs(): Promise<void> {
+    if (typeof chrome === "undefined" || !chrome.tabs?.query || !chrome.tabs?.update) return;
+    try {
+      const allTabs = await chrome.tabs.query({});
+      for (const t of allTabs) {
+        const url = (t as { url?: string; pendingUrl?: string }).url ||
+          (t as { pendingUrl?: string }).pendingUrl ||
+          "";
+        if (!url.includes("focus-guard.html")) continue;
+        if ((t as { id?: number }).id === undefined) continue;
+        const tabId = (t as { id: number }).id;
+        let targetUrl = "";
+        try {
+          const guardUrl = new URL(url);
+          targetUrl = guardUrl.searchParams.get("targetUrl") || "";
+        } catch {
+          targetUrl = "";
+        }
+        try {
+          if (targetUrl && targetUrl !== "about:blank" && !targetUrl.startsWith("chrome://newtab")) {
+            await chrome.tabs.update(tabId, { url: targetUrl });
+          } else {
+            try {
+              await chrome.tabs.update(tabId, { url: "chrome://newtab/" });
+            } catch {
+              await chrome.tabs.update(tabId, { url: "about:blank" });
+            }
+          }
+        } catch (err) {
+          console.warn("[FOCUS GUARD] Failed to release guarded tab:", tabId, err);
+        }
+      }
+    } catch (err) {
+      console.warn("[FOCUS GUARD] Failed to query guarded tabs:", err);
+    }
+  }
+
+  /**
+   * Enforces the tab limit immediately when a session starts/resumes, so
+   * pre-existing tabs beyond the limit show the guard page at once instead
+   * of only after a manual reload. Previously this only seeded the first N
+   * tabs and left excess tabs fully usable, which read as "blocker doesn't
+   * work until reload".
+   *
+   * Keep set is deterministic: the active tab is always kept, then the most
+   * recently accessed tabs fill up to `limit`. Pinned tabs and exempt URLs
+   * (auth, devtools, settings) are never parked. Parked tabs keep their
+   * original URL in `targetUrl` and are restored by `releaseGuardedTabs()`
+   * when the session ends.
+   */
   async auditExistingTabs(): Promise<void> {
     if (!this.enabled || !this.isEnforcing || !this.currentSession || this.currentSession.isPaused) {
       return;
     }
-    if (typeof chrome === "undefined" || !chrome.tabs?.query) return;
+    if (typeof chrome === "undefined" || !chrome.tabs?.query || !chrome.tabs?.update) return;
 
     try {
       const windowTabs = await chrome.tabs.query({ currentWindow: true });
       const normalTabs = windowTabs.filter((t) => {
-        const u = t.url || t.pendingUrl || "";
+        const u = (t as { url?: string; pendingUrl?: string }).url ||
+          (t as { pendingUrl?: string }).pendingUrl ||
+          "";
         if (u.startsWith("devtools://")) return false;
         if (u.startsWith("chrome-extension://") && !u.includes("focus-guard.html")) return false;
         return true;
       });
 
       if (!this.currentSession || this.currentSession.isPaused) return;
+      // Capture identity up front: the session may end while this async audit
+      // is in flight (setSession(null) re-enters), and touching
+      // this.currentSession.id afterwards would throw on null.
+      const auditSessionId = this.currentSession.id;
 
-      // Seed initial working set (up to limit tabs) so the first N tabs are never blocked!
-      for (const t of normalTabs.slice(0, this.limit)) {
-        if (t.id !== undefined) {
-          this.allowedTabIds.add(t.id);
-        }
+      // Deterministic working set: active tab first, then most-recently-used.
+      const sorted = [...normalTabs].sort((a, b) => {
+        const aActive = Boolean((a as { active?: boolean }).active);
+        const bActive = Boolean((b as { active?: boolean }).active);
+        if (aActive !== bActive) return aActive ? -1 : 1;
+        return ((b as { lastAccessed?: number }).lastAccessed ?? 0) - ((a as { lastAccessed?: number }).lastAccessed ?? 0);
+      });
+
+      const keep = new Set<number>();
+      for (const t of sorted) {
+        if (keep.size >= this.limit) break;
+        const url = (t as { url?: string; pendingUrl?: string }).url ||
+          (t as { pendingUrl?: string }).pendingUrl ||
+          "";
+        if (url.includes("focus-guard.html")) continue;
+        if (this.isExemptTarget(url)) continue;
+        if ((t as { pinned?: boolean }).pinned) continue;
+        if (t.id !== undefined) keep.add(t.id);
       }
+
+      this.allowedTabIds = keep;
+      this.persistAllowedTabs();
 
       const taskTitle = this.currentSession.taskTitle || this.currentSession.notes || "Active Focus";
 
-      if (normalTabs.length > this.limit) {
-        if (this.hasNotifiedStartupNudgeSessionId !== this.currentSession.id) {
-          this.hasNotifiedStartupNudgeSessionId = this.currentSession.id;
+      // Park every excess tab immediately so no reload is needed.
+      for (const t of normalTabs) {
+        if (t.id === undefined || keep.has(t.id)) continue;
+        try {
+          // Re-read fresh state: a concurrent checkTabLimit may have parked
+          // this tab already (stale event objects would nest guard URLs).
+          const fresh = await chrome.tabs.get(t.id).catch(() => null);
+          const freshUrl = (fresh as { url?: string; pendingUrl?: string } | null)?.url ||
+            (fresh as { pendingUrl?: string } | null)?.pendingUrl ||
+            "";
+          if (!freshUrl || freshUrl.includes("focus-guard.html")) continue;
+          if (this.isExemptTarget(freshUrl)) continue;
+          if ((fresh as { pinned?: boolean } | null)?.pinned) continue;
+          const guardPage = chrome.runtime.getURL(
+            `focus-guard.html?tabId=${t.id}&targetUrl=${encodeURIComponent(freshUrl)}&taskTitle=${encodeURIComponent(
+              taskTitle,
+            )}&limit=${this.limit}`,
+          );
+          await chrome.tabs.update(t.id, { url: guardPage });
+        } catch (err) {
+          console.warn("[FOCUS GUARD] Failed to park excess tab:", t.id, err);
+        }
+      }
+
+      // Only notify if the same session is still active; it may have ended
+      // while the parking loop above was awaiting tab updates.
+      if (normalTabs.length > this.limit && this.currentSession?.id === auditSessionId) {
+        if (this.hasNotifiedStartupNudgeSessionId !== auditSessionId) {
+          this.hasNotifiedStartupNudgeSessionId = auditSessionId;
           void showFocusGuardStartupNudge({
             taskTitle,
             limit: this.limit,
@@ -328,6 +473,8 @@ export class FocusGuardManager {
 
   checkTargetCompletion(): void {
     if (!this.currentSession || this.currentSession.isPaused) return;
+    // Open-ended sessions (no explicit target) have nothing to complete.
+    if (this.currentSession.targetDurationMinutes == null) return;
     if (this.hasNotifiedTargetSessionId === this.currentSession.id) return;
 
     const base = this.currentSession.durationSeconds ?? 0;
@@ -336,11 +483,11 @@ export class FocusGuardManager {
       ? Math.max(0, Math.floor((Date.now() - startMs) / 1000))
       : 0;
     const elapsedSec = base + currentSegment;
-    const targetSec = (this.currentSession.targetDurationMinutes ?? 25) * 60;
+    const targetSec = this.currentSession.targetDurationMinutes * 60;
 
     if (elapsedSec >= targetSec) {
       this.hasNotifiedTargetSessionId = this.currentSession.id;
-      const targetMins = this.currentSession.targetDurationMinutes ?? 25;
+      const targetMins = this.currentSession.targetDurationMinutes;
       const taskTitle = this.currentSession.taskTitle || this.currentSession.notes || "Focus Block";
 
       void showFocusTargetNotification({
@@ -409,10 +556,9 @@ export class FocusGuardManager {
             this.setSession(data.session);
             if (isNewStart && data.session && !data.session.isPaused) {
               const taskTitle = data.session.taskTitle || data.session.notes || "Deliberate Focus";
-              const targetMins = data.session.targetDurationMinutes ?? 25;
               void showFocusStartedNotification({
                 taskTitle,
-                targetMinutes: targetMins,
+                targetMinutes: data.session.targetDurationMinutes ?? undefined,
               });
             }
           } else if (data.type === "session:paused") {
@@ -509,7 +655,7 @@ export class FocusGuardManager {
     // Users must be able to switch freely between their working tabs without being blocked!
 
     chrome.tabs.onRemoved.addListener((tabId) => {
-      this.allowedTabIds.delete(tabId);
+      if (this.allowedTabIds.delete(tabId)) this.persistAllowedTabs();
     });
   }
 
@@ -527,6 +673,13 @@ export class FocusGuardManager {
 
     try {
       const windowTabs = await chrome.tabs.query({ windowId: tab.windowId });
+      // Re-read fresh state: the event's tab object may be stale (e.g. a
+      // concurrent audit parked this tab already, or a reload event carries
+      // the pre-reload URL). Never nest guard pages and never park twice.
+      const fresh = windowTabs.find((t) => t.id === tab.id);
+      const freshUrl = fresh ? (fresh.url || fresh.pendingUrl || "") : url;
+      if (freshUrl.includes("focus-guard.html")) return;
+      if (this.isExemptTarget(freshUrl)) return;
       const normalTabs = windowTabs.filter((t) => {
         const u = t.url || t.pendingUrl || "";
         if (u.startsWith("devtools://")) return false;
@@ -537,13 +690,14 @@ export class FocusGuardManager {
       // If the total number of normal tabs in the window is within the limit, allow it automatically!
       if (normalTabs.length <= this.limit) {
         this.allowedTabIds.add(tab.id);
+        this.persistAllowedTabs();
         return;
       }
 
       // Excess tab beyond limit: intercept this specific new tab
       const taskTitle = this.currentSession.taskTitle || this.currentSession.notes || "Active Focus";
       const guardPage = chrome.runtime.getURL(
-        `focus-guard.html?tabId=${tab.id}&targetUrl=${encodeURIComponent(url)}&taskTitle=${encodeURIComponent(
+        `focus-guard.html?tabId=${tab.id}&targetUrl=${encodeURIComponent(freshUrl)}&taskTitle=${encodeURIComponent(
           taskTitle,
         )}&limit=${this.limit}`,
       );
@@ -582,6 +736,7 @@ export class FocusGuardManager {
       }
 
       this.allowedTabIds.add(tabId);
+      this.persistAllowedTabs();
       if (targetUrl && !targetUrl.startsWith("chrome://newtab") && targetUrl !== "about:blank") {
         await chrome.tabs.update(tabId, { url: targetUrl });
       } else {
@@ -610,6 +765,7 @@ export class FocusGuardManager {
   async handleAllowTab(tabId: number, targetUrl: string): Promise<boolean> {
     try {
       this.allowedTabIds.add(tabId);
+      this.persistAllowedTabs();
       if (targetUrl && !targetUrl.startsWith("chrome://newtab") && targetUrl !== "about:blank") {
         await chrome.tabs.update(tabId, { url: targetUrl });
       } else {

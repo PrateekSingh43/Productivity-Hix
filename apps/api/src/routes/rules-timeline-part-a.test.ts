@@ -79,14 +79,9 @@ describe("Timeline Part A: Rule Effective Scope & Non-Destructive Invalidation",
       expect(state.status).toBe("STALE");
     }
 
-    // 14 outbox events emitted
-    expect(createdOutboxEvents).toHaveLength(14);
-    for (const ev of createdOutboxEvents) {
-      expect(ev.eventType).toBe("rule.changed");
-      expect(ev.payload.reason).toBe("rule_changed");
-    }
-
-    // Phase 2 coalescing: one work row per touched day, carrying the latest rule revision.
+    // Redis-free: no outbox events. One coalesced work row per touched
+    // day, carrying the latest rule revision.
+    expect(createdOutboxEvents).toHaveLength(0);
     expect(upsertedWork).toHaveLength(14);
     for (const w of upsertedWork) {
       expect(w.status).toBe("PENDING");
@@ -100,6 +95,7 @@ describe("Timeline Part A: Rule Effective Scope & Non-Destructive Invalidation",
   it("Scenario 14: Targeted override resolves affected dates and scopes in user timezone", async () => {
     const upsertedDayStates: any[] = [];
     const createdOutboxEvents: any[] = [];
+    const upsertedWork: any[] = [];
 
     const mockDb: any = {
       userPreference: {
@@ -121,7 +117,10 @@ describe("Timeline Part A: Rule Effective Scope & Non-Destructive Invalidation",
         }),
       },
       timelineWork: {
-        upsert: vi.fn().mockResolvedValue({ id: "work_001" }),
+        upsert: vi.fn().mockImplementation(({ create }) => {
+          upsertedWork.push(create);
+          return Promise.resolve({ id: "work_001", ...create });
+        }),
       },
       outboxEvent: {
         create: vi.fn().mockImplementation(({ data }) => {
@@ -157,8 +156,9 @@ describe("Timeline Part A: Rule Effective Scope & Non-Destructive Invalidation",
     expect(upsertedDayStates).toHaveLength(2);
     expect(upsertedDayStates.map((s) => s.localDate)).toEqual(["2026-09-23", "2026-09-24"]);
 
-    expect(createdOutboxEvents).toHaveLength(2);
-    expect(createdOutboxEvents[0].payload.localDate).toBe("2026-09-23");
-    expect(createdOutboxEvents[1].payload.localDate).toBe("2026-09-24");
+    // Redis-free: no outbox rows; one work row per touched day.
+    expect(createdOutboxEvents).toHaveLength(0);
+    expect(upsertedWork).toHaveLength(2);
+    expect(upsertedWork.map((w) => w.localDate).sort()).toEqual(["2026-09-23", "2026-09-24"]);
   });
 });

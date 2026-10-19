@@ -107,6 +107,22 @@ export function collectAtomicBoundaries(
     }
   }
 
+  // 8. Work Contexts (Phase 1 attribution signals)
+  if (options.workContexts) {
+    for (const c of options.workContexts) {
+      add(c.startedAt);
+      add(c.endedAt);
+    }
+  }
+
+  // 9. Attribution Corrections (Phase 1)
+  if (options.corrections) {
+    for (const x of options.corrections) {
+      add(x.windowStart);
+      add(x.windowEnd);
+    }
+  }
+
   const sorted = Array.from(boundaries).sort((a, b) => a - b);
   return sorted;
 }
@@ -212,7 +228,13 @@ export function deduplicateProvenance(items: EvidenceProvenance[]): EvidenceProv
   const seen = new Set<string>();
   const result: EvidenceProvenance[] = [];
   for (const item of items) {
-    const key = `${item.source}:${item.authority}:${item.collector ?? ""}`;
+    const key = [
+      item.source,
+      item.authority,
+      item.collector ?? "",
+      item.role ?? "",
+      item.targetTaskId ?? "",
+    ].join(":");
     if (!seen.has(key)) {
       seen.add(key);
       result.push(item);
@@ -223,6 +245,10 @@ export function deduplicateProvenance(items: EvidenceProvenance[]): EvidenceProv
     if (sCmp !== 0) return sCmp;
     const aCmp = a.authority.localeCompare(b.authority);
     if (aCmp !== 0) return aCmp;
+    const rCmp = (a.role ?? "").localeCompare(b.role ?? "");
+    if (rCmp !== 0) return rCmp;
+    const tCmp = (a.targetTaskId ?? "").localeCompare(b.targetTaskId ?? "");
+    if (tCmp !== 0) return tCmp;
     return (a.collector || "").localeCompare(b.collector || "");
   });
   return result;

@@ -5,10 +5,11 @@
  * 1. Payload validation happens before any resource allocation.
  * 2. Deterministic job identity provides queue-level uniqueness.
  * 3. Domain output idempotency check precedes distributed locking.
- * 4. Lock acquisition failure throws retryable error for BullMQ backoff.
+ * 4. Lock acquisition failure throws retryable error for publisher backoff.
  * 5. Pre- and post-execution supersession checks prevent executing or publishing stale results.
  * 6. Cooperative timeouts are enforced via AbortController and AbortSignal.
- * 7. BullMQ owns retry attempts and backoff; BaseWorker normalizes and classifies errors.
+ * 7. The publisher owns retry attempts and backoff (Postgres attempts +
+ *    exponential availableAt); BaseWorker normalizes and classifies errors.
  * 8. Never import @repo/ai into BaseWorker or low-level workers.
  */
 
@@ -223,7 +224,7 @@ export abstract class BaseWorker<TData, TResult> {
         timer.end('lock_acquire');
 
         if (!lockHandle) {
-          logger.warn(`Execution lock currently held for resource: ${lockKey}. Rescheduling via BullMQ.`);
+          logger.warn(`Execution lock currently held for resource: ${lockKey}. Publisher will back off and retry.`);
           throw new WorkerRetryableError(`Execution lock busy for ${lockKey}`);
         }
       }

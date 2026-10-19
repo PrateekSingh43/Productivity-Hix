@@ -91,11 +91,7 @@ export const handleTelemetryBatch: RequestHandler = async (request, response, ne
       }
     }
 
-    // Step 1: PostgreSQL is authoritative. Persist updates, inserts, day revision, and outbox in ONE transaction.
-    const correlationId =
-      (request.headers?.["x-correlation-id"] as string) ||
-      `corr-${Date.now()}-${Math.random().toString(36).substring(7)}`;
-
+    // Step 1: PostgreSQL is authoritative. Persist updates, inserts, day revision, and work row in ONE transaction.
     let actuallyInsertedCount = 0;
     let lastInsertedRow: { id: string; externalId: string; timestamp: Date; duration: number } | null = null;
 
@@ -213,8 +209,9 @@ export const handleTelemetryBatch: RequestHandler = async (request, response, ne
         }
       }
 
-      // For each affected date: update TimelineDayState revision and emit canonical minimal OutboxEvent
-      for (const [localDate, scope] of dateMap.entries()) {
+      // For each affected date: bump TimelineDayState revision and upsert
+      // the coalesced timeline_work row (the Redis-free publisher executes it).
+      for (const [localDate] of dateMap.entries()) {
         const dayState = await tx.timelineDayState.upsert({
           where: { userId_localDate: { userId, localDate } },
           create: {
@@ -261,49 +258,9 @@ export const handleTelemetryBatch: RequestHandler = async (request, response, ne
           },
         });
 
-        // With work-table dispatch enabled the work row above IS the durable
-        // promise; skip the legacy per-batch outbox row (dual-write stays on
-        // by default so counts remain comparable and rollback is a flag flip).
-        if (process.env.TIMELINE_WORK_DISPATCH === "true") continue;
-
-        await tx.outboxEvent.create({
-          data: {
-            eventType: "telemetry.ingested",
-            aggregateType: "user",
-            aggregateId: userId,
-            payload: {
-              userId,
-              localDate,
-              sourceRevision: dayState.currentObservationRevision,
-              // Phase 1 revision contract: the worker reads
-              // requestedRevision.{observationRevision,ruleRevision}. Emit it
-              // explicitly (post-increment values just upserted above) so
-              // supersession/idempotency compare true revisions, not 0/0.
-              // sourceRevision/ruleRevision kept for backward compatibility.
-              requestedRevision: {
-                observationRevision: dayState.currentObservationRevision,
-                ruleRevision: dayState.currentRuleRevision,
-                semanticVersion: "3b.0.1",
-              },
-              scope: {
-                start: scope.start.toISOString(),
-                end: scope.end.toISOString(),
-              },
-              reason: "telemetry_ingested",
-              ruleRevision: dayState.currentRuleRevision,
-              jobCorrelationId: correlationId,
-              queuedAt: new Date().toISOString(),
-            },
-            correlationId,
-            causationId: null,
-            schemaVersion: "1.0.0",
-            occurredAt: new Date(),
-            status: "PENDING",
-            publicationAttemptCount: 0,
-            maxAttempts: 5,
-            availableAt: new Date(),
-          },
-        });
+        // The work row above IS the durable promise: the Redis-free
+        // publisher claims it and executes TimelineWorker directly.
+        // No per-batch outbox row (that was the BullMQ transport, removed).
       }
     });
 

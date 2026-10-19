@@ -7,12 +7,16 @@ const SCHEDULER_STORAGE_KEY = "productivehix_scheduler_state"; // For reading us
 interface EngineState {
   activeTimeMs: number;
   lastNotificationSentAt: number | null;
+  lastNotificationClickedAt: number | null;
+  lastCompletedCheckInAt: number | null;
   cooldownUntil: number | null;
 }
 
 const DEFAULT_STATE: EngineState = {
   activeTimeMs: 0,
   lastNotificationSentAt: null,
+  lastNotificationClickedAt: null,
+  lastCompletedCheckInAt: null,
   cooldownUntil: null,
 };
 
@@ -125,7 +129,13 @@ export class ReflectionEngine {
   public getSchedulerStatus() {
     const intervalSec = this.config.devMode ? (this.config.devIntervalSeconds || 10) : 50 * 60;
     const activeSec = Math.floor(this.state.activeTimeMs / 1000);
-    const remainingSec = Math.max(0, intervalSec - activeSec);
+    const activeRemainingSec = Math.max(0, intervalSec - activeSec);
+    // A snooze ("Later") sets cooldownUntil; the real next trigger is whichever
+    // gate closes last. The UI countdown must reflect that, not just active time.
+    const cooldownRemainingSec = this.state.cooldownUntil
+      ? Math.max(0, Math.ceil((this.state.cooldownUntil - Date.now()) / 1000))
+      : 0;
+    const remainingSec = Math.max(activeRemainingSec, cooldownRemainingSec);
     const nextTriggerAt = Date.now() + remainingSec * 1000;
 
     return {
@@ -134,10 +144,17 @@ export class ReflectionEngine {
       nextTriggerAt,
       remainingSecondsUntilTrigger: remainingSec,
       lastNotificationSentAt: this.state.lastNotificationSentAt ? new Date(this.state.lastNotificationSentAt).toISOString() : null,
+      lastNotificationClickedAt: this.state.lastNotificationClickedAt ? new Date(this.state.lastNotificationClickedAt).toISOString() : null,
+      lastCompletedCheckIn: this.state.lastCompletedCheckInAt ? new Date(this.state.lastCompletedCheckInAt).toISOString() : null,
       checkInCooldownUntil: this.state.cooldownUntil ? new Date(this.state.cooldownUntil).toISOString() : null,
       eligibility: {
         eligible: remainingSec <= 0,
-        reason: remainingSec <= 0 ? "Active time threshold reached" : `Accumulating active time (${remainingSec}s remaining)`,
+        reason:
+          remainingSec <= 0
+            ? "Active time threshold reached"
+            : cooldownRemainingSec > activeRemainingSec
+              ? `In cooldown (${cooldownRemainingSec}s remaining)`
+              : `Accumulating active time (${activeRemainingSec}s remaining)`,
         remainingSeconds: remainingSec,
       },
     };
@@ -162,6 +179,31 @@ export class ReflectionEngine {
   public async forceReset() {
     this.state.activeTimeMs = 0;
     this.state.cooldownUntil = null;
+    await this.saveState();
+  }
+
+  /**
+   * "Later" snooze: hold back the next check-in for a delay-from-now window
+   * (the Due/Google Calendar snooze pattern). Dev mode snoozes 60s so the flow
+   * stays testable; production snoozes 15 minutes.
+   */
+  public async snooze(seconds?: number) {
+    const snoozeSec = seconds ?? (this.config.devMode ? 60 : 15 * 60);
+    const until = Date.now() + snoozeSec * 1000;
+    this.state.cooldownUntil = until;
+    this.config.checkInCooldownUntil = new Date(until).toISOString();
+    this.config.nextTriggerAt = until;
+    await chrome.storage.local.set({ [SCHEDULER_STORAGE_KEY]: this.config });
+    await this.saveState();
+  }
+
+  public async recordNotificationClicked() {
+    this.state.lastNotificationClickedAt = Date.now();
+    await this.saveState();
+  }
+
+  public async recordCheckInCompleted() {
+    this.state.lastCompletedCheckInAt = Date.now();
     await this.saveState();
   }
 

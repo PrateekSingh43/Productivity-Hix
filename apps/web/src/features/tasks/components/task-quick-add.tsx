@@ -2,8 +2,11 @@
 
 import { useState } from "react";
 import { Plus, Flag, AlignLeft, X, Target, Calendar } from "lucide-react";
-import { format, addDays } from "date-fns";
-import { resolveProductiveDay, type TaskPriority } from "@repo/types";
+import {
+  resolveProductiveDay,
+  resolveTomorrowProductiveDay,
+  type TaskPriority,
+} from "@repo/types";
 import { useCreateTaskMutation } from "../api/mutations";
 import { useTodayPlan } from "@features/today";
 import { PlannedFocusPicker } from "./planned-focus-picker";
@@ -21,14 +24,17 @@ export function TaskQuickAdd({ onSuccess }: TaskQuickAddProps) {
   const [plannedDurationMinutes, setPlannedDurationMinutes] = useState<number>(30);
   const [goalId, setGoalId] = useState<string>("");
   const [scheduleMode, setScheduleMode] = useState<"today" | "tomorrow" | "custom">("today");
-  const [dueDate, setDueDate] = useState<string>(() => format(new Date(), "yyyy-MM-dd"));
+  const [dueDate, setDueDate] = useState<string>(() => resolveProductiveDay(new Date()));
 
   const { data: plan } = useTodayPlan();
   const goals = plan?.goals ?? [];
   const createTaskMutation = useCreateTaskMutation();
 
-  const todayStr = format(new Date(), "yyyy-MM-dd");
-  const tomorrowStr = format(addDays(new Date(), 1), "yyyy-MM-dd");
+  // Productive-day aware (timezone + day boundary), never raw calendar date —
+  // otherwise tasks created after midnight but before the boundary land on
+  // the wrong day and never surface in Today.
+  const todayStr = resolveProductiveDay(new Date());
+  const tomorrowStr = resolveTomorrowProductiveDay(new Date());
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();

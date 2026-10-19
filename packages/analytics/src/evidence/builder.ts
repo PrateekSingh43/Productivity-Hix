@@ -3,6 +3,7 @@ import type {
   TemporalEvidenceBlock,
   EvidenceCoverageState,
   EvidenceProvenance,
+  EvidenceProvenanceRole,
   ObservationEvidence,
   ReportEvidence,
   IntentionEvidence,
@@ -12,8 +13,10 @@ import type {
   UserGapExplanation,
   WorkSession,
   Task,
+  WorkContext,
+  AttributionCorrection,
 } from "@repo/types";
-import { aggregateActivitySegments } from "../activity/segments";
+import { aggregateActivitySegments, TIMELINE_SEGMENTATION_OPTIONS } from "../activity/segments";
 import type { BuildEvidenceOptions } from "./types";
 import {
   toEpochMs,
@@ -111,6 +114,19 @@ export interface NormalizedSession {
   endMs: number;
 }
 
+export interface NormalizedWorkContext {
+  context: WorkContext;
+  startMs: number;
+  endMs: number;
+}
+
+export interface NormalizedCorrection {
+  correction: AttributionCorrection;
+  startMs: number;
+  endMs: number;
+  createdAtMs: number;
+}
+
 export function compareCheckIns(a: NormalizedCheckInWindow, b: NormalizedCheckInWindow): number {
   if (a.startMs !== b.startMs) return a.startMs - b.startMs;
   if (a.endMs !== b.endMs) return a.endMs - b.endMs;
@@ -130,6 +146,43 @@ export function compareWorkSessions(a: NormalizedSession, b: NormalizedSession):
   if (a.startMs !== b.startMs) return a.startMs - b.startMs;
   if (a.endMs !== b.endMs) return a.endMs - b.endMs;
   return (a.session.id || "").localeCompare(b.session.id || "");
+}
+
+export function compareWorkContexts(a: NormalizedWorkContext, b: NormalizedWorkContext): number {
+  if (a.startMs !== b.startMs) return a.startMs - b.startMs;
+  if (a.endMs !== b.endMs) return a.endMs - b.endMs;
+  return (a.context.id || "").localeCompare(b.context.id || "");
+}
+
+/**
+ * Deterministic winner among overlapping work contexts: the latest-started
+ * context wins; ties break by id (lexicographically greatest).
+ */
+export function compareWorkContextsLatestFirst(
+  a: NormalizedWorkContext,
+  b: NormalizedWorkContext,
+): number {
+  if (a.startMs !== b.startMs) return b.startMs - a.startMs;
+  return (b.context.id || "").localeCompare(a.context.id || "");
+}
+
+export function compareCorrections(a: NormalizedCorrection, b: NormalizedCorrection): number {
+  if (a.startMs !== b.startMs) return a.startMs - b.startMs;
+  if (a.endMs !== b.endMs) return a.endMs - b.endMs;
+  if (a.createdAtMs !== b.createdAtMs) return a.createdAtMs - b.createdAtMs;
+  return (a.correction.id || "").localeCompare(b.correction.id || "");
+}
+
+/**
+ * Deterministic winner among corrections overlapping one atomic interval (R1):
+ * latest by `(createdAt, id)` wins; ties break by id (lexicographically greatest).
+ */
+export function compareCorrectionsLatestFirst(
+  a: NormalizedCorrection,
+  b: NormalizedCorrection,
+): number {
+  if (a.createdAtMs !== b.createdAtMs) return b.createdAtMs - a.createdAtMs;
+  return (b.correction.id || "").localeCompare(a.correction.id || "");
 }
 
 export function compareTasksForOutcome(a: Task, b: Task): number {
@@ -162,11 +215,14 @@ export function buildEvidenceTimeline(options: BuildEvidenceOptions): EvidenceTi
   }
 
   // 1. Resolve Telemetry Segments (deterministic sorting)
+  // Canonical segmentation options (R4) so the events shortcut and the
+  // production timeline path (which pre-aggregates with the same options)
+  // always produce identical evidence.
   let segments: TimelineSegment[] = [];
   if (options.segments && options.segments.length > 0) {
     segments = [...options.segments];
   } else if (options.events && options.events.length > 0) {
-    segments = aggregateActivitySegments(options.events);
+    segments = aggregateActivitySegments(options.events, TIMELINE_SEGMENTATION_OPTIONS);
   }
 
   segments.sort((a, b) => {
@@ -186,27 +242,33 @@ export function buildEvidenceTimeline(options: BuildEvidenceOptions): EvidenceTi
     return (a.id || "").localeCompare(b.id || "");
   });
 
-  // 2. Normalize Check-in Windows
+  // 2. Normalize Check-in Windows (R6 temporal rule)
+  // (1) windowStart valid and windowEnd valid with end > start -> [start, end]
+  // (2) windowStart valid + windowEnd absent/unparseable + createdAt > start -> [start, createdAt]
+  // (3) otherwise EXCLUDED. A point check-in (explicit end == start) is never
+  //     expanded: it must not claim duration it cannot prove.
   const checkInWindows: NormalizedCheckInWindow[] = [];
   if (options.checkIns) {
     for (const ci of options.checkIns) {
+      const hasEnd = ci.windowEnd !== null && ci.windowEnd !== undefined;
       const sMs = ci.windowStart ? Date.parse(ci.windowStart) : NaN;
-      const eMs = ci.windowEnd ? Date.parse(ci.windowEnd) : NaN;
+      const eMs = hasEnd ? Date.parse(ci.windowEnd as string) : NaN;
       const cMs = ci.createdAt ? Date.parse(ci.createdAt) : NaN;
 
       let startMs = NaN;
       let endMs = NaN;
 
-      if (!Number.isNaN(sMs) && !Number.isNaN(eMs) && eMs > sMs) {
-        startMs = sMs;
-        endMs = eMs;
-      } else if (!Number.isNaN(sMs) && !Number.isNaN(cMs) && cMs > sMs) {
-        startMs = sMs;
-        endMs = cMs;
-      } else if (!Number.isNaN(cMs)) {
-        // Fallback: point reflection
-        startMs = cMs;
-        endMs = cMs;
+      if (!Number.isNaN(sMs)) {
+        if (hasEnd && !Number.isNaN(eMs)) {
+          if (eMs > sMs) {
+            startMs = sMs;
+            endMs = eMs;
+          }
+          // explicit end <= start (point/invalid window): excluded, never expanded
+        } else if (!Number.isNaN(cMs) && cMs > sMs) {
+          startMs = sMs;
+          endMs = cMs;
+        }
       }
 
       if (!Number.isNaN(startMs) && !Number.isNaN(endMs)) {
@@ -254,6 +316,46 @@ export function buildEvidenceTimeline(options: BuildEvidenceOptions): EvidenceTi
   }
 
   sessions.sort(compareWorkSessions);
+
+  // 4b. Normalize Work Contexts (Phase 1 attribution signals)
+  // Open contexts (endedAt === null) extend to the window end: the user is
+  // still in that context as far as committed data knows.
+  const workContexts: NormalizedWorkContext[] = [];
+  if (options.workContexts) {
+    for (const c of options.workContexts) {
+      try {
+        const sMs = toEpochMs(c.startedAt);
+        const eMs = c.endedAt ? toEpochMs(c.endedAt) : Math.max(windowEndMs, sMs);
+        if (eMs > sMs) {
+          workContexts.push({ context: c, startMs: sMs, endMs: eMs });
+        }
+      } catch {
+        // ignore invalid
+      }
+    }
+  }
+
+  workContexts.sort(compareWorkContexts);
+
+  // 4c. Normalize Attribution Corrections (Phase 1, R1)
+  // Append-only, latest-wins per atomic interval by (createdAt, id).
+  const corrections: NormalizedCorrection[] = [];
+  if (options.corrections) {
+    for (const x of options.corrections) {
+      try {
+        const sMs = toEpochMs(x.windowStart);
+        const eMs = toEpochMs(x.windowEnd);
+        const cMs = toEpochMs(x.createdAt);
+        if (eMs > sMs) {
+          corrections.push({ correction: x, startMs: sMs, endMs: eMs, createdAtMs: cMs });
+        }
+      } catch {
+        // ignore invalid
+      }
+    }
+  }
+
+  corrections.sort(compareCorrections);
 
   // 5. Tasks Lookup Map & Deterministically Sorted Tasks
   const taskMap = new Map<string, Task>();
@@ -323,29 +425,27 @@ export function buildEvidenceTimeline(options: BuildEvidenceOptions): EvidenceTi
       if (g.startMs < endMs && g.endMs > startMs) {
         isGapExplained = true;
         matchingGapExp = g.explanation;
-        provenance.push({
-          source: "user_gap_explanation",
-          authority: "USER",
-        });
         break;
       }
     }
+    // Note: gap-explanation provenance is attached in section F with a role
+    // relative to the resolved intention (R7).
 
     // C. Check User Check-In Report
     let isReported = false;
     let matchingCheckIn: CheckIn | null = null;
+    let matchingCheckInWindow: NormalizedCheckInWindow | null = null;
 
     for (const cw of checkInWindows) {
       if (cw.startMs < endMs && cw.endMs > startMs) {
         isReported = true;
         matchingCheckIn = cw.checkIn;
-        provenance.push({
-          source: "user_check_in",
-          authority: "USER",
-        });
+        matchingCheckInWindow = cw;
         break;
       }
     }
+    // Note: check-in provenance is attached in section F with a role relative
+    // to the resolved intention (R7).
 
     // D. Assemble Report Evidence
     let report: ReportEvidence | null = null;
@@ -360,16 +460,12 @@ export function buildEvidenceTimeline(options: BuildEvidenceOptions): EvidenceTi
         offlineWorkContext: matchingGapExp.offlineWorkContext ?? null,
         authority: "USER",
       };
-    } else if (isReported && matchingCheckIn) {
+    } else if (isReported && matchingCheckIn && matchingCheckInWindow) {
       report = {
         source: "CHECK_IN",
         reportingWindow: {
-          start: matchingCheckIn.windowStart
-            ? new Date(toEpochMs(matchingCheckIn.windowStart)).toISOString()
-            : new Date(startMs).toISOString(),
-          end: matchingCheckIn.windowEnd
-            ? new Date(toEpochMs(matchingCheckIn.windowEnd)).toISOString()
-            : new Date(endMs).toISOString(),
+          start: new Date(matchingCheckInWindow.startMs).toISOString(),
+          end: new Date(matchingCheckInWindow.endMs).toISOString(),
         },
         assessment: matchingCheckIn.activityAssessment ?? null,
         alignment: matchingCheckIn.alignment ?? null,
@@ -404,15 +500,79 @@ export function buildEvidenceTimeline(options: BuildEvidenceOptions): EvidenceTi
       }
     }
 
-    // F. Intention Link (Explicit vs Inferred vs Unknown)
+    // F. Intention Link — precedence (R7):
+    //   correction (latest per atomic interval) > work context > session task
+    //   > gap-explanation association > check-in task.
+    // Every overlapping attribution signal is preserved in provenance with a
+    // role (SELECTED / SUPPORTING / CONFLICTING) and its target task, so
+    // losing attributions stay auditable instead of being silently dropped.
     let intention: IntentionEvidence | null = null;
+    let intentionSource:
+      | "correction"
+      | "work_context"
+      | "work_session"
+      | "gap_explanation"
+      | "check_in"
+      | null = null;
 
-    // Check active session with explicit taskId
+    const overlappingCorrections = corrections.filter(
+      (x) => x.startMs < endMs && x.endMs > startMs,
+    );
+    const correctionWinner =
+      overlappingCorrections.length > 0
+        ? [...overlappingCorrections].sort(compareCorrectionsLatestFirst)[0]!
+        : null;
+
+    const overlappingContexts = workContexts.filter(
+      (c) => c.startMs < endMs && c.endMs > startMs && (c.context.taskId || c.context.goalId),
+    );
+    const contextWinner =
+      overlappingContexts.length > 0
+        ? [...overlappingContexts].sort(compareWorkContextsLatestFirst)[0]!
+        : null;
+
     const activeSession = sessions.find(
       (s) => s.startMs < endMs && s.endMs > startMs && s.session.taskId,
     );
 
-    if (activeSession && activeSession.session.taskId) {
+    if (correctionWinner) {
+      const x = correctionWinner.correction;
+      if (x.targetKind === "NONE") {
+        intention = {
+          targetScope: "UNLINKED",
+          taskId: null,
+          taskTitle: null,
+          goalId: null,
+          goalTitle: null,
+          linkType: "EXPLICIT",
+        };
+      } else {
+        const taskId = x.taskId;
+        const matchingTask = taskId ? taskMap.get(taskId) : undefined;
+        intention = {
+          targetScope: taskId ? "TASK" : "UNLINKED",
+          taskId,
+          taskTitle: matchingTask?.title ?? x.taskTitleSnapshot ?? null,
+          goalId: matchingTask?.goalId ?? null,
+          goalTitle: matchingTask?.goalTitle ?? null,
+          linkType: "EXPLICIT",
+        };
+      }
+      intentionSource = "correction";
+    } else if (contextWinner) {
+      const taskId = contextWinner.context.taskId;
+      const goalId = contextWinner.context.goalId;
+      const matchingTask = taskId ? taskMap.get(taskId) : undefined;
+      intention = {
+        targetScope: taskId ? "TASK" : "GOAL",
+        taskId,
+        taskTitle: matchingTask?.title ?? null,
+        goalId,
+        goalTitle: matchingTask?.goalTitle ?? null,
+        linkType: "EXPLICIT",
+      };
+      intentionSource = "work_context";
+    } else if (activeSession && activeSession.session.taskId) {
       const taskId = activeSession.session.taskId;
       const matchingTask = taskMap.get(taskId);
       intention = {
@@ -423,10 +583,7 @@ export function buildEvidenceTimeline(options: BuildEvidenceOptions): EvidenceTi
         goalTitle: matchingTask?.goalTitle ?? activeSession.session.goalTitle ?? null,
         linkType: "EXPLICIT",
       };
-      provenance.push({
-        source: "work_session",
-        authority: "SYSTEM",
-      });
+      intentionSource = "work_session";
     } else if (matchingGapExp && (matchingGapExp.associatedTaskId || matchingGapExp.associatedGoalId)) {
       const taskId = matchingGapExp.associatedTaskId ?? null;
       const goalId = matchingGapExp.associatedGoalId ?? null;
@@ -438,6 +595,7 @@ export function buildEvidenceTimeline(options: BuildEvidenceOptions): EvidenceTi
         goalId,
         linkType: "EXPLICIT",
       };
+      intentionSource = "gap_explanation";
     } else if (matchingCheckIn && matchingCheckIn.taskId) {
       const taskId = matchingCheckIn.taskId;
       const matchingTask = taskMap.get(taskId);
@@ -448,6 +606,98 @@ export function buildEvidenceTimeline(options: BuildEvidenceOptions): EvidenceTi
         goalId: matchingTask?.goalId ?? null,
         linkType: "EXPLICIT",
       };
+      intentionSource = "check_in";
+    }
+
+    // F2. Role-aware attribution provenance (R7). Entries only receive
+    // role/target fields when the signal carries attribution information;
+    // plain telemetry provenance stays untouched.
+    const intentionTaskId = intention?.taskId ?? null;
+
+    const roleFor = (
+      targetTaskId: string | null | undefined,
+      isSelected: boolean,
+    ): EvidenceProvenanceRole | undefined => {
+      if (isSelected) return "SELECTED";
+      if (targetTaskId === null || targetTaskId === undefined) return undefined;
+      if (intentionTaskId !== null && targetTaskId === intentionTaskId) return "SUPPORTING";
+      return "CONFLICTING";
+    };
+
+    if (correctionWinner) {
+      const x = correctionWinner.correction;
+      const taskId = x.targetKind === "NONE" ? null : x.taskId;
+      const matchingTask = taskId ? taskMap.get(taskId) : undefined;
+      provenance.push({
+        source: "user_correction",
+        authority: "USER",
+        role: "SELECTED",
+        targetTaskId: taskId,
+        targetTaskTitle:
+          x.targetKind === "NONE" ? null : matchingTask?.title ?? x.taskTitleSnapshot ?? null,
+      });
+    }
+
+    if (contextWinner) {
+      const taskId = contextWinner.context.taskId;
+      const matchingTask = taskId ? taskMap.get(taskId) : undefined;
+      const entry: EvidenceProvenance = {
+        source: "work_context",
+        authority: "SYSTEM",
+      };
+      const role = roleFor(taskId, intentionSource === "work_context");
+      if (role) entry.role = role;
+      if (taskId !== null) {
+        entry.targetTaskId = taskId;
+        entry.targetTaskTitle = matchingTask?.title ?? null;
+      }
+      provenance.push(entry);
+    }
+
+    if (activeSession && activeSession.session.taskId) {
+      const taskId = activeSession.session.taskId;
+      const matchingTask = taskMap.get(taskId);
+      const entry: EvidenceProvenance = {
+        source: "work_session",
+        authority: "SYSTEM",
+      };
+      const role = roleFor(taskId, intentionSource === "work_session");
+      if (role) entry.role = role;
+      if (taskId) {
+        entry.targetTaskId = taskId;
+        entry.targetTaskTitle = matchingTask?.title ?? activeSession.session.taskTitle ?? null;
+      }
+      provenance.push(entry);
+    }
+
+    if (matchingGapExp) {
+      const entry: EvidenceProvenance = {
+        source: "user_gap_explanation",
+        authority: "USER",
+      };
+      const modelTaskId = matchingGapExp.associatedTaskId ?? null;
+      const role = roleFor(modelTaskId, intentionSource === "gap_explanation");
+      if (role) entry.role = role;
+      if (modelTaskId !== null) {
+        entry.targetTaskId = modelTaskId;
+        entry.targetTaskTitle = taskMap.get(modelTaskId)?.title ?? null;
+      }
+      provenance.push(entry);
+    }
+
+    if (matchingCheckIn) {
+      const entry: EvidenceProvenance = {
+        source: "user_check_in",
+        authority: "USER",
+      };
+      const modelTaskId = matchingCheckIn.taskId ?? null;
+      const role = roleFor(modelTaskId, intentionSource === "check_in");
+      if (role) entry.role = role;
+      if (modelTaskId !== null) {
+        entry.targetTaskId = modelTaskId;
+        entry.targetTaskTitle = taskMap.get(modelTaskId)?.title ?? null;
+      }
+      provenance.push(entry);
     }
 
     // G. Outcome Evidence (Separate signal)

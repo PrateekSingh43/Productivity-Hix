@@ -14,11 +14,11 @@ activityRulesRouter.use(requireAuth);
 import {
   resolveAffectedDatesForRuleChange,
   resolveAffectedDatesForOverride,
-  resolveLocalDayInterval,
 } from "@repo/types";
 
 /**
- * Transactional helper to record rule revision and publish outbox events for global rules.
+ * Transactional helper to record rule revision and mark days STALE with a
+ * coalesced timeline_work row for global rules.
  * Applies explicit RuleEffectiveScope policy (bounded_retention 14 days by default).
  * Invariant: Never deletes historical activity blocks. Marks state STALE for background recomputation.
  */
@@ -42,7 +42,6 @@ async function emitGlobalRuleChangedTx(
   });
 
   for (const localDate of affectedDates) {
-    const dayInterval = resolveLocalDayInterval(localDate, { timezone });
     const dayState = await tx.timelineDayState.upsert({
       where: { userId_localDate: { userId: params.userId, localDate } },
       create: {
@@ -86,48 +85,16 @@ async function emitGlobalRuleChangedTx(
       },
     });
 
-    if (process.env.TIMELINE_WORK_DISPATCH === "true") continue;
-
-    await tx.outboxEvent.create({
-      data: {
-        eventType: "rule.changed",
-        aggregateType: "user",
-        aggregateId: params.userId,
-        payload: {
-          userId: params.userId,
-          localDate,
-          sourceRevision: dayState.currentObservationRevision,
-          // Phase 1 revision contract: explicit requestedRevision so the
-          // worker compares true revisions (see telemetry.ts).
-          requestedRevision: {
-            observationRevision: dayState.currentObservationRevision,
-            ruleRevision: dayState.currentRuleRevision,
-            semanticVersion: "3b.0.1",
-          },
-          scope: {
-            start: dayInterval.startIso,
-            end: dayInterval.endIso,
-          },
-          reason: "rule_changed",
-          ruleRevision: dayState.currentRuleRevision,
-          jobCorrelationId: params.correlationId,
-          queuedAt: now.toISOString(),
-        },
-        correlationId: params.correlationId,
-        causationId: null,
-        schemaVersion: "1.0.0",
-        occurredAt: now,
-        status: "PENDING",
-        publicationAttemptCount: 0,
-        maxAttempts: 5,
-        availableAt: now,
-      },
-    });
+    // The work row above IS the durable promise (Redis-free publisher
+    // executes TimelineWorker directly). No outbox row — that was the
+    // BullMQ transport, removed.
+    void params.correlationId;
   }
 }
 
 /**
- * Transactional helper to record rule revision and publish outbox events for targeted overrides.
+ * Transactional helper to record rule revision and mark days STALE with a
+ * coalesced timeline_work row for targeted overrides.
  * Resolves affected dates strictly from [targetTimeWindowStart, targetTimeWindowEnd) in user timezone.
  */
 async function emitOverrideRuleChangedTx(
@@ -157,7 +124,7 @@ async function emitOverrideRuleChangedTx(
     timezone,
   });
 
-  for (const { localDate, scope } of affected) {
+  for (const { localDate } of affected) {
     const dayState = await tx.timelineDayState.upsert({
       where: { userId_localDate: { userId: params.userId, localDate } },
       create: {
@@ -201,40 +168,10 @@ async function emitOverrideRuleChangedTx(
       },
     });
 
-    if (process.env.TIMELINE_WORK_DISPATCH === "true") continue;
-
-    await tx.outboxEvent.create({
-      data: {
-        eventType: "rule.changed",
-        aggregateType: "user",
-        aggregateId: params.userId,
-        payload: {
-          userId: params.userId,
-          localDate,
-          sourceRevision: dayState.currentObservationRevision,
-          // Phase 1 revision contract: explicit requestedRevision so the
-          // worker compares true revisions (see telemetry.ts).
-          requestedRevision: {
-            observationRevision: dayState.currentObservationRevision,
-            ruleRevision: dayState.currentRuleRevision,
-            semanticVersion: "3b.0.1",
-          },
-          scope,
-          reason: "rule_changed",
-          ruleRevision: dayState.currentRuleRevision,
-          jobCorrelationId: params.correlationId,
-          queuedAt: now.toISOString(),
-        },
-        correlationId: params.correlationId,
-        causationId: null,
-        schemaVersion: "1.0.0",
-        occurredAt: now,
-        status: "PENDING",
-        publicationAttemptCount: 0,
-        maxAttempts: 5,
-        availableAt: now,
-      },
-    });
+    // The work row above IS the durable promise (Redis-free publisher
+    // executes TimelineWorker directly). No outbox row — that was the
+    // BullMQ transport, removed.
+    void params.correlationId;
   }
 }
 

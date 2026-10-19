@@ -100,9 +100,12 @@ export async function showFocusStartedNotification(options: {
   const notificationId = `focus-started-${Date.now()}`;
   const iconUrl = getNotificationIconUrl();
   const title = "ProductiveHix — Focus Mode Active";
+  // Never invent a target: open-ended sessions have none, so the message omits
+  // any target claim rather than fabricating a "25m target".
+  const targetLabel = options.targetMinutes != null ? ` (${options.targetMinutes}m target)` : "";
   const message = options.taskTitle
-    ? `Started focus on "${options.taskTitle}" (${options.targetMinutes ?? 25}m target). Guard active.`
-    : `Focus session active (${options.targetMinutes ?? 25}m target). Guard active.`;
+    ? `Started focus on "${options.taskTitle}"${targetLabel}. Guard active.`
+    : `Focus session active${targetLabel}. Guard active.`;
 
   return new Promise((resolve) => {
     chrome.notifications.create(
@@ -300,6 +303,14 @@ async function handleReflectAction(notificationId: string) {
     // Ignore
   }
 
+  // Diagnostics truth: record the engagement on the live engine.
+  try {
+    const { reflectionEngine } = await import("./reflection-engine");
+    void reflectionEngine.recordNotificationClicked();
+  } catch {
+    // Ignore
+  }
+
   const isAway = notificationId.includes("-away-");
   const targetMode = isAway ? "inactivity" : "hourly";
 
@@ -394,16 +405,13 @@ async function handleLaterAction(notificationId: string) {
     // Ignore
   }
 
-  // Snooze reminder
+  // Snooze the reminder on the live engine (ReflectionEngine drives the
+  // cadence; the old CheckInScheduler is retired and silently ignored this).
   try {
-    const { checkInScheduler } = await import("./scheduler");
-    const state = checkInScheduler.getState();
-    const snoozeSec = state.devMode ? 60 : 15 * 60;
-    await checkInScheduler.resetTimer(snoozeSec);
+    const { reflectionEngine } = await import("./reflection-engine");
+    await reflectionEngine.snooze();
   } catch {
-    if (typeof chrome !== "undefined" && typeof chrome.alarms?.create === "function") {
-      chrome.alarms.create("checkin-reminder", { delayInMinutes: 15 });
-    }
+    // Ignore: engine module unavailable (e.g. unit test context)
   }
 }
 

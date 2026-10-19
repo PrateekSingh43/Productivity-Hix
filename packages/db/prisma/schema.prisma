@@ -50,6 +50,10 @@ model User {
   patternFindings          PatternFinding[]
   aiConversations          AIConversation[]
 
+  // Phase 1 Task Attribution
+  workContexts             WorkContext[]
+  attributionCorrections   AttributionCorrection[]
+
   preferences              UserPreference?
 
   @@map("users")
@@ -135,6 +139,9 @@ model DailyGoal {
   activityContextLinks ActivityContextLink[]
   userGapExplanations  UserGapExplanation[]
 
+  // Phase 1 Task Attribution
+  workContexts         WorkContext[]
+
   @@index([planId, order])
   @@index([userId])
   @@map("daily_goals")
@@ -178,6 +185,10 @@ model Task {
   activityContextLinks   ActivityContextLink[]
   userGapExplanations    UserGapExplanation[]
 
+  // Phase 1 Task Attribution
+  workContexts           WorkContext[]
+  attributionCorrections AttributionCorrection[]
+
   @@index([userId, status])
   @@index([userId, productiveDate])
   @@index([userId, plannedStart])
@@ -202,6 +213,9 @@ model WorkSession {
   user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   task            Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
   checkIns        CheckIn[]
+
+  // Phase 1 Task Attribution
+  startedWorkContexts WorkContext[]
 
   @@index([userId, startedAt])
   @@map("work_sessions")
@@ -1100,4 +1114,79 @@ model PatternFinding {
   @@index([runId])
   @@index([userId])
   @@map("pattern_findings")
+}
+
+// ----------------------------------------------------------------------------
+// 16. WORK CONTEXT (Phase 1 Task Attribution: declared intent intervals)
+// ----------------------------------------------------------------------------
+/// A time-bounded declaration of what the user is working on. Semantically
+/// last-write-wins within its interval; switched by closing the open interval
+/// and inserting a successor — historical rows are never edited.
+///
+/// At most ONE open context per user (ended_at IS NULL) is enforced by a
+/// raw-SQL partial unique index created in the migration
+/// `work_contexts_and_attribution_corrections` (Prisma's schema language
+/// cannot express partial unique indexes; `prisma generate` is unaffected).
+/// Concurrent openers race on that index and surface as P2002, which the API
+/// maps to 409.
+model WorkContext {
+  id                 String    @id @default(cuid())
+  userId             String    @map("user_id")
+  taskId             String?   @map("task_id")
+  goalId             String?   @map("goal_id")
+  startedAt          DateTime  @default(now()) @map("started_at")
+  endedAt            DateTime? @map("ended_at")
+  // Session that caused this context to open (session-start association).
+  startedBySessionId String?   @map("started_by_session_id")
+  // "SWITCHED" | "SESSION_ASSOCIATED" | "USER_ENDED" | "STALE_RECOVERY"
+  // (STALE_RECOVERY is reserved for Phase 2 stale-session recovery; values
+  // are enforced at the application boundary, stored as text like
+  // WorkSession.source).
+  endedReason        String?   @map("ended_reason")
+  createdAt          DateTime  @default(now()) @map("created_at")
+
+  user              User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  task              Task?        @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  goal              DailyGoal?   @relation(fields: [goalId], references: [id], onDelete: SetNull)
+  startedBySession  WorkSession? @relation(fields: [startedBySessionId], references: [id], onDelete: SetNull)
+
+  @@index([userId, startedAt])
+  @@index([userId, endedAt])
+  @@map("work_contexts")
+}
+
+// ----------------------------------------------------------------------------
+// 17. ATTRIBUTION CORRECTION (Phase 1: append-only user attribution fixes)
+// ----------------------------------------------------------------------------
+/// A user's correction of task attribution for a time window — the
+/// highest-precedence attribution source. Strictly append-only: there is no
+/// UPDATE/DELETE path in the API. A newer correction may carry a backward
+/// pointer via supersedesCorrectionId (set at INSERT time, informational);
+/// resolution is latest-wins per atomic interval ordered by
+/// (createdAt, id). `targetKind` is explicit: "TASK" points at taskId +
+/// taskTitleSnapshot; "NONE" asserts the interval belongs to no task and is
+/// projected as EXPLICIT UNLINKED (never silently re-attributed).
+model AttributionCorrection {
+  id                     String   @id @default(cuid())
+  userId                 String   @map("user_id")
+  windowStart            DateTime @map("window_start")
+  windowEnd              DateTime @map("window_end")
+  // "TASK" | "NONE"
+  targetKind             String   @map("target_kind")
+  taskId                 String?  @map("task_id")
+  // Title capture at correction time so history stays readable after the
+  // task is renamed or deleted (taskId itself is ON DELETE SET NULL).
+  taskTitleSnapshot      String?  @map("task_title_snapshot")
+  reason                 String?  @db.VarChar(500)
+  supersedesCorrectionId String?  @map("supersedes_correction_id")
+  createdAt              DateTime @default(now()) @map("created_at")
+
+  user        User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  task        Task?                 @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  supersedes  AttributionCorrection?  @relation("CorrectionSupersession", fields: [supersedesCorrectionId], references: [id], onDelete: SetNull)
+  supersededBy AttributionCorrection[] @relation("CorrectionSupersession")
+
+  @@index([userId, windowStart, windowEnd])
+  @@index([userId, createdAt])
+  @@map("attribution_corrections")
 }

@@ -22,6 +22,8 @@ import { exportRouter } from "./routes/export";
 import { userRouter } from "./routes/user";
 import { aiRouter } from "./routes/ai";
 import { aiConversationsRouter } from "./routes/ai-conversations";
+import { workContextsRouter } from "./routes/work-contexts";
+import { attributionCorrectionsRouter } from "./routes/attribution-corrections";
 
 export function createApp(): Express {
   const app = express();
@@ -67,6 +69,8 @@ export function createApp(): Express {
   app.use("/api/export", exportRouter);
   app.use("/api/ai", aiRouter);
   app.use("/api/ai/conversations", aiConversationsRouter);
+  app.use("/api/work-contexts", workContextsRouter);
+  app.use("/api/attribution-corrections", attributionCorrectionsRouter);
   app.use(errorHandler);
   return app;
 }

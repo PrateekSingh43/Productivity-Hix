@@ -8,6 +8,7 @@ import {
   usePauseSessionMutation,
   useResumeSessionMutation,
   useDeleteSessionMutation,
+  resolveSessionTargetState,
 } from "@features/sessions";
 import { ConfirmDiscardModal } from "./confirm-discard-modal";
 import { FocusReflectionModal } from "./focus-reflection-modal";
@@ -51,17 +52,19 @@ export function ActiveSessionBanner({ sessions, tasks, onSelectTask }: ActiveSes
     : 0;
   const elapsedSeconds = !activeSession ? 0 : baseDuration + currentSegment;
 
-  const targetDurationMinutes =
-    activeSession?.targetDurationMinutes ??
-    linkedTask?.plannedDurationMinutes ??
-    25;
-  const targetSeconds = targetDurationMinutes * 60;
-  const remainingSeconds = targetSeconds - elapsedSeconds;
-  const isOvertime = remainingSeconds < 0;
+  // Target comes ONLY from the persisted session record. A task's planned
+  // duration estimates the whole task (a different concept), so it is never
+  // used as a focus-block target; a session started without a target is
+  // open-ended: no countdown, no overtime, no notification.
+  const target = resolveSessionTargetState(activeSession?.targetDurationMinutes, elapsedSeconds);
+  const overtimeSeconds = target.targetSeconds != null ? elapsedSeconds - target.targetSeconds : 0;
 
-  // Fire Web Desktop Notification when target is reached (called unconditionally to satisfy Rules of Hooks)
+  // Fire Web Desktop Notification when the PERSISTED target is reached
+  // (called unconditionally to satisfy Rules of Hooks). Open-ended sessions
+  // never notify.
   useEffect(() => {
-    if (!activeSession || isPaused || remainingSeconds > 0) return;
+    if (!activeSession || isPaused || target.remainingSeconds == null) return;
+    if (target.remainingSeconds > 0) return;
     if (hasNotifiedTargetRef.current === activeSession.id) return;
 
     hasNotifiedTargetRef.current = activeSession.id;
@@ -69,12 +72,12 @@ export function ActiveSessionBanner({ sessions, tasks, onSelectTask }: ActiveSes
       const title = linkedTask ? linkedTask.title : activeSession.taskTitle || "Focus Block";
       try {
         new Notification("Focus Target Reached!", {
-          body: `Completed planned ${targetDurationMinutes}m on "${title}". Continue in flow or wrap up & reflect.`,
+          body: `Completed planned ${target.targetMinutes}m on "${title}". Continue in flow or wrap up & reflect.`,
           icon: "/icon.png",
         });
       } catch {}
     }
-  }, [activeSession, isPaused, remainingSeconds, linkedTask, targetDurationMinutes]);
+  }, [activeSession, isPaused, target.remainingSeconds, target.targetMinutes, linkedTask]);
 
   if (!activeSession) return null;
 
@@ -111,7 +114,9 @@ export function ActiveSessionBanner({ sessions, tasks, onSelectTask }: ActiveSes
               {isPaused ? "Focus Paused" : "Focus Session In Progress"}
             </span>
             <span className="text-xs text-text-muted">
-              Target: {targetDurationMinutes}m
+              {target.targetMinutes != null
+                ? `Target: ${target.targetMinutes}m`
+                : "Open-ended · no target"}
             </span>
           </div>
 
@@ -125,13 +130,17 @@ export function ActiveSessionBanner({ sessions, tasks, onSelectTask }: ActiveSes
         <div className="text-right">
           <span className="text-[11px] text-text-muted font-mono block">
             {isPaused
-              ? `paused · target ${targetDurationMinutes}m`
-              : isOvertime
-              ? `flow (+${formatTimer(elapsedSeconds - targetSeconds)}) · target ${targetDurationMinutes}m`
-              : `target ${targetDurationMinutes}m`}
+              ? target.targetMinutes != null
+                ? `paused · target ${target.targetMinutes}m`
+                : "paused · open-ended"
+              : target.isOvertime
+              ? `flow (+${formatTimer(overtimeSeconds)}) · target ${target.targetMinutes}m`
+              : target.targetMinutes != null
+              ? `target ${target.targetMinutes}m`
+              : "open-ended"}
           </span>
           <div className={`font-mono text-base sm:text-lg font-semibold tabular-nums tracking-tight ${
-            isPaused ? "text-amber-500" : isOvertime ? "text-amber-400" : "text-text-primary"
+            isPaused ? "text-amber-500" : target.isOvertime ? "text-amber-400" : "text-text-primary"
           }`}>
             {formatTimer(elapsedSeconds)}
           </div>

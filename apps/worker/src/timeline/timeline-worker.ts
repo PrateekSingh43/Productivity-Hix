@@ -25,6 +25,7 @@ import {
   materializeTemporalBlocks,
   resolveBlockSemantics,
   unionIntervals,
+  TIMELINE_SEGMENTATION_OPTIONS,
   type BlockEngineInput,
 } from "@repo/analytics";
 import { getDb, type Prisma } from "@repo/db";
@@ -354,14 +355,10 @@ export class TimelineWorker extends BaseWorker<TimelineMaterializationJobData, T
     }));
 
     // 6. Materialize temporal blocks using pure deterministic engine
-    const materializedBlocks = materializeTemporalBlocks(inputs, {
-      maxGapMs: 120_000,
-      // 180s idle threshold matches ActivityWatch (AFK after 3min idle) and
-      // the blueprint's micro-pause tier (<3min stays inside the work block).
-      minBreakMs: 180_000,
-      transientThresholdMs: 15_000,
-      maxBreakMs: 2 * 60 * 60 * 1000,
-    });
+    // Canonical options (R4): 120s gap bridge, 180s AFK break threshold matching
+    // ActivityWatch (AFK after 3min idle) and the blueprint's micro-pause tier
+    // (<3min stays inside the work block), 2h max active break.
+    const materializedBlocks = materializeTemporalBlocks(inputs, TIMELINE_SEGMENTATION_OPTIONS);
 
     // 7. Resolve semantics and format blocks
     const formattedBlocks = materializedBlocks.map((mb, idx) => {

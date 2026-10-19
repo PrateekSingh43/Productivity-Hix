@@ -138,7 +138,11 @@ test("FocusGuardManager intercepts 4th tab when active focus session is running"
     { id: 13, windowId: 1, url: "chrome://newtab/" },
   );
 
-  await (manager as any).checkTabLimit(mockTabs[3]);
+  // Session start parks excess tabs immediately (no reload needed).
+  await manager.auditExistingTabs();
+  // Allow the fire-and-forget audit from setSession() to settle; fresh-state
+  // guards make the second pass a no-op instead of a double-park.
+  await new Promise((resolve) => setTimeout(resolve, 10));
   assert.equal(updatedTabs.length, 1, "Should intercept the 4th tab");
   assert.equal(updatedTabs[0]?.tabId, 13);
   assert.ok(
@@ -361,7 +365,7 @@ test("handleRemoteSessionEnded still notifies for a different session and for di
   manager.setSession(null);
 });
 
-test("FocusGuardManager seeds existing working tabs on session audit without hijacking", async () => {
+test("FocusGuardManager parks excess pre-existing tabs on session audit so no reload is needed", async () => {
   const manager = new FocusGuardManager();
   await manager.updateConfig({ limit: 3, enabled: true });
 
@@ -385,18 +389,110 @@ test("FocusGuardManager seeds existing working tabs on session audit without hij
     taskTitle: "Exam Prep",
   } as any);
 
-  // auditExistingTabs seeds the first 3 tabs
+  // auditExistingTabs keeps 3 tabs and parks the excess one immediately,
+  // preserving its original URL for restore on session end.
   await manager.auditExistingTabs();
+  // Allow the fire-and-forget audit from setSession() to settle; fresh-state
+  // guards make the second pass a no-op instead of a double-park.
+  await new Promise((resolve) => setTimeout(resolve, 10));
 
-  // None of the existing tabs should have been hijacked/updated with focus-guard.html!
-  assert.equal(updatedTabs.length, 0, "auditExistingTabs must NEVER forcibly hijack existing open tabs");
+  const parked = updatedTabs.filter((u) => u.updateProps.url?.includes("focus-guard.html"));
+  assert.equal(parked.length, 1, "Exactly one excess tab must be parked on the guard page");
+  assert.equal(parked[0]?.tabId, 64, "The last tab (64) must be the one parked");
+  assert.ok(
+    parked[0]?.updateProps.url?.includes(encodeURIComponent("https://chat.com")),
+    "Parked tab must preserve its original URL as targetUrl for restore",
+  );
 
-  // The first 3 tabs (61, 62, 63) are now in the allowed working set and are immune
+  // The kept working tabs (61, 62, 63) are immune from interception
   await (manager as any).checkTabLimit(mockTabs[0]);
   await (manager as any).checkTabLimit(mockTabs[1]);
   await (manager as any).checkTabLimit(mockTabs[2]);
-  assert.equal(updatedTabs.length, 0, "Pre-existing working tabs 1-3 must not be intercepted");
+  assert.equal(
+    updatedTabs.filter((u) => u.updateProps.url?.includes("focus-guard.html")).length,
+    1,
+    "Working tabs 61-63 must not be intercepted",
+  );
 
+  manager.setSession(null);
+});
+
+test("FocusGuardManager never mints a 25m target for open-ended sessions", async () => {
+  const manager = new FocusGuardManager();
+  await manager.updateConfig({ limit: 3, enabled: true });
+
+  const created: string[] = [];
+  const chromeApi = (globalThis as any).chrome;
+  const originalCreate = chromeApi.notifications.create;
+  chromeApi.notifications.create = (id: string, _opts: any, cb: (id: string) => void) => {
+    created.push(id);
+    cb?.(id);
+  };
+  try {
+    // Open-ended session: only 44m elapsed of a 2h block, and NO target set.
+    manager.setSession({
+      id: "sess-open-ended",
+      userId: "u-1",
+      startedAt: new Date(Date.now() - 44 * 60 * 1000).toISOString(),
+      isPaused: false,
+      durationSeconds: 44 * 60,
+      notes: "Open-ended deep work",
+    } as any);
+
+    manager.checkTargetCompletion();
+
+    assert.equal(
+      created.filter((id) => id.startsWith("focus-target-")).length,
+      0,
+      "No target-reached notification may fire when no target was set",
+    );
+
+    // Even with a fresh check after hours of elapsed time, still nothing.
+    manager.setSession({
+      id: "sess-open-ended-2",
+      userId: "u-1",
+      startedAt: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
+      isPaused: false,
+      durationSeconds: 3 * 60 * 60,
+      notes: "Long open-ended block",
+    } as any);
+    manager.checkTargetCompletion();
+    assert.equal(
+      created.filter((id) => id.startsWith("focus-target-")).length,
+      0,
+      "Elapsed time alone must never fabricate a target",
+    );
+  } finally {
+    chromeApi.notifications.create = originalCreate;
+    manager.setSession(null);
+  }
+});
+
+test("releaseGuardedTabs restores parked tabs to their original URLs on session end", async () => {
+  const manager = new FocusGuardManager();
+  await manager.updateConfig({ limit: 3, enabled: true });
+
+  mockTabs.length = 0;
+  updatedTabs.length = 0;
+
+  mockTabs.push(
+    { id: 71, windowId: 1, url: "https://keep.com" },
+    {
+      id: 72,
+      windowId: 1,
+      url: `chrome-extension://test-ext-id/focus-guard.html?tabId=72&targetUrl=${encodeURIComponent("https://parked.com/article")}&taskTitle=Exam%20Prep&limit=3`,
+    },
+  );
+
+  await manager.releaseGuardedTabs();
+
+  const restored = updatedTabs.find((u) => u.tabId === 72);
+  assert.equal(restored?.updateProps.url, "https://parked.com/article", "Parked tab must be restored to its targetUrl");
+  assert.equal(
+    updatedTabs.filter((u) => u.tabId === 71).length,
+    0,
+    "Non-guard tabs must be left untouched",
+  );
   manager.setSession(null);
 });
 

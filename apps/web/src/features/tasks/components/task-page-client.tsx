@@ -27,6 +27,7 @@ import {
   isOverdueTask,
   isTodayTask,
   isUpcomingTask,
+  resolveTargetDate,
 } from "../lib/task-scopes";
 import {
   buildHistoryGroups,
@@ -58,10 +59,11 @@ export function TaskPageClient() {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [showCompleted, setShowCompleted] = useState(true);
 
-  // Date context
+  // Date context: Today tab is always anchored to the current productive
+  // day. A future plan.date must never promote Today forward (see
+  // resolveTargetDate) — otherwise Oct 2 tasks leak into Today's Priorities.
   const localTodayDate = resolveProductiveDay(new Date());
-  const todayDate =
-    todayPlan?.date && todayPlan.date >= localTodayDate ? todayPlan.date : localTodayDate;
+  const todayDate = resolveTargetDate(todayPlan?.date, localTodayDate);
   const todayGoalIds = useMemo(
     () => new Set((todayPlan?.goals ?? []).map((g) => g.id)),
     [todayPlan]
@@ -112,15 +114,22 @@ export function TaskPageClient() {
     [todayPriorities]
   );
 
-  // Today's Up Next: Remaining today's tasks
-  const todayUpNext = useMemo(() => {
-    return todayTodos.filter((t) => !todayPriorityIds.has(t.id));
-  }, [todayTodos, todayPriorityIds]);
-
   // Today's In Progress tasks
   const todayInProgress = useMemo(() => {
     return todayTasks.filter((t) => t.hasActiveSession || t.status === "in_progress");
   }, [todayTasks]);
+
+  const todayInProgressIds = useMemo(
+    () => new Set(todayInProgress.map((t) => t.id)),
+    [todayInProgress]
+  );
+
+  // Today's Up Next: Remaining today's tasks (not in priorities and not currently in progress)
+  const todayUpNext = useMemo(() => {
+    return todayTodos.filter(
+      (t) => !todayPriorityIds.has(t.id) && !todayInProgressIds.has(t.id)
+    );
+  }, [todayTodos, todayPriorityIds, todayInProgressIds]);
 
   // 3. Upcoming vs Backlog split (Todoist Upcoming / Linear backlog semantics):
   // Upcoming = future-scheduled or future-due, sorted ascending so Sep 28

@@ -26,7 +26,14 @@ import { resolveProductiveDay } from "@repo/types";
  * of inline copies so day-boundary and timezone rules stay consistent.
  */
 export function resolveTargetDate(planDate: string | null | undefined, localTodayDate: string): string {
-  return planDate && planDate >= localTodayDate ? planDate : localTodayDate;
+  // Today-scoped surfaces (Today, Tasks/Today tab, Dashboard) must always be
+  // anchored to the current productive day. A future `plan.date` (stale cache,
+  // pre-created future plan, timezone skew) must never shift "Today" forward —
+  // otherwise future tasks (e.g. Oct 2) leak into Today's Priorities and the
+  // Sep 28 / Sep 30 / today split collapses. Past/missing dates also resolve
+  // to today; historical days live in History, not Today.
+  void planDate;
+  return localTodayDate;
 }
 
 /**
@@ -48,29 +55,53 @@ export function dueDateKey(dueAt: string | null | undefined): string | null {
 }
 
 /**
- * Effective scheduling key for ordering: `productiveDate` wins when present
- * (explicit "work on" day), otherwise the deadline's productive day.
+ * Effective scheduling key for ordering: when both schedule and deadline exist,
+ * the earlier of the two determines chronological placement (so an impending
+ * deadline is never hidden behind a later scheduled date). If only one is
+ * present, that date is used.
  */
 export function effectiveScheduleKey(task: Task): string | null {
-  if (task.productiveDate) return task.productiveDate;
-  return dueDateKey(task.dueAt);
+  const due = dueDateKey(task.dueAt);
+  if (task.productiveDate && due) {
+    return task.productiveDate < due ? task.productiveDate : due;
+  }
+  return task.productiveDate ?? due ?? null;
 }
 
 export function isTodayTask(task: Task, targetDate: string, todayGoalIds: Set<string>): boolean {
   if (task.hasActiveSession) return true;
-  if (task.goalId && todayGoalIds.has(task.goalId)) return true;
-  if (task.productiveDate === targetDate) return true;
+  // Deadline wins over schedule: a task due today must surface in Today even
+  // when its `productiveDate` still points at a future day (e.g. due edited
+  // from Oct 1 → Sep 30 while scheduled day lagged behind). Without this,
+  // due-date edits in Backlog never promote to Today and the task looks stuck.
   const due = dueDateKey(task.dueAt);
   if (due !== null && due === targetDate) return true;
+  // An explicit future schedule wins over goal linkage only (not over the
+  // deadline checked above). Without this, a task parked for Oct 2 but linked
+  // to one of today's goals (easy via Quick Add's goal picker) hijacks
+  // Today's Priorities, and the Today / Upcoming partition collapses.
+  if (task.productiveDate != null && task.productiveDate > targetDate) return false;
+  if (task.goalId && todayGoalIds.has(task.goalId)) return true;
+  if (task.productiveDate === targetDate) return true;
   return false;
 }
 
 export function isOverdueTask(task: Task, targetDate: string, todayGoalIds: Set<string>): boolean {
   if (task.status === "done" || task.status === "cancelled") return false;
   if (task.hasActiveSession) return false;
+  // A past deadline is overdue even when the scheduled day still points at
+  // the future (productiveDate > dueAt inconsistency from a due-date edit
+  // that did not realign the schedule). Otherwise such tasks sink into
+  // Upcoming forever with no reschedule affordance. A task already scheduled
+  // for today stays in Today ("rolled over to today"), not Overdue.
+  const due = dueDateKey(task.dueAt);
+  if (due !== null && due < targetDate) {
+    if (task.productiveDate === targetDate) return false;
+    if (task.goalId && todayGoalIds.has(task.goalId)) return false;
+    return true;
+  }
   if (task.productiveDate && task.productiveDate >= targetDate) return false;
   if (task.goalId && todayGoalIds.has(task.goalId)) return false;
-  const due = dueDateKey(task.dueAt);
   if (due !== null) return due < targetDate;
   return Boolean(task.productiveDate && task.productiveDate < targetDate);
 }

@@ -1,16 +1,16 @@
 /**
- * Group 2 Acceptance Gate Test Suite: Queue + Event Infrastructure
- * 
- * Verifies all 12 required test cases (Case A through Case L):
- * Case A. Redis configuration/connection lifecycle
- * Case B. Queue factory produces deterministic queue configuration
+ * Group 2 Acceptance Gate Test Suite: Postgres-Direct Event Infrastructure (Redis-free)
+ *
+ * Verifies all required test cases:
+ * Case A. Outbox event → domain worker routing table
+ * Case B. Direct dispatch uses deterministic job identity per event
  * Case C. Job payload validation rejects invalid input
  * Case D. Domain mutation + outbox record commit atomically
  * Case E. Rollback removes BOTH mutation and outbox record
- * Case F. Publisher successfully dispatches an outbox event
+ * Case F. Publisher successfully executes an outbox event directly
  * Case G. Publisher crash/retry does not permanently lose the event
- * Case H. Duplicate publication is safe
- * Case I. Exhausted publication retry enters explicit failure/dead-letter state
+ * Case H. Duplicate dispatch is safe (deterministic identity)
+ * Case I. Exhausted retries enter explicit failure/dead-letter state
  * Case J. Multiple publishers cannot corrupt the same outbox event
  * Case K. Worker bootstrap starts and shuts down correctly
  * Case L. Existing Group 1 acceptance cases still pass
@@ -18,72 +18,14 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
-  resolveRedisConnectionConfig,
-  checkRedisHealth,
-} from '../runtime/redis';
-import {
-  createQueue,
-  createDeterministicJobId,
-  CANONICAL_JOB_OPTIONS,
-  QueueManager,
-} from '../runtime/queue';
-import {
   validateJobPayload,
   JobPayloadValidationError,
-  timelineMaterializationJobDataSchema,
 } from '@repo/validation';
 import { PRODUCTIVEHIX_QUEUES } from '@repo/types';
-import { OutboxPublisher } from '../outbox/publisher';
+import { OutboxPublisher, resolveHandlerForEvent } from '../outbox/publisher';
 import { createOutboxEventTx } from '../outbox/storage';
 import { getDeadLetterEvents, retryDeadLetterEvent } from '../outbox/dead-letter';
 import { MemoryWorkerMetricsCollector } from '../shared/metrics';
-
-// ============================================================================
-// Mock Mappings for BullMQ & ioredis to ensure fast deterministic unit tests
-// ============================================================================
-
-const { MockBullQueue, mockQueues } = vi.hoisted(() => {
-  const queues = new Map<string, any>();
-
-  class MockBullQueue {
-    name: string;
-    options: any;
-    jobs: any[] = [];
-    closed = false;
-
-    constructor(name: string, options: any) {
-      this.name = name;
-      this.options = options;
-      queues.set(name, this);
-    }
-
-    add = vi.fn().mockImplementation(async (jobName: string, data: any, opts: any) => {
-      const id = opts?.jobId ?? `mock-job-${Date.now()}`;
-      const job = { id, name: jobName, data, opts };
-      this.jobs.push(job);
-      return job;
-    });
-
-    close = vi.fn().mockImplementation(async () => {
-      this.closed = true;
-    });
-
-    getWaitingCount = vi.fn().mockResolvedValue(0);
-    getActiveCount = vi.fn().mockResolvedValue(0);
-    getDelayedCount = vi.fn().mockResolvedValue(0);
-    getFailedCount = vi.fn().mockResolvedValue(0);
-  }
-
-  return { MockBullQueue, mockQueues: queues };
-});
-
-vi.mock('bullmq', () => ({
-  Queue: MockBullQueue,
-  Worker: class MockWorker {
-    close = vi.fn().mockResolvedValue(undefined);
-    on = vi.fn().mockReturnValue(this);
-  },
-}));
 
 // Mock Database for Outbox Tests
 function createMockDatabase() {
@@ -195,72 +137,64 @@ function createMockDatabase() {
   };
 }
 
-describe('Group 2 Acceptance Gate: Queue + Event Infrastructure', () => {
+describe('Group 2 Acceptance Gate: Postgres-Direct Event Infrastructure', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockQueues.clear();
   });
 
   // ==========================================================================
-  // Case A: Redis configuration/connection lifecycle
+  // Case A: Event → worker routing (no queue)
   // ==========================================================================
-  it('Case A: resolves Redis configuration and checks connection health lifecycle', async () => {
-    // 1. Direct URL parsing with TLS
-    const redissConfig = resolveRedisConnectionConfig({
-      url: 'rediss://default:secret@upstash-host:6379',
-    });
-    expect(redissConfig.url).toBe('rediss://default:secret@upstash-host:6379');
-    expect(redissConfig.options.tls).toBeDefined();
-    expect(redissConfig.options.maxRetriesPerRequest).toBeNull(); // Required by BullMQ
+  it('Case A: resolves each outbox event type to its owning domain worker', () => {
+    for (const t of ['telemetry.ingested', 'rule.changed', 'override.changed', 'gap.explained']) {
+      expect(resolveHandlerForEvent(t)).toBe('timeline');
+    }
+    expect(resolveHandlerForEvent('pattern.analysis.requested')).toBe('pattern');
+    expect(resolveHandlerForEvent('nope.unknown')).toBeUndefined();
+  });
 
-    // 2. Health monitoring check
-    const mockHealthyRedis = {
-      ping: vi.fn().mockResolvedValue('PONG'),
-      info: vi.fn().mockImplementation(async (section: string) => {
-        if (section === 'server') return 'uptime_in_seconds:3600\nredis_mode:standalone';
-        if (section === 'clients') return 'connected_clients:5';
-        return '';
+  // ==========================================================================
+  // Case B: Direct dispatch uses deterministic job identity per event
+  // ==========================================================================
+  it('Case B: repeated dispatch of the same event reuses the same jobId', async () => {
+    const mockDb = createMockDatabase();
+    const seenJobIds: string[] = [];
+    const fakeWorker = {
+      run: vi.fn().mockImplementation(async (_payload: unknown, opts: { jobId: string }) => {
+        seenJobIds.push(opts.jobId);
+        return { status: 'SUCCEEDED' };
       }),
-    } as any;
+    };
 
-    const health = await checkRedisHealth(mockHealthyRedis);
-    expect(health.status).toBe('healthy');
-    expect(health.connected).toBe(true);
-    expect(health.uptimeInSeconds).toBe(3600);
-    expect(health.connectedClients).toBe(5);
-
-    // 3. Unhealthy connection reporting
-    const mockFailingRedis = {
-      ping: vi.fn().mockRejectedValue(new Error('ECONNREFUSED 127.0.0.1:6379')),
-    } as any;
-
-    const failingHealth = await checkRedisHealth(mockFailingRedis);
-    expect(failingHealth.status).toBe('unhealthy');
-    expect(failingHealth.connected).toBe(false);
-    expect(failingHealth.error).toContain('ECONNREFUSED');
-  });
-
-  // ==========================================================================
-  // Case B: Queue factory produces deterministic queue configuration
-  // ==========================================================================
-  it('Case B: queue factory produces deterministic BullMQ queue options and jobId', () => {
-    const mockRedis = {} as any;
-    const queue = createQueue(PRODUCTIVEHIX_QUEUES.TIMELINE_MATERIALIZATION, {
-      connection: mockRedis,
-      prefix: 'custom_prefix',
+    const event = await mockDb.client.outboxEvent.create({
+      data: {
+        id: 'outbox-fixed-id-123',
+        eventType: 'telemetry.ingested',
+        aggregateType: 'user',
+        aggregateId: 'user-dedupe',
+        correlationId: 'corr-dedupe',
+        payload: {
+          userId: 'user-dedupe',
+          localDate: '2026-09-23',
+          reason: 'TELEMETRY_INGEST',
+          requestedRevision: { observationRevision: 1, ruleRevision: 1, semanticVersion: '1.0.0' },
+          jobCorrelationId: 'corr-dedupe',
+          queuedAt: new Date().toISOString(),
+        },
+      },
     });
 
-    expect(queue.name).toBe(PRODUCTIVEHIX_QUEUES.TIMELINE_MATERIALIZATION);
-    const opts = (queue as any).options;
-    expect(opts.prefix).toBe('custom_prefix');
-    expect(opts.defaultJobOptions.attempts).toBe(CANONICAL_JOB_OPTIONS.attempts);
-    expect(opts.defaultJobOptions.backoff).toEqual(CANONICAL_JOB_OPTIONS.backoff);
-    expect(opts.defaultJobOptions.removeOnComplete).toEqual(CANONICAL_JOB_OPTIONS.removeOnComplete);
-    expect(opts.defaultJobOptions.removeOnFail).toEqual(CANONICAL_JOB_OPTIONS.removeOnFail);
+    const publisher = new OutboxPublisher({
+      db: mockDb.client,
+      timelineWorker: fakeWorker as never,
+    });
 
-    // Deterministic JobId generation
-    const jobId = createDeterministicJobId('timeline-materialization', 'user-123:2026-09-23');
-    expect(jobId).toBe('timeline-materialization__user-123_2026-09-23');
+    await publisher.dispatchEvent(event);
+    await publisher.dispatchEvent(event);
+
+    expect(seenJobIds).toHaveLength(2);
+    expect(seenJobIds[0]).toBe('timeline__outbox-fixed-id-123');
+    expect(seenJobIds[1]).toBe(seenJobIds[0]);
   });
 
   // ==========================================================================
@@ -412,12 +346,17 @@ describe('Group 2 Acceptance Gate: Queue + Event Infrastructure', () => {
   });
 
   // ==========================================================================
-  // Case F: Publisher successfully dispatches an outbox event
+  // Case F: Publisher successfully executes an outbox event directly
   // ==========================================================================
-  it('Case F: publisher successfully claims and dispatches outbox event to BullMQ', async () => {
+  it('Case F: publisher successfully claims and executes outbox event via TimelineWorker', async () => {
     const mockDb = createMockDatabase();
-    const mockRedis = {} as any;
-    const queueManager = new QueueManager({ connection: mockRedis });
+    const executed: unknown[] = [];
+    const fakeWorker = {
+      run: vi.fn().mockImplementation(async (payload: unknown) => {
+        executed.push(payload);
+        return { status: 'SUCCEEDED' };
+      }),
+    };
     const metrics = new MemoryWorkerMetricsCollector();
 
     // Insert pending outbox event
@@ -444,7 +383,7 @@ describe('Group 2 Acceptance Gate: Queue + Event Infrastructure', () => {
 
     const publisher = new OutboxPublisher({
       db: mockDb.client,
-      queueManager,
+      timelineWorker: fakeWorker as never,
       metrics,
     });
 
@@ -456,13 +395,12 @@ describe('Group 2 Acceptance Gate: Queue + Event Infrastructure', () => {
     expect(record.publishedAt).toBeInstanceOf(Date);
     expect(metrics.getCount('outbox.published', PRODUCTIVEHIX_QUEUES.TIMELINE_MATERIALIZATION)).toBe(1);
 
-    // Verify BullMQ received the job with complete DomainEventEnvelope
-    const timelineQueue = mockQueues.get(PRODUCTIVEHIX_QUEUES.TIMELINE_MATERIALIZATION);
-    expect(timelineQueue).toBeDefined();
-    expect(timelineQueue.jobs).toHaveLength(1);
-    expect(timelineQueue.jobs[0].name).toBe('telemetry.ingested');
-    expect(timelineQueue.jobs[0].data.correlationId).toBe('corr-case-f');
-    expect(timelineQueue.jobs[0].data.schemaVersion).toBe('1.0.0');
+    // Verify the worker received the complete DomainEventEnvelope directly
+    expect(executed).toHaveLength(1);
+    const envelope = executed[0] as Record<string, unknown>;
+    expect(envelope.eventType).toBe('telemetry.ingested');
+    expect(envelope.correlationId).toBe('corr-case-f');
+    expect(envelope.schemaVersion).toBe('1.0.0');
   });
 
   // ==========================================================================
@@ -470,8 +408,6 @@ describe('Group 2 Acceptance Gate: Queue + Event Infrastructure', () => {
   // ==========================================================================
   it('Case G: publisher crash leaves event in PROCESSING; reclaimStaleProcessing recovers it', async () => {
     const mockDb = createMockDatabase();
-    const mockRedis = {} as any;
-    const queueManager = new QueueManager({ connection: mockRedis });
 
     // Stale event stuck in PROCESSING where claim lease expired
     const expiredClaim = new Date(Date.now() - 1000);
@@ -489,7 +425,6 @@ describe('Group 2 Acceptance Gate: Queue + Event Infrastructure', () => {
 
     const publisher = new OutboxPublisher({
       db: mockDb.client,
-      queueManager,
       lockTimeoutMs: 60_000,
     });
 
@@ -501,12 +436,17 @@ describe('Group 2 Acceptance Gate: Queue + Event Infrastructure', () => {
   });
 
   // ==========================================================================
-  // Case H: Duplicate publication is safe (deterministic jobId deduplication)
+  // Case H: Duplicate dispatch is safe (deterministic job identity)
   // ==========================================================================
-  it('Case H: duplicate publication uses deterministic jobId ensuring queue deduplication', async () => {
+  it('Case H: duplicate dispatch reuses the deterministic jobId (no duplicate work identity)', async () => {
     const mockDb = createMockDatabase();
-    const mockRedis = {} as any;
-    const queueManager = new QueueManager({ connection: mockRedis });
+    const seenJobIds: string[] = [];
+    const fakeWorker = {
+      run: vi.fn().mockImplementation(async (_payload: unknown, opts: { jobId: string }) => {
+        seenJobIds.push(opts.jobId);
+        return { status: 'SUCCEEDED' };
+      }),
+    };
 
     const event = await mockDb.client.outboxEvent.create({
       data: {
@@ -532,7 +472,7 @@ describe('Group 2 Acceptance Gate: Queue + Event Infrastructure', () => {
 
     const publisher = new OutboxPublisher({
       db: mockDb.client,
-      queueManager,
+      timelineWorker: fakeWorker as never,
     });
 
     // Dispatch event first time
@@ -540,13 +480,10 @@ describe('Group 2 Acceptance Gate: Queue + Event Infrastructure', () => {
     // Dispatch event second time (simulating recovery replay)
     await publisher.dispatchEvent(event);
 
-    const timelineQueue = mockQueues.get(PRODUCTIVEHIX_QUEUES.TIMELINE_MATERIALIZATION);
-    expect(timelineQueue.jobs).toHaveLength(2);
-    // Both enqueues used the exact same deterministic jobId
-    expect(timelineQueue.jobs[0].opts.jobId).toBe(
-      createDeterministicJobId(PRODUCTIVEHIX_QUEUES.TIMELINE_MATERIALIZATION, 'outbox-fixed-id-123')
-    );
-    expect(timelineQueue.jobs[1].opts.jobId).toBe(timelineQueue.jobs[0].opts.jobId);
+    expect(seenJobIds).toHaveLength(2);
+    // Both executions used the exact same deterministic jobId
+    expect(seenJobIds[0]).toBe('timeline__outbox-fixed-id-123');
+    expect(seenJobIds[1]).toBe(seenJobIds[0]);
   });
 
   // ==========================================================================
@@ -554,12 +491,12 @@ describe('Group 2 Acceptance Gate: Queue + Event Infrastructure', () => {
   // ==========================================================================
   it('Case I: exhausted publication retries transitions event to DEAD_LETTER state', async () => {
     const mockDb = createMockDatabase();
-    const mockRedis = {} as any;
-    const queueManager = new QueueManager({ connection: mockRedis });
     const metrics = new MemoryWorkerMetricsCollector();
 
-    // Mock queueManager.addJob to simulate transient network/redis failure
-    vi.spyOn(queueManager, 'addJob').mockRejectedValue(new Error('BullMQ connection timeout'));
+    // Failing worker simulates poison payload (non-infra error)
+    const failingWorker = {
+      run: vi.fn().mockRejectedValue(new Error('worker poison: invalid payload')),
+    };
 
     const event = await mockDb.client.outboxEvent.create({
       data: {
@@ -575,7 +512,7 @@ describe('Group 2 Acceptance Gate: Queue + Event Infrastructure', () => {
 
     const publisher = new OutboxPublisher({
       db: mockDb.client,
-      queueManager,
+      timelineWorker: failingWorker as never,
       metrics,
     });
 
@@ -601,8 +538,6 @@ describe('Group 2 Acceptance Gate: Queue + Event Infrastructure', () => {
   // ==========================================================================
   it('Case J: concurrent publishers claim disjoint events without double-claiming', async () => {
     const mockDb = createMockDatabase();
-    const mockRedis = {} as any;
-    const queueManager = new QueueManager({ connection: mockRedis });
 
     // Seed 10 pending events
     for (let i = 0; i < 10; i++) {
@@ -617,8 +552,8 @@ describe('Group 2 Acceptance Gate: Queue + Event Infrastructure', () => {
       });
     }
 
-    const publisherA = new OutboxPublisher({ db: mockDb.client, queueManager });
-    const publisherB = new OutboxPublisher({ db: mockDb.client, queueManager });
+    const publisherA = new OutboxPublisher({ db: mockDb.client });
+    const publisherB = new OutboxPublisher({ db: mockDb.client });
 
     // Simulate concurrent claiming
     const [claimedA, claimedB] = await Promise.all([
@@ -645,49 +580,34 @@ describe('Group 2 Acceptance Gate: Queue + Event Infrastructure', () => {
   });
 
   // ==========================================================================
-  // Case K: Worker bootstrap starts and shuts down correctly
+  // Case K: Worker bootstrap starts and shuts down correctly (no Redis)
   // ==========================================================================
-  it('Case K: worker bootstrap initializes and terminates services in clean order', async () => {
+  it('Case K: publisher lifecycle starts and stops cleanly with no transport to close', async () => {
     const events: string[] = [];
 
-    const mockPublisher = {
-      start: vi.fn().mockImplementation(() => events.push('publisher:start')),
-      stop: vi.fn().mockImplementation(async () => events.push('publisher:stop')),
+    const mockDb: any = {
+      outboxEvent: {
+        updateMany: async () => ({ count: 0 }),
+        findMany: async () => [],
+        groupBy: async () => [],
+      },
+      timelineWork: {
+        updateMany: async () => ({ count: 0 }),
+        findMany: async () => [],
+      },
     };
+    const publisher = new OutboxPublisher({ db: mockDb, pollIntervalMs: 10 });
 
-    const mockRuntime = {
-      start: vi.fn().mockImplementation(async () => events.push('runtime:start')),
-      stop: vi.fn().mockImplementation(async () => events.push('runtime:stop')),
-    };
+    // Startup: publisher starts polling
+    publisher.start();
+    events.push('publisher:start');
+    expect(publisher.isPublisherRunning()).toBe(true);
 
-    const mockQueueManager = {
-      closeAll: vi.fn().mockImplementation(async () => events.push('queues:closeAll')),
-    };
+    // Shutdown: publisher stops intake (no queues, no redis to close)
+    await publisher.stop();
+    events.push('publisher:stop');
+    expect(publisher.isPublisherRunning()).toBe(false);
 
-    const mockRedis = {
-      quit: vi.fn().mockImplementation(async () => events.push('redis:quit')),
-      status: 'ready',
-    };
-
-    // Simulate lifecycle execution
-    // 1. Startup order: runtime -> publisher
-    await mockRuntime.start();
-    mockPublisher.start();
-    expect(events).toEqual(['runtime:start', 'publisher:start']);
-
-    // 2. Shutdown order: publisher -> runtime -> queues -> redis
-    await mockPublisher.stop();
-    await mockRuntime.stop();
-    await mockQueueManager.closeAll();
-    await mockRedis.quit();
-
-    expect(events).toEqual([
-      'runtime:start',
-      'publisher:start',
-      'publisher:stop',
-      'runtime:stop',
-      'queues:closeAll',
-      'redis:quit',
-    ]);
+    expect(events).toEqual(['publisher:start', 'publisher:stop']);
   });
 });

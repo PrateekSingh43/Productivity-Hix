@@ -39,10 +39,14 @@ import {
   useDeleteSessionMutation,
   usePauseSessionMutation,
   useResumeSessionMutation,
+  describeSessionSpan,
+  formatSessionDuration,
+  formatSessionDurationExact,
 } from "@features/sessions";
 import { FocusReflectionModal } from "./focus-reflection-modal";
 import { ConfirmDiscardModal } from "./confirm-discard-modal";
 import { PlannedFocusPicker } from "./planned-focus-picker";
+import { TaskEvidenceSummary } from "./task-evidence-summary";
 import {
   ReflectionAmendmentHistory,
   SessionReflectionComposer,
@@ -322,6 +326,18 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
     const saveStatus = status;
     const savePriority = priority;
     const saveDueAt = dueDate ? new Date(`${dueDate}T23:59:59`).toISOString() : null;
+    // Keep schedule <= deadline: moving a deadline earlier must pull a
+    // future `productiveDate` forward too, otherwise the task keeps a
+    // productiveDate > dueAt and (before the scope fix) never surfaces in
+    // Today/Overdue. Clearing the deadline leaves the schedule untouched.
+    const currentSchedule = currentTask.productiveDate ?? null;
+    const saveProductiveDate =
+      dueDate &&
+      (currentSchedule == null ||
+        currentSchedule > dueDate ||
+        (currentSchedule < localToday && dueDate >= localToday))
+        ? dueDate
+        : currentSchedule;
 
     updateTaskMutation.mutate(
       {
@@ -334,7 +350,7 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
           plannedDurationMinutes: savePlannedDuration,
           goalId: saveGoalId,
           dueAt: saveDueAt,
-          productiveDate: currentTask.productiveDate ?? null,
+          productiveDate: saveProductiveDate,
         },
       },
       {
@@ -570,6 +586,32 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
               <span className="text-[10px] font-mono font-medium px-2 py-0.5 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 shrink-0">
                 Today
               </span>
+            </div>
+          )}
+
+          {!isOverdue && !isRolloverToToday && !isScheduledToday && !isDone && (
+            <div className="p-3 rounded-xl bg-bg-secondary border border-border-subtle flex items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <Calendar size={16} className="text-text-muted shrink-0" />
+                <div className="min-w-0">
+                  <div className="font-semibold text-text-primary">
+                    {dueDateStr ? `Due ${format(new Date(currentTask.dueAt!), "MMM d")}` : "Unscheduled in Backlog"}
+                  </div>
+                  <div className="text-[11px] text-text-muted mt-0.5 truncate">
+                    Not scheduled for today. Move to Today to execute now.
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleScheduleToToday}
+                disabled={updateTaskMutation.isPending}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-bg-card border border-border-subtle hover:border-amber-500/40 text-xs font-medium text-text-primary hover:text-amber-500 transition-colors shrink-0 cursor-pointer"
+                title="Schedule to Today"
+              >
+                <Calendar size={12} />
+                <span>To Today</span>
+              </button>
             </div>
           )}
 
@@ -841,6 +883,17 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
               <div className="divide-y divide-border-subtle rounded-xl border border-border-subtle bg-bg-secondary/20 overflow-hidden">
                 {sessions.map((session, idx) => {
                   const isOngoing = !session.endedAt;
+                  // Same canonical wall/active/paused semantics as Session
+                  // History: the range is wall time, the duration is active.
+                  const span = describeSessionSpan(
+                    session.startedAt,
+                    session.endedAt,
+                    session.durationSeconds,
+                  );
+                  const spanTitle =
+                    span.wallDurationSeconds != null
+                      ? `Focused: ${formatSessionDurationExact(span.activeDurationSeconds)} · Paused: ${formatSessionDurationExact(span.pausedDurationSeconds)} · Elapsed: ${formatSessionDurationExact(span.wallDurationSeconds)}`
+                      : formatSessionDurationExact(session.durationSeconds);
                   let startDate = new Date(session.startedAt);
                   if (session.endedAt && session.durationSeconds) {
                     const endDate = new Date(session.endedAt);
@@ -853,9 +906,7 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
                   const endText = session.endedAt
                     ? format(new Date(session.endedAt), "h:mm a")
                     : "now";
-                  const durationMins = session.durationSeconds
-                    ? Math.round(session.durationSeconds / 60)
-                    : null;
+                  const durationLabel = formatSessionDuration(session.durationSeconds);
                   const hasDebrief = debriefBySession.has(session.id);
                   const isComposerOpen =
                     composer?.kind === "create" && composer.sessionId === session.id;
@@ -867,9 +918,20 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
                           <span className="text-[11px] font-mono text-text-muted shrink-0">
                             #{sessions.length - idx}
                           </span>
-                          <span className="text-text-primary font-medium shrink-0">
+                          <span
+                            className="text-text-primary font-medium shrink-0"
+                            title={spanTitle}
+                          >
                             {startText} – {endText}
                           </span>
+                          {!isOngoing && span.hasMeaningfulPause && (
+                            <span
+                              className="text-[11px] font-mono text-text-muted shrink-0"
+                              title={spanTitle}
+                            >
+                              · {formatSessionDuration(span.pausedDurationSeconds)} paused
+                            </span>
+                          )}
                           {session.notes && (
                             <span className="text-[11px] text-text-muted truncate max-w-[150px]">
                               • {session.notes}
@@ -883,8 +945,11 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
                               Active
                             </span>
                           ) : (
-                            <span className="font-mono text-xs text-text-muted">
-                              {durationMins !== null ? `${durationMins}m` : "0m"}
+                            <span
+                              className="font-mono text-xs text-text-muted"
+                              title={spanTitle}
+                            >
+                              {durationLabel}
                             </span>
                           )}
 
@@ -955,12 +1020,16 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
 
             <div className="p-4 rounded-xl bg-bg-secondary/30 border border-border-subtle space-y-3">
               <p className="text-xs text-text-muted leading-relaxed">
-                Activity telemetry observed during this task&apos;s focus periods. This provides observational evidence without auto-completing tasks.
+                Telemetry attributed to this task by work context or session link,
+                inside the range spanned by its linked focus sessions. Time outside
+                that range is not assessed, and nothing here ever auto-completes
+                the task.
               </p>
-
               {activitySummary.length === 0 ? (
                 <div className="py-2 text-center text-xs text-text-muted">
-                  No telemetry recorded during this task&apos;s session windows.
+                  {sessions.length === 0
+                    ? "No focus sessions linked yet — observed activity appears here once sessions exist for this task."
+                    : "No telemetry recorded inside this task's session windows. Time outside those windows is not assessed."}
                 </div>
               ) : (
                 <div className="space-y-2.5 divide-y divide-border-subtle/30">
@@ -1009,6 +1078,9 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
               )}
             </div>
           </div>
+
+          {/* Slice C: evidence coverage + freshness + provenance (R3/R7) */}
+          <TaskEvidenceSummary taskId={currentTask.id} sessions={sessions} />
 
           {/* SCHEDULE HISTORY (append-only reschedule audit) */}
           {scheduleHistory.length > 0 && (

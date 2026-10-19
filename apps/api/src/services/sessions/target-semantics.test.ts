@@ -40,6 +40,15 @@ function mockDb(captured: { data?: Record<string, unknown> }) {
         };
       },
     },
+    // R5: task sessions now run session-start context association inside the
+    // same transaction. No open context in these fixtures.
+    workContext: {
+      findFirst: async () => null,
+      create: async ({ data }: { data: Record<string, unknown> }) => ({
+        id: "ctx-1",
+        ...data,
+      }),
+    },
   });
 }
 

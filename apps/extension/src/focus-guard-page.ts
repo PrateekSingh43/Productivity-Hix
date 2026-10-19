@@ -21,6 +21,52 @@ if (destEl) {
   destEl.textContent = isBlankOrNewTab ? "New Tab" : targetUrl;
 }
 
+/**
+ * Self-healing: a tab parked on this guard page must not stay blocked after
+ * the focus session ends. The background proactively restores guarded tabs
+ * (see FocusGuardManager.releaseGuardedTabs), but as a second layer this page
+ * checks session liveness on load and listens for session end broadcasts.
+ */
+function releaseToDestination(): void {
+  if (targetUrl && targetUrl !== "about:blank" && !targetUrl.startsWith("chrome://newtab")) {
+    window.location.href = targetUrl;
+  } else {
+    // No meaningful destination: fall back to a fresh tab page.
+    try {
+      window.location.href = "chrome://newtab/";
+    } catch {
+      window.location.href = "about:blank";
+    }
+  }
+}
+
+function isSessionLive(session: { endedAt?: string | null } | null | undefined): boolean {
+  return Boolean(session && !(session as { endedAt?: string | null }).endedAt);
+}
+
+try {
+  // On load: if no live session, immediately release instead of showing stale block.
+  chrome.runtime
+    .sendMessage({ type: "get-active-session" })
+    .then((session) => {
+      if (!isSessionLive(session as { endedAt?: string | null } | null)) {
+        releaseToDestination();
+      }
+    })
+    .catch(() => {
+      // Background unreachable (e.g. reloaded): do not trap the user.
+    });
+
+  // Live update: release the moment the session ends elsewhere.
+  chrome.runtime.onMessage.addListener((message: { type?: string; session?: { endedAt?: string | null } | null }) => {
+    if (message?.type === "session:updated" && !isSessionLive(message.session)) {
+      releaseToDestination();
+    }
+  });
+} catch {
+  // Non-extension context (dev preview): no-op.
+}
+
 document.getElementById("btn-swap")?.addEventListener("click", () => {
   chrome.runtime.sendMessage(
     {

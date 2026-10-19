@@ -130,13 +130,18 @@ chrome.idle.onStateChanged.addListener(async (state) => {
   await queue.enqueue([idleEvent]);
   triggerDebouncedFlush();
 
-  // IDLE state transitions are handled automatically by AvailabilityManager and ActivityEngine
+  // Real user return is the only "activity" signal here — a mere heartbeat
+  // (browser alive, user away) must never reset the activity clock, or the
+  // engines can never observe IDLE while the browser stays open.
+  if (state === "active") {
+    activityEngine.registerDesktopActivity();
+  }
 });
 
-// MV3 Alarms for queue flushing, long-session heartbeat, and hourly reflection evaluation
+// MV3 Alarms for queue flushing, long-session heartbeat, and focus target checks.
+// Check-in scheduling is state-driven (ActivityEngine ticks) — no eval alarm.
 chrome.alarms.create("productivehix-sync", { periodInMinutes: 1 });
 chrome.alarms.create("productivehix-heartbeat", { periodInMinutes: 0.5 });
-chrome.alarms.create("productivehix-checkin-eval", { periodInMinutes: 1 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === "productivehix-sync") {
@@ -145,7 +150,6 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     void focusGuard.refreshSession();
   } else if (alarm.name === "productivehix-heartbeat") {
     void recordTabEvent(tracker.handlePeriodicHeartbeat());
-    activityEngine.registerDesktopActivity(); // Record desktop heartbeat as activity
     focusGuard.checkTargetCompletion();
   } else if (alarm.name === "focus-target-alarm") {
     focusGuard.checkTargetCompletion();
@@ -201,6 +205,7 @@ async function handleSubmitCheckIn(payload: CheckInCreateInput): Promise<{
 
       if (result?.id) {
         await reflectionEngine.forceReset();
+        await reflectionEngine.recordCheckInCompleted();
         return { success: true, queuedOffline: false, checkIn: result };
       }
     } catch (err) {
@@ -210,6 +215,7 @@ async function handleSubmitCheckIn(payload: CheckInCreateInput): Promise<{
 
   await checkInQueue.enqueue(payload);
   await reflectionEngine.forceReset();
+  await reflectionEngine.recordCheckInCompleted();
   return { success: true, queuedOffline: true };
 }
 

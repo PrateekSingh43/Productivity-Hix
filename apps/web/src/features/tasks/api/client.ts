@@ -1,5 +1,5 @@
 import { apiFetch, jsonBody } from "@shared/api/client";
-import type { Task, TaskWithSessions, TaskObservedActivityItem, TaskScheduleMove, CreateTaskInput, UpdateTaskInput, TaskFilters } from "../types";
+import type { Task, TaskWithSessions, TaskObservedActivityItem, TaskScheduleMove, TaskEvidenceResponse, CreateTaskInput, UpdateTaskInput, TaskFilters } from "../types";
 
 export function getTasks(filters?: TaskFilters) {
   const params = new URLSearchParams();
@@ -20,6 +20,14 @@ export function getTaskObservedActivity(id: string) {
 
 export function getTaskScheduleHistory(id: string) {
   return apiFetch<TaskScheduleMove[]>(`/api/tasks/${id}/schedule-history`);
+}
+
+export function getTaskEvidence(id: string, from: Date, to: Date) {
+  const params = new URLSearchParams({
+    from: from.toISOString(),
+    to: to.toISOString(),
+  });
+  return apiFetch<TaskEvidenceResponse>(`/api/tasks/${id}/evidence?${params.toString()}`);
 }
 
 export function createTask(input: CreateTaskInput) {

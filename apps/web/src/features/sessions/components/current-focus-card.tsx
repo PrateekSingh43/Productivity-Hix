@@ -293,7 +293,9 @@ export function CurrentFocusCard({
                     </div>
                     <div className="flex items-center gap-3 shrink-0 ml-3">
                       <span className="text-xs font-mono text-text-muted">
-                        {task.plannedDurationMinutes ?? 30}m
+                        {task.plannedDurationMinutes != null
+                          ? `${task.plannedDurationMinutes}m`
+                          : "No estimate"}
                       </span>
                       <PriorityBadge priority={task.priority} />
                     </div>
@@ -348,8 +350,6 @@ export function CurrentFocusCard({
       );
     }
 
-    const planned = focusTask.plannedDurationMinutes ?? 30;
-
     return (
       <div
         className={`rounded-xl border border-border-subtle bg-bg-card p-6 space-y-4 ${className}`}
@@ -387,7 +387,11 @@ export function CurrentFocusCard({
             <span>·</span>
             <span className="flex items-center gap-1 font-mono">
               <Clock size={11} />
-              <span>Task planned: {planned}m</span>
+              <span>
+                {focusTask.plannedDurationMinutes != null
+                  ? `Task planned: ${focusTask.plannedDurationMinutes}m`
+                  : "No plan set"}
+              </span>
             </span>
             <PriorityBadge priority={focusTask.priority} />
           </div>

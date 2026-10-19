@@ -8,6 +8,8 @@ type StoredTabState = {
   activeStartTime: number;
   lastEvidenceTime?: number;
   windowFocused: boolean;
+  audible?: boolean;
+  incognito?: boolean;
 };
 
 const TAB_STATE_KEY = "productivehix_tab_state";
@@ -27,6 +29,8 @@ export class TabTracker {
   private activeStartTime: number = Date.now();
   private lastEvidenceTime: number = Date.now();
   private windowFocused: boolean = true;
+  private currentAudible: boolean = false;
+  private currentIncognito: boolean = false;
   private installationId = "browser-ext-default";
 
   setInstallationId(id: string): void {
@@ -56,6 +60,8 @@ export class TabTracker {
             this.lastEvidenceTime = now;
           }
           this.windowFocused = state.windowFocused ?? true;
+          this.currentAudible = state.audible ?? false;
+          this.currentIncognito = state.incognito ?? false;
         }
       }
     } catch {
@@ -73,6 +79,8 @@ export class TabTracker {
           activeStartTime: this.activeStartTime,
           lastEvidenceTime: this.lastEvidenceTime,
           windowFocused: this.windowFocused,
+          audible: this.currentAudible,
+          incognito: this.currentIncognito,
         };
         await chrome.storage.local.set({ [TAB_STATE_KEY]: state });
       }
@@ -81,7 +89,13 @@ export class TabTracker {
     }
   }
 
-  private createEvent(url: string, title: string, startTime: number, endTime: number, tab?: chrome.tabs.Tab): BrowserActivityEvent | null {
+  private createEvent(
+    url: string,
+    title: string,
+    startTime: number,
+    endTime: number,
+    flags?: { audible?: boolean; incognito?: boolean },
+  ): BrowserActivityEvent | null {
     const durationMs = Math.max(0, endTime - startTime);
     if (durationMs < 1000) return null; // Ignore sub-second noise
 
@@ -90,8 +104,8 @@ export class TabTracker {
       title,
       timestamp: new Date(startTime).toISOString(),
       durationMs,
-      audible: tab?.audible,
-      incognito: tab?.incognito,
+      audible: flags?.audible,
+      incognito: flags?.incognito,
     });
 
     // Development logging as specified in Requirement 7
@@ -117,12 +131,19 @@ export class TabTracker {
     let previousEvent: BrowserActivityEvent | null = null;
 
     if (this.windowFocused && this.currentUrl && this.currentTitle) {
-      previousEvent = this.createEvent(this.currentUrl, this.currentTitle, this.activeStartTime, now, tab);
+      // The segment that just ended carries the PREVIOUS tab's flags — the
+      // incoming tab's audible/incognito must not leak onto it.
+      previousEvent = this.createEvent(this.currentUrl, this.currentTitle, this.activeStartTime, now, {
+        audible: this.currentAudible,
+        incognito: this.currentIncognito,
+      });
     }
 
     this.currentTabId = tab.id ?? null;
     this.currentUrl = tab.url ?? null;
     this.currentTitle = tab.title ?? null;
+    this.currentAudible = tab.audible ?? false;
+    this.currentIncognito = tab.incognito ?? false;
     this.activeStartTime = now;
     this.lastEvidenceTime = now;
     this.windowFocused = true;
@@ -154,7 +175,10 @@ export class TabTracker {
     if (windowId === chrome.windows.WINDOW_ID_NONE) {
       // User switched focus away from browser window to desktop / another application
       if (this.windowFocused && this.currentUrl && this.currentTitle) {
-        const event = this.createEvent(this.currentUrl, this.currentTitle, this.activeStartTime, now);
+        const event = this.createEvent(this.currentUrl, this.currentTitle, this.activeStartTime, now, {
+          audible: this.currentAudible,
+          incognito: this.currentIncognito,
+        });
         this.windowFocused = false;
         await this.savePersistedState();
         return event;
@@ -172,6 +196,8 @@ export class TabTracker {
         this.currentTabId = activeTab.id ?? null;
         this.currentUrl = activeTab.url;
         this.currentTitle = activeTab.title ?? null;
+        this.currentAudible = activeTab.audible ?? false;
+        this.currentIncognito = activeTab.incognito ?? false;
         this.activeStartTime = now;
       }
     } catch {
@@ -213,7 +239,10 @@ export class TabTracker {
     const elapsed = now - this.activeStartTime;
     // Emit segment if on the same page for >= 30 seconds
     if (elapsed >= 30_000) {
-      const event = this.createEvent(this.currentUrl, this.currentTitle, this.activeStartTime, now);
+      const event = this.createEvent(this.currentUrl, this.currentTitle, this.activeStartTime, now, {
+        audible: this.currentAudible,
+        incognito: this.currentIncognito,
+      });
       this.activeStartTime = now;
       await this.savePersistedState();
       return event;

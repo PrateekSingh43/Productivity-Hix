@@ -49,3 +49,71 @@ export function formatTargetVariance(actualSeconds: number, targetMinutes: numbe
   if (diffMins === 0) return "on target";
   return diffMins > 0 ? `+${diffMins}m` : `${diffMins}m`;
 }
+
+/**
+ * Minimum paused time worth disclosing in the UI. Sub-minute gaps are
+ * timestamp precision / second-rounding noise; surfacing "Paused 14s"
+ * would be clutter, not honesty.
+ */
+export const PAUSE_DISCLOSURE_THRESHOLD_SECONDS = 60;
+
+export interface SessionSpan {
+  /** Wall-clock `endedAt - startedAt` in seconds, or null while running. */
+  wallDurationSeconds: number | null;
+  /** Recorded active/focused seconds (`durationSeconds`, floored at 0). */
+  activeDurationSeconds: number;
+  /** `max(0, wall - active)` for ended sessions, else 0. Never negative. */
+  pausedDurationSeconds: number;
+  /** True when an ended session carries a disclosable pause gap. */
+  hasMeaningfulPause: boolean;
+}
+
+/**
+ * Single canonical decomposition of a completed session's time span.
+ *
+ * Domain semantics (server-audited): `durationSeconds` counts ACTIVE time
+ * only — pause/resume accounting in the sessions service excludes paused
+ * intervals — while `startedAt → endedAt` spans WALL time including them.
+ * So for an ended session `active <= wall`, and the difference is total
+ * paused time. This helper derives all three from the same record so every
+ * session list (History, Task Drawer, …) shares one semantic source instead
+ * of re-deriving wall/active inline in different ways.
+ *
+ * Precision: subtraction happens on whole seconds (durations are stored as
+ * whole seconds; wall is rounded once from milliseconds). No minute-level
+ * rounding before subtraction. Formatting is left to the canonical
+ * `formatSessionDuration` / `formatSessionDurationExact` helpers.
+ */
+export function describeSessionSpan(
+  startedAt: string,
+  endedAt: string | null,
+  durationSeconds: number | null | undefined,
+): SessionSpan {
+  const activeDurationSeconds = Math.max(0, Math.floor(durationSeconds ?? 0));
+  if (!endedAt) {
+    return {
+      wallDurationSeconds: null,
+      activeDurationSeconds,
+      pausedDurationSeconds: 0,
+      hasMeaningfulPause: false,
+    };
+  }
+  const startMs = Date.parse(startedAt);
+  const endMs = Date.parse(endedAt);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+    return {
+      wallDurationSeconds: null,
+      activeDurationSeconds,
+      pausedDurationSeconds: 0,
+      hasMeaningfulPause: false,
+    };
+  }
+  const wallDurationSeconds = Math.round((endMs - startMs) / 1000);
+  const pausedDurationSeconds = Math.max(0, wallDurationSeconds - activeDurationSeconds);
+  return {
+    wallDurationSeconds,
+    activeDurationSeconds,
+    pausedDurationSeconds,
+    hasMeaningfulPause: pausedDurationSeconds >= PAUSE_DISCLOSURE_THRESHOLD_SECONDS,
+  };
+}

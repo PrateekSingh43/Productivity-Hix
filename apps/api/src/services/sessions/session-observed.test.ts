@@ -5,11 +5,20 @@ import { getSessionsObservedActivity } from "./service";
 afterEach(resetTestDb);
 
 /**
- * Pins the compact observation contract (mission Phase 4):
- * per-session windows attribute normalized telemetry by interval midpoint;
- * AFK is excluded; output is apps + seconds only — no productivity labels,
- * no coverage percentages.
+ * Pins the compact observation contract (mission Phase 4 / Slice C):
+ * per-session windows attribute telemetry by EVIDENCE BLOCKS (pure builder
+ * slicing), never by interval midpoint; AFK is excluded; output is apps +
+ * seconds only — no productivity labels, no coverage percentages.
  */
+
+function evidenceExtras() {
+  return {
+    workContext: { findMany: async () => [] },
+    attributionCorrection: { findMany: async () => [] },
+    checkIn: { findMany: async () => [] },
+    userGapExplanation: { findMany: async () => [] },
+  };
+}
 
 function activity(
   id: string,
@@ -55,6 +64,7 @@ describe("getSessionsObservedActivity", () => {
           activity("a-3", "2026-09-30T12:00:00.000Z", 600, "Code.exe"),
         ],
       },
+      ...evidenceExtras(),
     });
 
     const out = await getSessionsObservedActivity("user-1", ["s-1", "s-2", "s-9"]);
@@ -79,6 +89,7 @@ describe("getSessionsObservedActivity", () => {
         ],
       },
       normalizedActivity: { findMany: async () => [] },
+      ...evidenceExtras(),
     });
     const out = await getSessionsObservedActivity("user-1", ["s-1"]);
     expect(out).toEqual({ "s-1": { apps: [], observedSeconds: 0 } });
@@ -88,8 +99,47 @@ describe("getSessionsObservedActivity", () => {
     setTestDb({
       workSession: { findMany: async () => [] },
       normalizedActivity: { findMany: async () => [] },
+      ...evidenceExtras(),
     });
     expect(await getSessionsObservedActivity("user-1", [])).toEqual({});
     expect(await getSessionsObservedActivity("user-1", ["nope"])).toEqual({});
+  });
+
+  it("overlapping session windows are NON-ADDITIVE per-session views (shared telemetry appears in both)", async () => {
+    setTestDb({
+      workSession: {
+        findMany: async () => [
+          {
+            id: "s-1",
+            startedAt: new Date("2026-09-30T08:00:00.000Z"),
+            endedAt: new Date("2026-09-30T09:00:00.000Z"),
+            durationSeconds: 3600,
+          },
+          {
+            id: "s-2",
+            startedAt: new Date("2026-09-30T08:30:00.000Z"),
+            endedAt: new Date("2026-09-30T09:30:00.000Z"),
+            durationSeconds: 3600,
+          },
+        ],
+      },
+      normalizedActivity: {
+        findMany: async () => [
+          activity("a-1", "2026-09-30T08:40:00.000Z", 600, "Code.exe"),
+        ],
+      },
+      ...evidenceExtras(),
+    });
+
+    const out = await getSessionsObservedActivity("user-1", ["s-1", "s-2"]);
+    // The 10-minute block [08:40,08:50) sits inside BOTH windows: each
+    // summary is a contextual view of its own window, so both include it.
+    // This is the documented contract (SessionObservedSummary), not a bug:
+    // summing per-session values can exceed distinct observed time.
+    expect(out["s-1"]!.observedSeconds).toBe(600);
+    expect(out["s-2"]!.observedSeconds).toBe(600);
+    expect(out["s-1"]!.apps).toEqual(["Visual Studio Code"]);
+    expect(out["s-2"]!.apps).toEqual(["Visual Studio Code"]);
+    expect(out["s-1"]!.observedSeconds + out["s-2"]!.observedSeconds).toBeGreaterThan(600);
   });
 });

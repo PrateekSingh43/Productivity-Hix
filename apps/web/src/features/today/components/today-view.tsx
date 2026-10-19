@@ -115,6 +115,26 @@ export function TodayView() {
       });
   }, [rawTasks, targetDate, goalIdSet]);
 
+  // Group tasks that have a goalId not present in today's daily plan goals (e.g. goals from prior days or ongoing goals)
+  const otherGoalGroups = React.useMemo(() => {
+    const groups = new Map<string, { goalId: string; goalTitle: string; tasks: Task[] }>();
+    for (const t of tasks) {
+      if (t.goalId && !goalIdSet.has(t.goalId)) {
+        const existing = groups.get(t.goalId);
+        if (existing) {
+          existing.tasks.push(t);
+        } else {
+          groups.set(t.goalId, {
+            goalId: t.goalId,
+            goalTitle: t.goalTitle || "Ongoing Goal",
+            tasks: [t],
+          });
+        }
+      }
+    }
+    return Array.from(groups.values());
+  }, [tasks, goalIdSet]);
+
   // Handler to roll over overdue tasks to today
   const handleRollOverOverdue = async () => {
     for (const t of overdueTasks) {
@@ -165,10 +185,11 @@ export function TodayView() {
     ? (rawTasks.find((t) => t.id === serverActiveSession.taskId) ?? null)
     : null;
 
-  // Session target for display: server target, else the linked task's plan,
-  // else unset. Never invent 25m.
-  const displayTargetMinutes =
-    serverActiveSession?.targetDurationMinutes ?? serverTask?.plannedDurationMinutes ?? null;
+  // Session target for display: the PERSISTED session target only. The
+  // linked task's plan estimates the whole task (a different concept) and
+  // is never substituted here; unset renders as "Target not set" and no
+  // target-reached notification fires.
+  const displayTargetMinutes = serverActiveSession?.targetDurationMinutes ?? null;
 
   // Wake resync: refresh authoritative session state when the tab becomes
   // visible or connectivity returns, so a pre-sleep frozen display converges
@@ -350,10 +371,12 @@ export function TodayView() {
     setSessionError(null);
     setSessionPending(true);
     try {
-      const targetDurationMinutes = task.plannedDurationMinutes ?? 30;
+      // No explicit target picker exists on this quick-start path, so the
+      // session starts open-ended. The task's planned duration estimates the
+      // whole task and must not be stored as this block's target.
       const session = await createSession({
         taskId: task.id,
-        targetDurationMinutes,
+        targetDurationMinutes: null,
         notes: `Focus on ${task.title}`,
         startedAt: new Date().toISOString(),
       });
@@ -715,7 +738,7 @@ export function TodayView() {
                   <span className="inline-flex items-center gap-1">
                     <Target size={11} />
                     <span className="truncate max-w-[220px]">
-                      {goals.find((g) => g.id === nextUpTask.goalId)?.title ?? "Goal"}
+                      {goals.find((g) => g.id === nextUpTask.goalId)?.title ?? nextUpTask.goalTitle ?? "Goal"}
                     </span>
                   </span>
                 )}
@@ -798,6 +821,11 @@ export function TodayView() {
                       Goal: {g.title}
                     </option>
                   ))}
+                  {otherGoalGroups.map((og) => (
+                    <option key={og.goalId} value={og.goalId}>
+                      Goal: {og.goalTitle} (Ongoing)
+                    </option>
+                  ))}
                 </select>
                 <div className="flex items-center gap-1.5 bg-bg-secondary border border-border-subtle rounded-md px-2.5 py-1.5">
                   <Calendar size={12} className="text-text-muted shrink-0" />
@@ -866,6 +894,32 @@ export function TodayView() {
                 </div>
               );
             })}
+
+            {/* Ongoing / Carried-over Goal Tasks (e.g. goals from prior days or backlog) */}
+            {otherGoalGroups.map((group) => (
+              <div key={group.goalId}>
+                {/* Goal Subheader */}
+                <div className="flex items-center justify-between px-5 py-2.5 bg-bg-secondary/40 border-b border-border-subtle/50">
+                  <div className="flex items-center gap-2">
+                    <Target size={13} className="text-text-muted" />
+                    <span className="text-xs font-semibold text-text-primary">
+                      {group.goalTitle}
+                    </span>
+                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-bg-secondary text-text-muted border border-border-subtle">
+                      Ongoing Goal
+                    </span>
+                  </div>
+                  <span className="text-xs text-text-muted font-mono">
+                    {group.tasks.length} {group.tasks.length === 1 ? "task" : "tasks"}
+                  </span>
+                </div>
+
+                {/* Tasks under this goal */}
+                <div className="divide-y divide-border-subtle/40">
+                  {group.tasks.map((task) => renderTodayTaskRow(task))}
+                </div>
+              </div>
+            ))}
 
             {/* Independent Tasks */}
             {(() => {

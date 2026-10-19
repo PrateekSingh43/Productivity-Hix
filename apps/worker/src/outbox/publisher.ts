@@ -1,28 +1,55 @@
 /**
- * Outbox Publisher Engine
- * 
+ * Outbox Publisher Engine (Redis-free, Postgres-direct)
+ *
  * Responsibilities:
  * 1. Safely poll & claim pending PostgreSQL outbox events across multiple publisher instances
  *    using PostgreSQL FOR UPDATE SKIP LOCKED (or atomic token claim).
- * 2. Dispatch events to canonical BullMQ queues carrying the complete DomainEventEnvelope<T>.
+ * 2. Execute each event directly via the owning domain worker
+ *    (TimelineWorker / PatternWorker) through the shared BaseWorker.run
+ *    engine — validation, idempotency, locks, supersession, timeouts.
+ *    No Redis, no BullMQ: Postgres rows ARE the queue.
  * 3. Reclaim stale 'PROCESSING' events when claimExpiresAt passes (crash recovery).
  * 4. Move permanently failing events to 'DEAD_LETTER' state after exhausting maxAttempts.
- * 5. Provide bounded retention cleanup for successfully published events.
- * 6. Track infrastructure metrics for publication latency and throughput.
+ * 5. Provide bounded retention cleanup for successfully executed events.
+ * 6. Track infrastructure metrics for execution latency and throughput.
+ *
+ * Retry ownership: Postgres attempts + exponential availableAt backoff
+ * (see dispatchEvent / dispatchTimelineWork). BaseWorker normalizes and
+ * classifies errors; the publisher decides park-vs-count.
  */
 
 import type { Database, OutboxEvent } from '@repo/db';
-import { PRODUCTIVEHIX_QUEUES, type DomainEventEnvelope } from '@repo/types';
+import type { DomainEventEnvelope } from '@repo/types';
 import { InMemoryLockProvider, type IdempotencyProvider } from '../base/idempotency';
 import { TimelineWorker } from '../timeline/timeline-worker';
-import type { QueueManager } from '../runtime/queue';
-import { resolveQueueForEvent } from '../queues/registry';
-import { createDeterministicJobId } from '../runtime/queue';
+import { PatternWorker } from '../pattern/pattern-worker';
 import {
   type WorkerMetricsCollector,
   noopMetricsCollector,
 } from '../shared/metrics';
 import type { WorkerLogger } from '../shared/logging';
+
+/** Which domain worker owns an outbox event type. Null = unknown (dead-letter). */
+export type OutboxHandler = 'timeline' | 'pattern';
+
+/**
+ * Maps durable outbox event types to their owning domain worker.
+ * Replaces the former BullMQ EVENT_TO_QUEUE_MAPPING — same routing,
+ * Postgres-direct execution instead of queue enqueueing.
+ */
+export function resolveHandlerForEvent(eventType: string): OutboxHandler | undefined {
+  switch (eventType) {
+    case 'telemetry.ingested':
+    case 'rule.changed':
+    case 'override.changed':
+    case 'gap.explained':
+      return 'timeline';
+    case 'pattern.analysis.requested':
+      return 'pattern';
+    default:
+      return undefined;
+  }
+}
 
 export interface DirectExecutor {
   (payload: unknown, opts: {
@@ -36,35 +63,44 @@ export interface DirectExecutor {
 export interface OutboxPublisherOptions {
   publisherId?: string;
   db: Database;
-  queueManager: QueueManager;
   pollIntervalMs?: number;
   batchSize?: number;
   lockTimeoutMs?: number;
   metrics?: WorkerMetricsCollector;
   logger?: WorkerLogger;
-  /** Phase 4: retention sweep cadence. Default 6h; 0 disables. */
+  /** Retention sweep cadence. Default 6h; 0 disables. */
   cleanupIntervalMs?: number;
-  /** Phase 4: retention horizon for terminal rows. Default 7 days. */
+  /** Retention horizon for terminal rows. Default 7 days. */
   retentionMs?: number;
   /**
-   * Phase 3: executes timeline work inline instead of enqueueing to BullMQ.
-   * Defaults to a lazily constructed TimelineWorker with a process-local
+   * Injected domain workers (tests inject fakes; production lazily
+   * constructs real TimelineWorker / PatternWorker against `db`).
+   */
+  timelineWorker?: TimelineWorker;
+  patternWorker?: PatternWorker;
+  /**
+   * Lock provider for direct execution. Defaults to a process-local
    * in-memory lock (correct for a single publisher process; multi-process
-   * deployments must keep the BullMQ path until a shared lock lands).
+   * deployments need a shared Postgres advisory lock before scaling out).
+   */
+  locks?: IdempotencyProvider;
+  /**
+   * Low-level timeline override (legacy test hook). Prefer injecting
+   * `timelineWorker` instead; when set, it takes precedence.
    */
   directExecutor?: DirectExecutor;
 }
 
 /**
- * True when a dispatch failure is an infrastructure outage (Redis down,
- * quota exhausted, connection lost) rather than a poison payload. Infra
+ * True when a dispatch failure is an infrastructure outage (Postgres down,
+ * pool exhausted, connection lost) rather than a poison payload. Infra
  * failures must park the event WITHOUT consuming publication attempts —
  * otherwise a transient outage deterministically dead-letters healthy
  * events and breaks the at-least-once outbox guarantee.
  */
 export function isInfrastructureError(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err ?? "");
-  return /max requests limit exceeded|quota|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|EHOSTUNREACH|Connection is closed|ECONNRESET|READONLY|LOADING|MISCONF/i.test(
+  return /max requests limit exceeded|quota|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|EHOSTUNREACH|Connection is closed|ECONNRESET|READONLY|LOADING|MISCONF|max clients|EMAXCONNSESSION|pool|timeout expired|connection terminated/i.test(
     message
   );
 }
@@ -72,7 +108,6 @@ export function isInfrastructureError(err: unknown): boolean {
 export class OutboxPublisher {
   public readonly publisherId: string;
   private readonly db: Database;
-  private readonly queueManager: QueueManager;
   private readonly pollIntervalMs: number;
   private readonly batchSize: number;
   private readonly lockTimeoutMs: number;
@@ -90,21 +125,34 @@ export class OutboxPublisher {
   private lastCleanupAt = 0;
 
   private directExecutor?: DirectExecutor;
-  private directLocks?: IdempotencyProvider;
-  private directWorker?: TimelineWorker;
+  private locks: IdempotencyProvider;
+  private timelineWorker?: TimelineWorker;
+  private patternWorker?: PatternWorker;
 
   constructor(options: OutboxPublisherOptions) {
     this.publisherId = options.publisherId ?? `pub-${Date.now()}-${Math.random().toString(36).substring(7)}`;
     this.db = options.db;
-    this.queueManager = options.queueManager;
     this.pollIntervalMs = options.pollIntervalMs ?? 500;
     this.batchSize = options.batchSize ?? 25;
     this.lockTimeoutMs = options.lockTimeoutMs ?? 60_000;
     this.metrics = options.metrics ?? noopMetricsCollector;
     this.logger = options.logger;
     this.directExecutor = options.directExecutor;
+    this.timelineWorker = options.timelineWorker;
+    this.patternWorker = options.patternWorker;
+    this.locks = options.locks ?? new InMemoryLockProvider();
     this.cleanupIntervalMs = options.cleanupIntervalMs ?? 6 * 60 * 60 * 1000;
     this.retentionMs = options.retentionMs ?? 7 * 24 * 60 * 60 * 1000;
+  }
+
+  private getTimelineWorker(): TimelineWorker {
+    if (!this.timelineWorker) this.timelineWorker = new TimelineWorker(this.db);
+    return this.timelineWorker;
+  }
+
+  private getPatternWorker(): PatternWorker {
+    if (!this.patternWorker) this.patternWorker = new PatternWorker(this.db as never);
+    return this.patternWorker;
   }
 
   /**
@@ -259,14 +307,16 @@ export class OutboxPublisher {
   }
 
   /**
-   * Dispatches a single outbox event to BullMQ carrying the full DomainEventEnvelope<T>.
+   * Executes a single outbox event directly via its owning domain worker.
+   * The envelope is passed straight to BaseWorker.run — no queue in between.
+   * PUBLISHED here means "consumed and executed", not "enqueued".
    */
   async dispatchEvent(event: OutboxEvent): Promise<boolean> {
     const startTime = Date.now();
-    const targetQueue = resolveQueueForEvent(event.eventType);
+    const handler = resolveHandlerForEvent(event.eventType);
 
-    if (!targetQueue) {
-      const errorMsg = `No canonical queue registered for event type: ${event.eventType}`;
+    if (!handler) {
+      const errorMsg = `No domain worker registered for event type: ${event.eventType}`;
       this.logger?.error(errorMsg);
 
       await this.db.outboxEvent.update({
@@ -284,8 +334,9 @@ export class OutboxPublisher {
       return false;
     }
 
+    const workerLabel = handler === 'timeline' ? 'timeline-materialization' : 'pattern-analysis';
     try {
-      const jobId = createDeterministicJobId(targetQueue, event.id);
+      const jobId = `${handler}__${event.id}`;
 
       // Construct canonical DomainEventEnvelope
       const envelope: DomainEventEnvelope = {
@@ -303,20 +354,27 @@ export class OutboxPublisher {
             : String(event.occurredAt),
       };
 
-      await this.queueManager.addJob(
-        targetQueue,
-        event.eventType,
-        envelope,
-        {
+      const attempt = event.publicationAttemptCount + 1;
+      if (handler === 'timeline') {
+        await this.executeTimelineDirectly(envelope, {
           jobId,
-          timestamp:
-            event.createdAt instanceof Date
-              ? event.createdAt.getTime()
-              : Date.now(),
-        }
-      );
+          correlationId: event.correlationId,
+          attempt,
+          maxAttempts: event.maxAttempts,
+        });
+      } else {
+        await this.getPatternWorker().run(envelope, {
+          jobId,
+          correlationId: event.correlationId,
+          attempt,
+          maxAttempts: event.maxAttempts,
+          idempotencyProvider: this.locks,
+          metrics: this.metrics,
+          logger: this.logger,
+        });
+      }
 
-      // Successfully enqueued to BullMQ: mark PUBLISHED
+      // Successfully executed: mark PUBLISHED (= consumed)
       await this.db.outboxEvent.update({
         where: { id: event.id },
         data: {
@@ -330,10 +388,10 @@ export class OutboxPublisher {
       });
 
       const latencyMs = Date.now() - startTime;
-      this.metrics.increment('outbox.published', { queue: targetQueue });
-      this.metrics.timing('outbox.latency', latencyMs, { queue: targetQueue });
+      this.metrics.increment('outbox.published', { queue: workerLabel });
+      this.metrics.timing('outbox.latency', latencyMs, { queue: workerLabel });
 
-      this.logger?.debug(`Published outbox event ${event.id} to queue ${targetQueue}`);
+      this.logger?.debug(`Executed outbox event ${event.id} via ${handler} worker`);
       return true;
     } catch (dispatchErr) {
       const errorMessage =
@@ -358,7 +416,7 @@ export class OutboxPublisher {
           },
         });
 
-        this.metrics.increment('outbox.publish_failed', { queue: targetQueue });
+        this.metrics.increment('outbox.publish_failed', { queue: workerLabel });
         this.logger?.warn(
           `Outbox event ${event.id} dispatch hit infrastructure outage; parked without consuming an attempt. Next try at ${nextAvailableAt.toISOString()}: ${errorMessage}`
         );
@@ -381,7 +439,7 @@ export class OutboxPublisher {
           },
         });
 
-        this.metrics.increment('outbox.dead_letter', { queue: targetQueue });
+        this.metrics.increment('outbox.dead_letter', { queue: workerLabel });
         this.logger?.error(`Outbox event ${event.id} permanently failed -> DEAD_LETTER`, dispatchErr);
       } else {
         // Exponential backoff: 1s, 2s, 4s, 8s... max 60s
@@ -401,7 +459,7 @@ export class OutboxPublisher {
           },
         });
 
-        this.metrics.increment('outbox.publish_failed', { queue: targetQueue });
+        this.metrics.increment('outbox.publish_failed', { queue: workerLabel });
         this.logger?.warn(
           `Outbox event ${event.id} dispatch failed (attempt ${nextAttemptCount}/${event.maxAttempts}). Retrying at ${nextAvailableAt.toISOString()}`
         );
@@ -439,11 +497,9 @@ export class OutboxPublisher {
   /**
    * Executes one polling and dispatch cycle.
    * Returns count of events processed.
-   */
-  /**
-   * Phase 0 ops visibility: once a minute, log pending depth + oldest
-   * pending age (single cheap aggregate). This is the backlog signal —
-   * persistent growth here means the dispatcher, not Redis, is behind.
+   * Ops visibility: once a minute, log pending depth + oldest pending age
+   * (single cheap aggregate). Persistent growth here means the dispatcher
+   * — not any transport, there is none — is behind.
    */
   async logOpsSummary(): Promise<void> {
     const now = Date.now();
@@ -470,28 +526,13 @@ export class OutboxPublisher {
   }
 
   /**
-   * Phase 2 coalesced dispatch: claims due timeline_work rows (one per dirty
-   * user/day) and enqueues each as a single timeline-materialization job
-   * carrying the row's latest requested revisions. Enabled only when
-   * TIMELINE_WORK_DISPATCH=true; the legacy outbox path stays default.
+   * Executes a timeline payload through BaseWorker.run — validation,
+   * idempotency, locks, supersession, timeouts — with a process-local lock
+   * provider. Correct for a single publisher process; multi-process
+   * deployments need a shared Postgres advisory lock before scaling out.
+   * A custom executor may be injected (tests do this).
    */
-  private workDispatchEnabled(): boolean {
-    return process.env.TIMELINE_WORK_DISPATCH === 'true';
-  }
-
-  /**
-   * Phase 3: execute timeline work inline (no BullMQ/Redis) when
-   * TIMELINE_DIRECT_DISPATCH=true. Uses the same BaseWorker.run engine —
-   * validation, idempotency, locks, supersession, timeouts — with a
-   * process-local lock provider. Correct for a single publisher process;
-   * multi-process deployments must keep the queue path until a shared
-   * lock lands. A custom executor may be injected (tests do this).
-   */
-  private directDispatchEnabled(): boolean {
-    return process.env.TIMELINE_DIRECT_DISPATCH === 'true';
-  }
-
-  private async executeWorkDirectly(
+  private async executeTimelineDirectly(
     payload: unknown,
     opts: { jobId: string; correlationId: string; attempt: number; maxAttempts: number }
   ): Promise<void> {
@@ -499,14 +540,12 @@ export class OutboxPublisher {
       await this.directExecutor(payload, opts);
       return;
     }
-    if (!this.directLocks) this.directLocks = new InMemoryLockProvider();
-    if (!this.directWorker) this.directWorker = new TimelineWorker(this.db);
-    await this.directWorker.run(payload, {
+    await this.getTimelineWorker().run(payload, {
       jobId: opts.jobId,
       correlationId: opts.correlationId,
       attempt: opts.attempt,
       maxAttempts: opts.maxAttempts,
-      idempotencyProvider: this.directLocks,
+      idempotencyProvider: this.locks,
       metrics: this.metrics,
       logger: this.logger,
     });
@@ -514,6 +553,11 @@ export class OutboxPublisher {
     // the work row (obsolete work completing as SUPERSEDED is still done).
   }
 
+  /**
+   * Coalesced dispatch: claims due timeline_work rows (one per dirty
+   * user/day) and executes each directly via TimelineWorker carrying the
+   * row's latest requested revisions. The work table IS the queue.
+   */
   async dispatchTimelineWork(): Promise<number> {
     const now = new Date();
     const claimExpiresAt = new Date(now.getTime() + this.lockTimeoutMs);
@@ -550,27 +594,15 @@ export class OutboxPublisher {
         jobCorrelationId: `work-${row.id}`,
         queuedAt: new Date().toISOString(),
       };
-      const workJobId = createDeterministicJobId(
-        PRODUCTIVEHIX_QUEUES.TIMELINE_MATERIALIZATION,
-        `work-${row.id}`
-      );
+      const workJobId = `timeline-materialization__work-${row.id}`;
 
       try {
-        if (this.directDispatchEnabled()) {
-          await this.executeWorkDirectly(workPayload, {
-            jobId: workJobId,
-            correlationId: `work-${row.id}`,
-            attempt: (row.attempts ?? 0) + 1,
-            maxAttempts: row.maxAttempts ?? 5,
-          });
-        } else {
-          await this.queueManager.addJob(
-            PRODUCTIVEHIX_QUEUES.TIMELINE_MATERIALIZATION,
-            'timeline.work.requested',
-            workPayload,
-            { jobId: workJobId, timestamp: Date.now() }
-          );
-        }
+        await this.executeTimelineDirectly(workPayload, {
+          jobId: workJobId,
+          correlationId: `work-${row.id}`,
+          attempt: (row.attempts ?? 0) + 1,
+          maxAttempts: row.maxAttempts ?? 5,
+        });
         await db.timelineWork.update({
           where: { id: row.id },
           data: {
@@ -582,7 +614,7 @@ export class OutboxPublisher {
           },
         });
         this.metrics.increment('timeline.work_dispatched', {
-          queue: PRODUCTIVEHIX_QUEUES.TIMELINE_MATERIALIZATION,
+          queue: 'timeline-materialization',
         });
         done++;
       } catch (err) {
@@ -618,7 +650,7 @@ export class OutboxPublisher {
               },
             });
             this.metrics.increment('timeline.work_failed', {
-              queue: PRODUCTIVEHIX_QUEUES.TIMELINE_MATERIALIZATION,
+              queue: 'timeline-materialization',
             });
             this.logger?.error(`Timeline work ${row.id} permanently failed -> DEAD_LETTER`, err);
           } else {
@@ -692,12 +724,10 @@ export class OutboxPublisher {
     // 1b. Periodic ops visibility (non-blocking cadence, cheap aggregate)
     await this.logOpsSummary();
 
-    // 1c. Phase 2 coalesced path: dirty days first when enabled.
-    if (this.workDispatchEnabled()) {
-      await this.dispatchTimelineWork();
-    }
+    // 1c. Coalesced path first: dirty days (one row per user/day).
+    await this.dispatchTimelineWork();
 
-    // 1d. Phase 4 scheduled retention (cadence-gated, cheap when idle).
+    // 1d. Scheduled retention (cadence-gated, cheap when idle).
     await this.runRetentionCleanup();
 
     // 2. Claim pending batch
@@ -755,11 +785,7 @@ export class OutboxPublisher {
 
     scheduleNext();
     this.logger?.info(
-      `OutboxPublisher started polling for events (timeline dispatch: ${
-        this.directDispatchEnabled() ? 'direct-inline (no Redis)' : 'BullMQ queue'
-      }, work-table: ${
-        process.env.TIMELINE_WORK_DISPATCH === 'true' ? 'preferred' : 'observe-only'
-      })`
+      'OutboxPublisher started (Postgres-direct, no Redis): work-table + outbox → TimelineWorker / PatternWorker'
     );
   }
 

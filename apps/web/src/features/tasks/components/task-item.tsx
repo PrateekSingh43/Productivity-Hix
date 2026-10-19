@@ -83,20 +83,17 @@ export function TaskItem({ task, onSelect, isPrioritySection, onRescheduleToday 
   const todayStr = resolveProductiveDay(new Date());
   const dueKey = dueDateKey(task.dueAt);
   const isScheduledToday = task.productiveDate === todayStr;
+  // Rollover = already pulled into today despite an older deadline (Today
+  // scope wins). Past-due + future-scheduled is NOT rollover — it is Overdue
+  // and needs an explicit reschedule (canonical isOverdueTask semantics).
   const isRollover =
-    !isDone &&
-    Boolean(
-      task.productiveDate &&
-        task.productiveDate >= todayStr &&
-        dueKey &&
-        dueKey < todayStr
-    );
+    !isDone && Boolean(isScheduledToday && dueKey && dueKey < todayStr);
 
   const isOverdue =
     !isDone &&
     !isRollover &&
     (dueKey
-      ? dueKey < todayStr
+      ? dueKey < todayStr && !isScheduledToday
       : Boolean(task.productiveDate && task.productiveDate < todayStr));
 
   const displayDate = task.dueAt
@@ -265,15 +262,19 @@ export function TaskItem({ task, onSelect, isPrioritySection, onRescheduleToday 
         )}
 
         {/* Move to Today CTA */}
-        {onRescheduleToday && !isDone && !isScheduledToday && isOverdue && (
+        {onRescheduleToday && !isDone && !isScheduledToday && (
           <button
             type="button"
             onClick={(e) => {
               e.stopPropagation();
               onRescheduleToday(task);
             }}
-            className="inline-flex items-center gap-1 px-2 py-1 rounded bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 text-xs font-medium transition-colors cursor-pointer"
-            title="Reschedule to Today"
+            className={`inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors cursor-pointer ${
+              isOverdue
+                ? "bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20"
+                : "bg-bg-secondary border border-border-subtle text-text-primary hover:border-amber-500/40 hover:text-amber-500"
+            }`}
+            title={isOverdue ? "Reschedule to Today" : "Schedule to Today"}
           >
             <Calendar size={11} />
             <span className="hidden sm:inline">To Today</span>

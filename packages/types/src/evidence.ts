@@ -21,11 +21,31 @@ export type EvidenceCoverageState =
 
 export type EvidenceAuthority = "SYSTEM" | "USER";
 
+/**
+ * Relation of an attribution signal to a block's resolved intention (R7).
+ * - SELECTED: this signal determined the block's intention.
+ * - SUPPORTING: this signal points at the same task as the resolved intention.
+ * - CONFLICTING: this signal points at a different task (kept visible, never hidden).
+ */
+export type EvidenceProvenanceRole = "SELECTED" | "SUPPORTING" | "CONFLICTING";
+
 export interface EvidenceProvenance {
   source: string;
   collector?: string;
   authority: EvidenceAuthority;
   confidence?: number | null;
+  /**
+   * Present on attribution signals (work_context, user_correction,
+   * work_session, user_gap_explanation, user_check_in). Describes how this
+   * signal relates to the block's resolved intention (R7).
+   */
+  role?: EvidenceProvenanceRole;
+  /**
+   * The task this signal points at, independent of the final winning
+   * intention, so losing/conflicting attributions stay auditable.
+   */
+  targetTaskId?: string | null;
+  targetTaskTitle?: string | null;
 }
 
 export interface ObservationEvidence {

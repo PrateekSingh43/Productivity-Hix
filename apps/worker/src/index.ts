@@ -1,19 +1,13 @@
 /**
  * ProductiveHix Dedicated Worker Application (`apps/worker`)
- * Phase 0 Contract & Architectural Skeleton
- * 
- * IMPORTANT:
- * This application is prepared for Phase 1 (Timeline Materialization), Phase 4 (Pattern Analysis),
- * and Phase 5 (Insight Generation). It serves as the single unified worker process hosting
- * domain-specific BullMQ processors.
- * 
- * In Phase 0, this file exports contract interfaces and verifies architectural wiring.
+ * Postgres-direct dispatcher (no Redis, no BullMQ).
+ *
+ * Hosts TimelineWorker and PatternWorker, driven by Postgres rows
+ * (timeline_work + outbox_events) claimed with leases and executed
+ * in-process through the shared BaseWorker.run engine.
  */
 
-export * from './queues';
-export * from './processors';
 export * from './base';
-export * from './runtime';
 export * from './outbox';
 export * from './shared/context';
 export * from './shared/logging';
@@ -23,8 +17,8 @@ export * from './shared/metrics';
 
 export const WORKER_SUBSYSTEM_METADATA = {
   name: '@repo/worker',
-  version: '0.2.0-group2.verified',
-  status: 'GROUP_2_QUEUE_EVENT_INFRASTRUCTURE_VERIFIED',
+  version: '0.3.0-postgres-direct',
+  status: 'POSTGRES_DIRECT_NO_REDIS',
   runtimeExecutionEnabled: true,
 } as const;
 

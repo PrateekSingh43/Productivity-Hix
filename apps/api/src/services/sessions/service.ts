@@ -1,11 +1,10 @@
 import type { WorkSession } from "@repo/types";
 import type { SessionListQueryInput } from "@repo/validation";
-import {
-  normalizeRawActivityEvents,
-  normalizeIntervals,
-} from "@repo/analytics";
+import { buildEvidenceTimeline } from "@repo/analytics";
 import { getDb } from "../../lib/prisma";
 import { wsManager } from "../websocket/server";
+import { ensureContextForSessionStart } from "../work-contexts/service";
+import { loadEvidenceInputs } from "../task-evidence/service";
 
 function serializeSession(session: {
   id: string;
@@ -213,32 +212,43 @@ export async function createSession(
 
   const startedAt = input.startedAt ?? new Date();
   const endedAt = input.endedAt ?? null;
-  const created = await db.workSession.create({
-    data: {
-      userId,
-      taskId: input.taskId ?? null,
-      targetDurationMinutes: targetMins,
-      startedAt,
-      endedAt,
-      isPaused: false,
-      pausedAt: null,
-      lastResumedAt: startedAt,
-      notes: input.notes ?? null,
-      durationSeconds: endedAt
-        ? Math.max(0, Math.round((endedAt.getTime() - startedAt.getTime()) / 1000))
-        : 0,
-    },
-    include: {
-      task: {
-        select: {
-          title: true,
-          plannedDurationMinutes: true,
-          goal: {
-            select: { title: true },
+  // R5: the session row and its work-context association commit or roll back
+  // together. The broadcast happens after commit, so listeners never observe
+  // a session whose context was rolled back.
+  const created = await db.$transaction(async (tx) => {
+    const session = await tx.workSession.create({
+      data: {
+        userId,
+        taskId: input.taskId ?? null,
+        targetDurationMinutes: targetMins,
+        startedAt,
+        endedAt,
+        isPaused: false,
+        pausedAt: null,
+        lastResumedAt: startedAt,
+        notes: input.notes ?? null,
+        durationSeconds: endedAt
+          ? Math.max(0, Math.round((endedAt.getTime() - startedAt.getTime()) / 1000))
+          : 0,
+      },
+      include: {
+        task: {
+          select: {
+            title: true,
+            plannedDurationMinutes: true,
+            goal: {
+              select: { title: true },
+            },
           },
         },
       },
-    },
+    });
+    await ensureContextForSessionStart(tx, userId, {
+      taskId: input.taskId ?? null,
+      sessionId: session.id,
+      startedAt,
+    });
+    return session;
   });
 
   const serialized = serializeSession(created);
@@ -463,21 +473,29 @@ export async function deleteSession(userId: string, id: string): Promise<{ succe
 }
 
 export interface SessionObservedSummary {
-  /** Top applications observed during the session window (max 3, each ≥5s). */
+  /** Top applications observed within the session window (max 3, each ≥5s). */
   apps: string[];
-  /** Total non-AFK observed seconds attributed to the session window. */
+  /**
+   * Non-AFK telemetry-observed seconds inside this session's window.
+   * NOT additive across sessions: overlapping windows (only possible when
+   * the one-active invariant was bypassed) may each include the same
+   * seconds. Treat these as per-session contextual views, not a partition.
+   */
   observedSeconds: number;
 }
 
 /**
  * Compact per-session observation summaries for a batch of session ids.
  *
- * Each session contributes its own window (with the same historic
- * wall-clock recovery used by the task activity read path). Telemetry is
- * fetched once over the union range, normalized once, then attributed per
- * session by interval midpoint. Overlapping windows (possible only when the
- * one-active invariant was bypassed) may attribute an interval twice; the
- * rule is documented here rather than hidden.
+ * Each session contributes its own window (projected backwards from
+ * durationSeconds when a historic resume bug shrank startedAt; unlike the
+ * task activity read path, no extra 120s buffer is applied). Telemetry is
+ * fetched once over the union range and then attributed per session by
+ * EVIDENCE BLOCKS (Slice C): the pure builder slices the window atomically,
+ * so an interval straddling a session boundary can never be captured by a
+ * midpoint rule. Overlapping windows (possible only when the one-active
+ * invariant was bypassed) may attribute a block twice; see
+ * SessionObservedSummary. The rule is documented here rather than hidden.
  *
  * The output is strictly observational — application names and seconds.
  * No productivity labels, no coverage percentages: pause-interval history
@@ -513,69 +531,45 @@ export async function getSessionsObservedActivity(
   const minStart = new Date(Math.min(...windows.map((w) => w.start.getTime())));
   const maxEnd = new Date(Math.max(...windows.map((w) => w.end.getTime())));
 
-  const activities = await db.normalizedActivity.findMany({
-    where: {
-      userId,
-      timestamp: { gte: minStart, lte: maxEnd },
-    },
-    select: {
-      id: true,
-      externalId: true,
-      timestamp: true,
-      source: true,
-      watcher: true,
-      duration: true,
-      data: true,
-    },
-    orderBy: { timestamp: "asc" },
-  });
+  const inputs = await loadEvidenceInputs(db, userId, { from: minStart, to: maxEnd });
 
   const result: Record<string, SessionObservedSummary> = {};
   for (const w of windows) {
-    result[w.id] = { apps: [], observedSeconds: 0 };
-  }
-  if (activities.length === 0) return result;
-
-  const canonical = normalizeRawActivityEvents(
-    activities.map((a) => ({
-      id: a.id,
-      externalId: a.externalId,
-      timestamp: a.timestamp,
-      duration: a.duration,
-      source: a.source,
-      watcher: a.watcher,
-      data: a.data,
-    })),
-  );
-  const normalized = normalizeIntervals(canonical);
-
-  const perSession = new Map<string, { total: number; apps: Map<string, number> }>();
-  for (const n of normalized) {
-    if (n.isAfk) continue;
-    const durSec = Math.max(0, Math.round(n.durationMs / 1000));
-    if (durSec < 1) continue;
-    const mid = n.start + n.durationMs / 2;
-    for (const w of windows) {
-      if (mid >= w.start.getTime() && mid <= w.end.getTime()) {
-        let entry = perSession.get(w.id);
-        if (!entry) {
-          entry = { total: 0, apps: new Map() };
-          perSession.set(w.id, entry);
-        }
-        entry.total += durSec;
-        entry.apps.set(n.application, (entry.apps.get(n.application) ?? 0) + durSec);
-      }
+    if (w.end.getTime() <= w.start.getTime()) {
+      result[w.id] = { apps: [], observedSeconds: 0 };
+      continue;
     }
-  }
 
-  for (const [id, entry] of perSession) {
-    result[id] = {
-      apps: Array.from(entry.apps.entries())
+    const evidence = buildEvidenceTimeline({
+      windowStart: w.start,
+      windowEnd: w.end,
+      events: inputs.events,
+      sessions: inputs.sessions,
+      workContexts: inputs.workContexts,
+      corrections: inputs.corrections,
+      checkIns: inputs.checkIns,
+      gapExplanations: inputs.gapExplanations,
+    });
+
+    let total = 0;
+    const apps = new Map<string, number>();
+    for (const block of evidence.blocks) {
+      if (block.coverage !== "OBSERVED" && block.coverage !== "OBSERVED_REPORTED") continue;
+      const observation = block.observation;
+      if (!observation || observation.isAfk) continue;
+      const durSec = Math.max(0, Math.round(block.durationSeconds));
+      if (durSec < 1) continue;
+      total += durSec;
+      apps.set(observation.application, (apps.get(observation.application) ?? 0) + durSec);
+    }
+
+    result[w.id] = {
+      apps: Array.from(apps.entries())
         .filter(([, secs]) => secs >= 5)
         .sort((a, b) => b[1] - a[1])
         .slice(0, 3)
         .map(([app]) => app),
-      observedSeconds: entry.total,
+      observedSeconds: total,
     };
   }
   return result;

@@ -245,6 +245,39 @@ test("ReflectionEngine and InactivityEngine suppress check-ins and away reviews 
   focusGuard.setSession(null);
 });
 
+test("ReflectionEngine snooze re-arms the cooldown and records completion/click timestamps", async () => {
+  const { reflectionEngine } = await import("./background/reflection-engine");
+
+  await reflectionEngine.updateConfig({
+    devMode: true,
+    devIntervalSeconds: 10,
+    checkInsPaused: false,
+    suppressCheckInsDuringFocus: false,
+    resetCooldown: true,
+  });
+
+  await reflectionEngine.recordCheckInCompleted();
+  await reflectionEngine.recordNotificationClicked();
+
+  let status = reflectionEngine.getSchedulerStatus();
+  assert.ok(status.lastCompletedCheckIn, "Completed check-in timestamp must be exposed");
+  assert.ok(status.lastNotificationClickedAt, "Notification click timestamp must be exposed");
+
+  // "Later" snooze: dev mode holds back the next reminder for 60s.
+  await reflectionEngine.snooze();
+  status = reflectionEngine.getSchedulerStatus();
+  const cooldownMs = Date.parse(status.checkInCooldownUntil!) - Date.now();
+  assert.ok(
+    cooldownMs > 50_000 && cooldownMs <= 60_000,
+    `Snooze cooldown should be ~60s in dev mode, got ${cooldownMs}ms`,
+  );
+  assert.equal(status.eligibility.eligible, false, "Snoozed engine must not be eligible yet");
+  assert.ok(
+    status.eligibility.reason.includes("cooldown"),
+    `Eligibility reason must reflect the snooze cooldown, got: ${status.eligibility.reason}`,
+  );
+});
+
 test("FocusGuard calculates elapsed and remaining duration accurately across pause and resume", async () => {
   const { focusGuard } = await import("./background/focus-guard");
 
@@ -272,7 +305,7 @@ test("FocusGuard calculates elapsed and remaining duration accurately across pau
   const startMs = Date.parse(session.lastResumedAt ?? session.startedAt);
   const currentSegment = Math.max(0, Math.floor((Date.now() - startMs) / 1000));
   const elapsedSec = base + currentSegment;
-  const targetSec = (session.targetDurationMinutes ?? 25) * 60;
+  const targetSec = session.targetDurationMinutes! * 60;
   const remainingSec = targetSec - elapsedSec;
 
   // Elapsed should be ~45 minutes (2700s), NOT 94+ minutes (double-counting startedAt)!

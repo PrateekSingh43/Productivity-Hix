@@ -1,5 +1,5 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
-import { OutboxPublisher, isInfrastructureError } from "./publisher";
+import { OutboxPublisher, isInfrastructureError, resolveHandlerForEvent } from "./publisher";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -35,13 +35,43 @@ function makeEvent(overrides: Record<string, unknown> = {}) {
   } as never;
 }
 
+function fakeWorker(behavior: (payload: unknown) => Promise<unknown>) {
+  return {
+    run: async (payload: unknown, _opts: unknown) => {
+      await behavior(payload);
+      return { status: "SUCCEEDED" };
+    },
+  };
+}
+
+describe("resolveHandlerForEvent", () => {
+  it("routes telemetry/rule/gap events to timeline", () => {
+    for (const t of ["telemetry.ingested", "rule.changed", "override.changed", "gap.explained"]) {
+      expect(resolveHandlerForEvent(t)).toBe("timeline");
+    }
+  });
+
+  it("routes pattern requests to pattern", () => {
+    expect(resolveHandlerForEvent("pattern.analysis.requested")).toBe("pattern");
+  });
+
+  it("returns undefined for unknown types", () => {
+    expect(resolveHandlerForEvent("nope.unknown")).toBeUndefined();
+  });
+});
+
 describe("isInfrastructureError", () => {
-  it("classifies quota / connection failures as infra", () => {
+  it("classifies quota / connection / pool failures as infra", () => {
     expect(
       isInfrastructureError(new Error("ERR max requests limit exceeded. Limit: 5, Usage: 6"))
     ).toBe(true);
-    expect(isInfrastructureError(new Error("connect ECONNREFUSED 127.0.0.1:6379"))).toBe(true);
+    expect(isInfrastructureError(new Error("connect ECONNREFUSED 127.0.0.1:5432"))).toBe(true);
     expect(isInfrastructureError(new Error("Connection is closed"))).toBe(true);
+    expect(
+      isInfrastructureError(
+        new Error("(EMAXCONNSESSION) max clients reached in session mode - max clients are limited to pool_size: 15")
+      )
+    ).toBe(true);
   });
 
   it("does not classify payload errors as infra", () => {
@@ -50,22 +80,19 @@ describe("isInfrastructureError", () => {
   });
 });
 
-describe("dispatchEvent infra handling", () => {
-  it("parks quota failures as PENDING without consuming attempts", async () => {
+describe("dispatchEvent direct execution", () => {
+  it("parks worker infra throws as PENDING without consuming attempts", async () => {
     const updates: Array<{ where: unknown; data: Record<string, unknown> }> = [];
     const db = makeDb(async (args: unknown) => {
       const { where, data } = args as { where: unknown; data: Record<string, unknown> };
       updates.push({ where, data });
       return {};
     });
-    const queueManager = {
-      addJob: async () => {
-        throw new Error("ERR max requests limit exceeded. Limit: 5, Usage: 6");
-      },
-    };
     const publisher = new OutboxPublisher({
       db: db as never,
-      queueManager: queueManager as never,
+      patternWorker: fakeWorker(async () => {
+        throw new Error("connect ECONNREFUSED 127.0.0.1:5432");
+      }) as never,
       metrics: noopMetrics as never,
     });
 
@@ -78,47 +105,6 @@ describe("dispatchEvent infra handling", () => {
     expect(String(updates[0]!.data.lastError)).toContain("[infra]");
   });
 
-  it("coalesces many ticks into one work row only at ingest (dispatcher executes once per row)", async () => {
-    // Regression shape for Phase 2: N ticks revive the SAME (user, day) row,
-    // so the dispatcher sees one PENDING row no matter how many batches landed.
-    const seenJobIds: string[] = [];
-    const db = {
-      timelineWork: {
-        findMany: async () => [
-          {
-            id: "work-1",
-            userId: "u",
-            localDate: "2026-09-30",
-            status: "PENDING",
-            requestedObservationRevision: 42,
-            requestedRuleRevision: 0,
-            attempts: 0,
-            maxAttempts: 5,
-          },
-        ],
-        updateMany: async () => ({ count: 1 }),
-        update: async () => ({}),
-      },
-      outboxEvent: { update: async () => ({}), updateMany: async () => ({ count: 0 }) },
-    };
-    const queueManager = {
-      addJob: async (_q: string, _n: string, _d: unknown, opts: { jobId: string }) => {
-        seenJobIds.push(opts.jobId);
-        return opts.jobId;
-      },
-    };
-    const publisher = new OutboxPublisher({
-      db: db as never,
-      queueManager: queueManager as never,
-      metrics: noopMetrics as never,
-    });
-
-    const done = await publisher.dispatchTimelineWork();
-
-    expect(done).toBe(1);
-    expect(seenJobIds).toHaveLength(1);
-  });
-
   it("still counts payload errors against attempts", async () => {
     const updates: Array<{ where: unknown; data: Record<string, unknown> }> = [];
     const db = makeDb(async (args: unknown) => {
@@ -126,14 +112,11 @@ describe("dispatchEvent infra handling", () => {
       updates.push({ where, data });
       return {};
     });
-    const queueManager = {
-      addJob: async () => {
-        throw new Error("invalid job payload: missing userId");
-      },
-    };
     const publisher = new OutboxPublisher({
       db: db as never,
-      queueManager: queueManager as never,
+      patternWorker: fakeWorker(async () => {
+        throw new Error("invalid job payload: missing userId");
+      }) as never,
       metrics: noopMetrics as never,
     });
 
@@ -143,13 +126,56 @@ describe("dispatchEvent infra handling", () => {
     expect(updates[0]!.data.status).toBe("PENDING");
     expect(updates[0]!.data.publicationAttemptCount).toBe(1);
   });
+
+  it("marks executed timeline events PUBLISHED", async () => {
+    const updates: Array<{ where: unknown; data: Record<string, unknown> }> = [];
+    const db = makeDb(async (args: unknown) => {
+      const { where, data } = args as { where: unknown; data: Record<string, unknown> };
+      updates.push({ where, data });
+      return {};
+    });
+    const seen: unknown[] = [];
+    const publisher = new OutboxPublisher({
+      db: db as never,
+      timelineWorker: fakeWorker(async (payload) => {
+        seen.push(payload);
+      }) as never,
+      metrics: noopMetrics as never,
+    });
+
+    const ok = await publisher.dispatchEvent(makeEvent({ eventType: "telemetry.ingested" }));
+
+    expect(ok).toBe(true);
+    expect(seen).toHaveLength(1);
+    expect(updates).toHaveLength(1);
+    expect(updates[0]!.data.status).toBe("PUBLISHED");
+  });
+
+  it("dead-letters unknown event types", async () => {
+    const updates: Array<{ where: unknown; data: Record<string, unknown> }> = [];
+    const db = makeDb(async (args: unknown) => {
+      const { where, data } = args as { where: unknown; data: Record<string, unknown> };
+      updates.push({ where, data });
+      return {};
+    });
+    const publisher = new OutboxPublisher({
+      db: db as never,
+      metrics: noopMetrics as never,
+    });
+
+    const ok = await publisher.dispatchEvent(makeEvent({ eventType: "nope.unknown" }));
+
+    expect(ok).toBe(false);
+    expect(updates).toHaveLength(1);
+    expect(updates[0]!.data.status).toBe("DEAD_LETTER");
+  });
 });
 
-describe("dispatchTimelineWork (Phase 2)", () => {
+describe("dispatchTimelineWork (coalesced, direct)", () => {
   function makeWorkDb(
     row: Record<string, unknown>,
-    behavior: { addJob?: (opts: { jobId: string }) => Promise<string>; claimCount?: number },
-    updates: Array<{ where: unknown; data: Record<string, unknown> }>
+    updates: Array<{ where: unknown; data: Record<string, unknown> }>,
+    claimCount = 1
   ) {
     return {
       timelineWork: {
@@ -157,7 +183,7 @@ describe("dispatchTimelineWork (Phase 2)", () => {
         updateMany: async (args: unknown) => {
           const { where, data } = args as { where: unknown; data: Record<string, unknown> };
           updates.push({ where, data });
-          return { count: behavior.claimCount ?? 1 };
+          return { count: claimCount };
         },
         update: async (args: unknown) => {
           const { where, data } = args as { where: unknown; data: Record<string, unknown> };
@@ -181,36 +207,33 @@ describe("dispatchTimelineWork (Phase 2)", () => {
     ...overrides,
   });
 
-  function makePublisher(db: unknown, addJob: (opts: { jobId: string }) => Promise<string>) {
+  function makePublisher(
+    db: unknown,
+    executor: (payload: unknown, opts: { jobId: string; correlationId: string; attempt: number; maxAttempts: number }) => Promise<{ status: string }>
+  ) {
     return new OutboxPublisher({
       db: db as never,
-      queueManager: { addJob: async (_q: string, _n: string, _d: unknown, opts: { jobId: string }) => addJob(opts) } as never,
       metrics: noopMetrics as never,
+      directExecutor: executor,
     });
   }
 
-  it("dispatches the row's latest revisions and marks COMPLETED", async () => {
+  it("coalesces many ticks into one work execution carrying the latest revisions", async () => {
+    // Regression shape: N ticks revive the SAME (user, day) row,
+    // so the dispatcher executes once per row no matter how many batches landed.
     const updates: Array<{ where: unknown; data: Record<string, unknown> }> = [];
-    const db = makeWorkDb(workRow(), {}, updates);
-    let enqueued: Record<string, unknown> | null = null;
-    const seenJobIds: string[] = [];
-    const publisher = new OutboxPublisher({
-      db: db as never,
-      queueManager: {
-        addJob: async (_q: string, _n: string, data: unknown, opts: { jobId: string }) => {
-          enqueued = data as Record<string, unknown>;
-          seenJobIds.push(opts.jobId);
-          return opts.jobId;
-        },
-      } as never,
-      metrics: noopMetrics as never,
+    const db = makeWorkDb(workRow(), updates);
+    const seen: Array<{ payload: unknown; opts: unknown }> = [];
+    const publisher = makePublisher(db, async (payload, opts) => {
+      seen.push({ payload, opts });
+      return { status: "SUCCEEDED" };
     });
 
     const done = await publisher.dispatchTimelineWork();
 
     expect(done).toBe(1);
-    expect(seenJobIds).toHaveLength(1);
-    const sent = enqueued as Record<string, unknown> | null;
+    expect(seen).toHaveLength(1);
+    const sent = seen[0]!.payload as Record<string, unknown>;
     expect(sent?.requestedRevision).toEqual({
       observationRevision: 42,
       ruleRevision: 0,
@@ -220,13 +243,20 @@ describe("dispatchTimelineWork (Phase 2)", () => {
     expect(final.data.status).toBe("COMPLETED");
   });
 
+  it("treats SUPERSEDED as terminal COMPLETED", async () => {
+    const updates: Array<{ where: unknown; data: Record<string, unknown> }> = [];
+    const publisher = makePublisher(makeWorkDb(workRow(), updates), async () => ({ status: "SUPERSEDED" }));
+
+    expect(await publisher.dispatchTimelineWork()).toBe(1);
+    expect(updates[updates.length - 1]!.data.status).toBe("COMPLETED");
+  });
+
   it("skips rows lost in a claim race", async () => {
     const updates: Array<{ where: unknown; data: Record<string, unknown> }> = [];
-    const db = makeWorkDb(workRow(), { claimCount: 0 }, updates);
     let calls = 0;
-    const publisher = makePublisher(db, async (opts) => {
+    const publisher = makePublisher(makeWorkDb(workRow(), updates, 0), async () => {
       calls++;
-      return opts.jobId;
+      return { status: "SUCCEEDED" };
     });
 
     expect(await publisher.dispatchTimelineWork()).toBe(0);
@@ -235,9 +265,8 @@ describe("dispatchTimelineWork (Phase 2)", () => {
 
   it("parks infra failures without consuming attempts", async () => {
     const updates: Array<{ where: unknown; data: Record<string, unknown> }> = [];
-    const db = makeWorkDb(workRow(), {}, updates);
-    const publisher = makePublisher(db, async () => {
-      throw new Error("ERR max requests limit exceeded. Limit: 5, Usage: 6");
+    const publisher = makePublisher(makeWorkDb(workRow(), updates), async () => {
+      throw new Error("connect ECONNREFUSED 127.0.0.1:5432");
     });
 
     expect(await publisher.dispatchTimelineWork()).toBe(0);
@@ -249,8 +278,7 @@ describe("dispatchTimelineWork (Phase 2)", () => {
 
   it("counts poison failures and dead-letters at cap", async () => {
     const updates: Array<{ where: unknown; data: Record<string, unknown> }> = [];
-    const db = makeWorkDb(workRow({ attempts: 4 }), {}, updates);
-    const publisher = makePublisher(db, async () => {
+    const publisher = makePublisher(makeWorkDb(workRow({ attempts: 4 }), updates), async () => {
       throw new Error("invalid job payload: missing userId");
     });
 
@@ -261,7 +289,7 @@ describe("dispatchTimelineWork (Phase 2)", () => {
   });
 });
 
-describe("retention sweep (Phase 4)", () => {
+describe("retention sweep", () => {
   function retentionDb(calls: string[]) {
     return {
       outboxEvent: {
@@ -291,7 +319,6 @@ describe("retention sweep (Phase 4)", () => {
   function retentionPublisher(db: unknown, opts: Record<string, unknown> = {}) {
     return new OutboxPublisher({
       db: db as never,
-      queueManager: { addJob: async () => "job-1" } as never,
       metrics: noopMetrics as never,
       cleanupIntervalMs: 60_000,
       ...opts,
@@ -334,116 +361,5 @@ describe("retention sweep (Phase 4)", () => {
 
     await publisher.runRetentionCleanup();
     expect(calls).toEqual(["outbox"]);
-  });
-});
-
-describe("direct dispatch (Phase 3, TIMELINE_DIRECT_DISPATCH=true)", () => {
-  function makeDirectPublisher(
-    db: unknown,
-    executor: (payload: unknown, opts: { jobId: string; correlationId: string; attempt: number; maxAttempts: number }) => Promise<{ status: string }>
-  ) {
-    return new OutboxPublisher({
-      db: db as never,
-      queueManager: {
-        addJob: async () => {
-          throw new Error("BullMQ path must not be used in direct mode");
-        },
-      } as never,
-      metrics: noopMetrics as never,
-      directExecutor: executor,
-    });
-  }
-
-  function workDb(row: Record<string, unknown>, updates: Array<{ where: unknown; data: Record<string, unknown> }>) {
-    return {
-      timelineWork: {
-        findMany: async () => [row],
-        updateMany: async (args: unknown) => {
-          const { where, data } = args as { where: unknown; data: Record<string, unknown> };
-          updates.push({ where, data });
-          return { count: 1 };
-        },
-        update: async (args: unknown) => {
-          const { where, data } = args as { where: unknown; data: Record<string, unknown> };
-          updates.push({ where, data });
-          return {};
-        },
-      },
-      outboxEvent: { update: async () => ({}), updateMany: async () => ({ count: 0 }) },
-    };
-  }
-
-  const row = {
-    id: "work-9",
-    userId: "u",
-    localDate: "2026-09-30",
-    status: "PENDING",
-    requestedObservationRevision: 11,
-    requestedRuleRevision: 2,
-    attempts: 0,
-    maxAttempts: 5,
-  };
-
-  it("executes inline and marks COMPLETED without touching BullMQ", async () => {
-    vi.stubEnv("TIMELINE_DIRECT_DISPATCH", "true");
-    const updates: Array<{ where: unknown; data: Record<string, unknown> }> = [];
-    const seen: Array<{ payload: unknown; opts: unknown }> = [];
-    const publisher = makeDirectPublisher(workDb(row, updates), async (payload, opts) => {
-      seen.push({ payload, opts });
-      return { status: "SUCCEEDED" };
-    });
-
-    expect(await publisher.dispatchTimelineWork()).toBe(1);
-    expect(seen).toHaveLength(1);
-    expect((seen[0]!.payload as Record<string, unknown>).requestedRevision).toEqual({
-      observationRevision: 11,
-      ruleRevision: 2,
-      semanticVersion: "3b.0.1",
-    });
-    expect(updates[updates.length - 1]!.data.status).toBe("COMPLETED");
-  });
-
-  it("treats SUPERSEDED as terminal COMPLETED", async () => {
-    vi.stubEnv("TIMELINE_DIRECT_DISPATCH", "true");
-    const updates: Array<{ where: unknown; data: Record<string, unknown> }> = [];
-    const publisher = makeDirectPublisher(workDb(row, updates), async () => ({ status: "SUPERSEDED" }));
-
-    expect(await publisher.dispatchTimelineWork()).toBe(1);
-    expect(updates[updates.length - 1]!.data.status).toBe("COMPLETED");
-  });
-
-  it("parks executor infra throws without consuming attempts", async () => {
-    vi.stubEnv("TIMELINE_DIRECT_DISPATCH", "true");
-    const updates: Array<{ where: unknown; data: Record<string, unknown> }> = [];
-    const publisher = makeDirectPublisher(workDb(row, updates), async () => {
-      throw new Error("connect ECONNREFUSED 127.0.0.1:5432");
-    });
-
-    expect(await publisher.dispatchTimelineWork()).toBe(0);
-    const final = updates[updates.length - 1]!;
-    expect(final.data.status).toBe("PENDING");
-    expect(final.data).not.toHaveProperty("attempts");
-  });
-
-  it("queue path is used when the flag is off", async () => {
-    vi.stubEnv("TIMELINE_DIRECT_DISPATCH", "false");
-    const updates: Array<{ where: unknown; data: Record<string, unknown> }> = [];
-    let enqueued = 0;
-    const publisher = new OutboxPublisher({
-      db: workDb(row, updates) as never,
-      queueManager: {
-        addJob: async () => {
-          enqueued++;
-          return "job-1";
-        },
-      } as never,
-      metrics: noopMetrics as never,
-      directExecutor: async () => {
-        throw new Error("must not run");
-      },
-    });
-
-    expect(await publisher.dispatchTimelineWork()).toBe(1);
-    expect(enqueued).toBe(1);
   });
 });

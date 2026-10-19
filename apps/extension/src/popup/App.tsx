@@ -606,15 +606,6 @@ function TodayView({
   });
   const nextUpTasks = nextUpCandidates.slice(0, 3);
 
-  // Intentional work & metrics calculations
-  const intentionalSeconds = (sessions.data ?? []).reduce(
-    (sum, s) => sum + (s.durationSeconds ?? 0),
-    0,
-  );
-  const sessionsCompleted = (sessions.data ?? []).filter((s) => Boolean(s.endedAt)).length;
-  const tasksCompleted = allTasks.filter((t) => t.status === "done").length;
-  const observedSeconds = (summary.data?.activeTime ?? 0) / 1000;
-
   const current = status?.currentActivity;
   const isEligibleForCheckIn = status?.scheduler?.eligibility?.eligible ?? false;
   const activeSession = (sessions.data ?? []).find((s) => !s.endedAt);
@@ -636,6 +627,32 @@ function TodayView({
       : 0;
     return base + segment;
   }, [activeSession, now]);
+
+  // Today-scoped metrics: sessions are attributed to the productive day of
+  // their start (analytics convention), tasks to the day they were completed.
+  // A "Today" card must never sum all-time data.
+  const todaySessions = (sessions.data ?? []).filter(
+    (s) => resolveProductiveDay(s.startedAt, { timezone: userTimezone }) === localDate,
+  );
+  const activeSessionIsToday =
+    activeSession != null &&
+    resolveProductiveDay(activeSession.startedAt, { timezone: userTimezone }) === localDate;
+  // durationSeconds only counts completed segments; add the live segment for a
+  // running session so the metric ticks with reality.
+  const liveSegmentSeconds =
+    activeSession && activeSessionIsToday
+      ? Math.max(0, activeElapsedSec - (activeSession.durationSeconds ?? 0))
+      : 0;
+  const intentionalSeconds =
+    todaySessions.reduce((sum, s) => sum + (s.durationSeconds ?? 0), 0) + liveSegmentSeconds;
+  const sessionsCompleted = todaySessions.filter((s) => Boolean(s.endedAt)).length;
+  const tasksCompleted = allTasks.filter(
+    (t) =>
+      t.status === "done" &&
+      t.completedAt != null &&
+      resolveProductiveDay(t.completedAt, { timezone: userTimezone }) === localDate,
+  ).length;
+  const observedSeconds = (summary.data?.activeTime ?? 0) / 1000;
 
   // Plan workflow handlers (authoritative backend mutation)
   const handleSavePlan = async (
@@ -724,7 +741,10 @@ function TodayView({
                 fontFamily: "ui-monospace, monospace",
               }}
             >
-              {formatClock(activeElapsedSec)} · Target {activeSession.targetDurationMinutes ?? 25}m
+              {formatClock(activeElapsedSec)} ·{" "}
+              {activeSession.targetDurationMinutes != null
+                ? `Target ${activeSession.targetDurationMinutes}m`
+                : "Target not set"}
             </div>
           </div>
           <button
@@ -1513,9 +1533,11 @@ function FocusView({
     return base + currentSegment;
   }, [activeSession, now]);
 
-  const targetDurationMins = useMemo(() => {
+  const targetDurationMins = useMemo<number | null>(() => {
     if (activeSession) {
-      return activeSession.targetDurationMinutes ?? task?.plannedDurationMinutes ?? 25;
+      // Server target, else the linked task's plan — never invent a target.
+      // Open-ended sessions honestly render "Target not set".
+      return activeSession.targetDurationMinutes ?? task?.plannedDurationMinutes ?? null;
     }
     if (task?.plannedDurationMinutes) {
       return task.plannedDurationMinutes;
@@ -1523,9 +1545,9 @@ function FocusView({
     return preset === "custom" ? customMins : preset;
   }, [activeSession, task, preset, customMins]);
 
-  const targetDurationSec = targetDurationMins * 60;
-  const remainingSec = targetDurationSec - elapsedSec;
-  const isOvertime = remainingSec < 0;
+  const targetDurationSec = targetDurationMins != null ? targetDurationMins * 60 : 0;
+  const remainingSec = targetDurationMins != null ? targetDurationSec - elapsedSec : 0;
+  const isOvertime = targetDurationMins != null && remainingSec < 0;
 
   if (showEndDialog && activeSession) {
     return (
@@ -1741,10 +1763,14 @@ function FocusView({
               )}
               {activeSession
                 ? activeSession.isPaused
-                  ? `Paused · Target ${targetDurationMins}m`
+                  ? targetDurationMins != null
+                    ? `Paused · Target ${targetDurationMins}m`
+                    : "Paused"
                   : isOvertime
                     ? `Flow Overtime (+${formatClock(Math.abs(remainingSec))}) · Target ${targetDurationMins}m`
-                    : `Target ${targetDurationMins}m`
+                    : targetDurationMins != null
+                      ? `Target ${targetDurationMins}m`
+                      : "Target not set"
                 : "Duration"}
             </span>
             <strong>
@@ -1805,7 +1831,7 @@ function FocusView({
                   border: "1px solid var(--border-subtle)",
                 }}
               >
-                Target: {targetDurationMins}m
+                {targetDurationMins != null ? `Target: ${targetDurationMins}m` : "Target not set"}
               </span>
               {isOvertime && (
                 <span

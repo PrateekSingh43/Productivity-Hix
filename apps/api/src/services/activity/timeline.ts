@@ -9,6 +9,7 @@ import {
   normalizeAppName,
   cleanWindowTitle,
   categorizeActivity,
+  TIMELINE_SEGMENTATION_OPTIONS,
 } from "@repo/analytics";
 import { getDb } from "../../lib/prisma";
 import { materializeBlocksForUserDay } from "./blocks";
@@ -177,14 +178,10 @@ export async function getTimelineForDay(
   // Aggregate into continuous human-scale TimelineSegments
   // Invariant: quietHours is user notification context only, NOT machine sleep or slacking.
   // Do not conflate quietHours with sleep detection.
-  const segments = aggregateActivitySegments(rawRows, {
-    maxGapMs: 120_000,
-    // 180s idle threshold matches ActivityWatch (AFK after 3min idle) and
-    // the blueprint's micro-pause tier (<3min stays inside the work block).
-    minBreakMs: 180_000,
-    transientThresholdMs: 15_000,
-    maxBreakMs: 2 * 60 * 60 * 1000, // 2 hours: extended absence must never accumulate as active work break
-  });
+  // Canonical options (R4): 120s gap bridge, 180s AFK break threshold matching
+  // ActivityWatch (AFK after 3min idle) and the blueprint's micro-pause tier
+  // (<3min stays inside the work block), 2h max active break.
+  const segments = aggregateActivitySegments(rawRows, TIMELINE_SEGMENTATION_OPTIONS);
 
   // Calculate mathematically consistent summary
   const summary = computeTimelineSummary(segments);

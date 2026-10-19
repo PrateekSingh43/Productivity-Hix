@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import Link from "next/link";
 import { PageContainer, PageHeader, Section, SectionHeader } from "@shared/components/layout";
 import { EmptyState } from "@shared/components/primitives";
@@ -44,6 +44,12 @@ import { resolveSessionFilters, sessionFiltersDifferFromDefaults } from "../lib/
 import { lastProductiveDays, resolveSessionDateRange } from "../lib/date-range";
 import { resolveFocusPayload, type FocusTarget } from "../lib/focus-target";
 import {
+  readStoredFocusTaskId,
+  writeStoredFocusTaskId,
+  validateStoredFocusTaskId,
+} from "../lib/focus-selection-storage";
+import {
+  describeSessionSpan,
   formatSessionDuration,
   formatSessionDurationExact,
   formatTargetVariance,
@@ -105,8 +111,16 @@ function SessionRow({
 }: SessionRowProps) {
   const linkedTask = tasks.find((t) => t.id === sess.taskId) ?? null;
   const isLive = !sess.endedAt;
-  const actualLabel = formatSessionDuration(sess.durationSeconds);
-  const actualTitle = formatSessionDurationExact(sess.durationSeconds);
+  // Canonical wall/active/paused semantics (see lib/duration.ts): the time
+  // range below is wall time including pauses, the focused duration is
+  // active time excluding them. A meaningful pause is disclosed explicitly
+  // so the two numbers never read as contradictory.
+  const span = describeSessionSpan(sess.startedAt, sess.endedAt, sess.durationSeconds);
+  const focusedLabel = formatSessionDuration(span.activeDurationSeconds);
+  const spanTitle =
+    span.wallDurationSeconds != null
+      ? `Focused: ${formatSessionDurationExact(span.activeDurationSeconds)} · Paused: ${formatSessionDurationExact(span.pausedDurationSeconds)} · Elapsed: ${formatSessionDurationExact(span.wallDurationSeconds)}`
+      : formatSessionDurationExact(sess.durationSeconds);
   const title =
     sess.taskTitle ?? linkedTask?.title ?? sess.notes ?? "Intentional Focus Session";
   const goalTitle = sess.goalTitle ?? linkedTask?.goalTitle ?? null;
@@ -176,7 +190,16 @@ function SessionRow({
             )}
           </div>
           <div className="flex items-center gap-2 text-xs text-text-muted font-mono flex-wrap">
-            <span>{timeRange}</span>
+            <span title={spanTitle}>{timeRange}</span>
+            {!isLive && span.hasMeaningfulPause && (
+              <>
+                <span>·</span>
+                <span className="text-text-secondary" title={spanTitle}>
+                  {formatSessionDuration(span.wallDurationSeconds)} elapsed ·{" "}
+                  {formatSessionDuration(span.pausedDurationSeconds)} paused
+                </span>
+              </>
+            )}
             {sess.notes && sess.notes !== title && (
               <>
                 <span>·</span>
@@ -191,7 +214,7 @@ function SessionRow({
               observation && (observation.apps.length > 0 || observation.observedSeconds > 0) ? (
                 <span
                   className="text-[10px] text-text-secondary bg-bg-secondary px-1.5 py-0.5 rounded border border-border-subtle truncate max-w-55"
-                  title={`${observation.observedSeconds}s of telemetry during this session`}
+                  title={`${observation.observedSeconds}s of telemetry within this session's window. Overlapping sessions may each include the same time — per-session views are not additive.`}
                 >
                   Observed{" "}
                   {observation.apps.length > 0
@@ -235,7 +258,7 @@ function SessionRow({
         </div>
       </div>
 
-      {/* Target · Actual · Variance for this execution block only */}
+      {/* Target · Focused · Variance for this execution block only */}
       <div className="flex items-center gap-2 shrink-0 font-mono text-xs text-text-muted sm:self-auto self-end">
         {isLive ? (
           <>
@@ -245,9 +268,14 @@ function SessionRow({
         ) : targetMins != null ? (
           <>
             <span>Target {targetMins}m ·</span>
-            <span className="text-text-primary font-medium" title={actualTitle}>
-              Actual {actualLabel}
+            <span className="text-text-primary font-medium" title={spanTitle}>
+              Focused {focusedLabel}
             </span>
+            {span.hasMeaningfulPause && (
+              <span className="text-text-secondary" title={spanTitle}>
+                · Paused {formatSessionDuration(span.pausedDurationSeconds)}
+              </span>
+            )}
             {variance && variance !== "on target" && (
               <span
                 className="inline-flex items-center gap-0.5 px-1 py-0.2 rounded text-[10px] bg-bg-secondary text-text-muted border border-border-subtle"
@@ -260,9 +288,14 @@ function SessionRow({
         ) : (
           <>
             <span>Target not set ·</span>
-            <span className="text-text-primary font-medium" title={actualTitle}>
-              Actual {actualLabel}
+            <span className="text-text-primary font-medium" title={spanTitle}>
+              Focused {focusedLabel}
             </span>
+            {span.hasMeaningfulPause && (
+              <span className="text-text-secondary" title={spanTitle}>
+                · Paused {formatSessionDuration(span.pausedDurationSeconds)}
+              </span>
+            )}
           </>
         )}
       </div>
@@ -326,7 +359,7 @@ export function SessionsView() {
   );
 
   // 2. Data fetching
-  const { data: tasks = [] } = useQuery(taskQueries.list());
+  const { data: tasks = [], isSuccess: tasksLoaded } = useQuery(taskQueries.list());
   const { data: serverActiveSession, isLoading: isLoadingActive } = useActiveSession();
   const { data: sessions = [], isLoading: isLoadingSessions } = useSessionsList(activeFilters);
 
@@ -335,6 +368,8 @@ export function SessionsView() {
   // {kind:"task"} choice or an explicit independent topic. It stores an id,
   // never a full Task object, so a stale object can never corrupt attribution.
   const [focusTarget, setFocusTarget] = useState<FocusTarget | null>(null);
+  // One-shot guard for the sessionStorage restore below (per component mount).
+  const restoredSelectionRef = useRef(false);
   const [sessionActive, setSessionActive] = useState(false);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -427,6 +462,24 @@ export function SessionsView() {
     }
   }, [currentActive, activeSessionId]);
 
+  // Restore a pre-start task selection after a remount (sessionStorage is a
+  // temporary UI convenience, never the work-context source of truth). Runs
+  // once, only after task data resolved, and only when a server session is
+  // not already authoritative. A stored id that no longer maps to an
+  // available task is dropped instead of resurrected.
+  useEffect(() => {
+    if (restoredSelectionRef.current || !tasksLoaded || currentActive) return;
+    restoredSelectionRef.current = true;
+    const storedId = readStoredFocusTaskId();
+    if (!storedId) return;
+    const validId = validateStoredFocusTaskId(storedId, new Set(tasks.map((t) => t.id)));
+    if (!validId) {
+      writeStoredFocusTaskId(null);
+      return;
+    }
+    setFocusTarget((prev) => prev ?? { kind: "task", taskId: validId });
+  }, [tasksLoaded, tasks, currentActive]);
+
   // Count-up timer tick
   useEffect(() => {
     let interval: NodeJS.Timeout | null = null;
@@ -456,6 +509,9 @@ export function SessionsView() {
         targetDurationMinutes: startInput.targetDurationMinutes,
         notes: startInput.notes,
       });
+      // The stored pre-start selection has served its purpose the moment a
+      // session durably exists (server record is now authoritative).
+      writeStoredFocusTaskId(null);
       setActiveSessionId(session.id);
       setSessionActive(true);
       setElapsedSeconds(0);
@@ -470,6 +526,9 @@ export function SessionsView() {
       // enforces one-active). Adopt it instead of forking a duplicate:
       // refresh authoritative state so the UI converges on the real session.
       if (err instanceof ApiClientError && err.status === 409) {
+        // Adopting the authoritative active session: the local draft
+        // selection is no longer the intended focus target.
+        writeStoredFocusTaskId(null);
         queryClient.invalidateQueries({ queryKey: sessionQueries.active().queryKey });
         queryClient.invalidateQueries({ queryKey: sessionQueries.all() });
         setSessionError("A focus session is already active — showing it instead.");
@@ -764,7 +823,12 @@ export function SessionsView() {
           observedApplication={telemetry.activeApp || undefined}
           observedDomain={telemetry.activeDomain || undefined}
           observedTitle={telemetry.windowTitle || undefined}
-          onTargetChange={(target) => setFocusTarget(target)}
+          onTargetChange={(target) => {
+            // Keep the temporary stored selection in step with the explicit
+            // choice: task target stores its id, anything else clears it.
+            setFocusTarget(target);
+            writeStoredFocusTaskId(target?.kind === "task" ? target.taskId : null);
+          }}
           onStartFocus={handleStartFocus}
           onPause={() => void handlePauseResume(true)}
           onResume={() => void handlePauseResume(false)}

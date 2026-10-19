@@ -96,20 +96,15 @@ describe("Timeline Part A: Telemetry Ingestion, Revisions & Concurrent Duplicate
     expect(upsertedDayStates).toHaveLength(1);
     expect(upsertedDayStates[0].localDate).toBe("2026-09-23");
 
-    expect(createdOutboxEvents).toHaveLength(1);
-    expect(createdOutboxEvents[0].eventType).toBe("telemetry.ingested");
-    expect(createdOutboxEvents[0].payload.localDate).toBe("2026-09-23");
-    // Phase 2 coalescing: exactly one work row for the single touched day.
+    // Redis-free: no per-batch outbox row. Exactly one coalesced work row
+    // for the single touched day, carrying the post-increment revisions
+    // the worker reads for supersession/idempotency.
+    expect(createdOutboxEvents).toHaveLength(0);
     expect(upsertedWork).toHaveLength(1);
-    // Phase 1 revision contract: the worker reads requestedRevision, so the
-    // producer must emit the post-increment values explicitly.
-    expect(createdOutboxEvents[0].payload.requestedRevision).toEqual({
-      observationRevision: 1,
-      ruleRevision: 0,
-      semanticVersion: "3b.0.1",
-    });
-    expect(typeof createdOutboxEvents[0].payload.jobCorrelationId).toBe("string");
-    expect(typeof createdOutboxEvents[0].payload.queuedAt).toBe("string");
+    expect(upsertedWork[0].localDate).toBe("2026-09-23");
+    expect(upsertedWork[0].status).toBe("PENDING");
+    expect(upsertedWork[0].requestedObservationRevision).toBe(1);
+    expect(upsertedWork[0].requestedRuleRevision).toBe(0);
   });
 
   it("Scenario 7: Pure duplicate batch (actual mutations = 0) does NOT advance revision or emit outbox event", async () => {
@@ -168,6 +163,7 @@ describe("Timeline Part A: Telemetry Ingestion, Revisions & Concurrent Duplicate
   it("Scenario 8: Mixed batch advances revisions only for actually inserted rows", async () => {
     const upsertedDayStates: any[] = [];
     const createdOutboxEvents: any[] = [];
+    const upsertedWork: any[] = [];
 
     const mockDb: any = {
       userPreference: {
@@ -197,7 +193,10 @@ describe("Timeline Part A: Telemetry Ingestion, Revisions & Concurrent Duplicate
         }),
       },
       timelineWork: {
-        upsert: vi.fn().mockResolvedValue({ id: "work_001" }),
+        upsert: vi.fn().mockImplementation(({ create }) => {
+          upsertedWork.push(create);
+          return Promise.resolve({ id: "work_001", ...create });
+        }),
       },
       outboxEvent: {
         create: vi.fn().mockImplementation(({ data }) => {
@@ -246,8 +245,10 @@ describe("Timeline Part A: Telemetry Ingestion, Revisions & Concurrent Duplicate
     // Only 2026-09-23 was inserted! 2026-09-21 was skipped by PostgreSQL and must NOT have its revision bumped.
     expect(upsertedDayStates).toHaveLength(1);
     expect(upsertedDayStates[0].localDate).toBe("2026-09-23");
-    expect(createdOutboxEvents).toHaveLength(1);
-    expect(createdOutboxEvents[0].payload.localDate).toBe("2026-09-23");
+    // Redis-free: one coalesced work row, no outbox row.
+    expect(createdOutboxEvents).toHaveLength(0);
+    expect(upsertedWork).toHaveLength(1);
+    expect(upsertedWork[0].localDate).toBe("2026-09-23");
   });
 
   it("Scenario 9: Duration updates use original observation timestamp, not current time", async () => {

@@ -1,14 +1,19 @@
 /**
- * Phase 0 Frozen Worker & Queue Architecture Contracts
- * Canonical Domain Types for BullMQ Job Payloads, Queue Identifiers, and Worker Lifecycle.
- * 
+ * Worker Architecture Contracts (Redis-free, Postgres-direct)
+ * Canonical Domain Types for Job Payloads, Logical Worker Names, and Worker Lifecycle.
+ *
  * Inviolable Principles:
  * 1. Background computation belongs in the worker system, never in the synchronous Timeline request path.
- * 2. Dedicated single worker application (`apps/worker`) hosting domain-specific processors.
- * 3. PostgreSQL is the authoritative source of truth; Redis/BullMQ is purely for transient queueing/scheduling.
+ * 2. Dedicated single worker application (`apps/worker`) hosting domain workers,
+ *    driven by Postgres rows (timeline_work + outbox_events) — no Redis/BullMQ.
+ * 3. PostgreSQL is the authoritative source of truth AND the queue (leased
+ *    PENDING→PROCESSING rows with claimedBy/claimExpiresAt).
  * 4. Job uniqueness is scoped to `userId + localDate` (prevents uncontrolled duplicate jobs).
  * 5. Materialization for the same user/day MUST be serialized; different users/days can run concurrently.
  * 6. The worker must re-verify the database revision upon execution before publishing.
+ *
+ * PRODUCTIVEHIX_QUEUES names are retained as logical worker labels (metrics,
+ * lock keys, job ids). They no longer name BullMQ queues.
  */
 
 // ============================================================================

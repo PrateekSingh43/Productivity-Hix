@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { taskCreateSchema, taskUpdateSchema } from "@repo/validation";
+import { taskCreateSchema, taskUpdateSchema, taskEvidenceQuerySchema } from "@repo/validation";
 import { requireAuth, userIdFrom } from "../middleware/auth";
 import {
   createTask,
@@ -10,6 +10,7 @@ import {
   updateTask,
   deleteTask,
 } from "../services/tasks/service";
+import { getTaskEvidence } from "../services/task-evidence/service";
 
 export const tasksRouter: Router = Router();
 tasksRouter.use(requireAuth);
@@ -44,6 +45,20 @@ tasksRouter.get("/:id/activity", async (request, response, next) => {
   try {
     const activities = await getTaskObservedActivity(userIdFrom(request), request.params.id);
     response.json(activities);
+  } catch (error) {
+    next(error);
+  }
+});
+
+tasksRouter.get("/:id/evidence", async (request, response, next) => {
+  try {
+    const query = taskEvidenceQuerySchema.parse(request.query);
+    response.json(
+      await getTaskEvidence(userIdFrom(request), request.params.id, {
+        from: query.from,
+        to: query.to,
+      }),
+    );
   } catch (error) {
     next(error);
   }

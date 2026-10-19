@@ -1,7 +1,7 @@
 "use client";
 
 import { queryOptions, useQuery } from "@tanstack/react-query";
-import { getTasks, getTask, getTaskObservedActivity, getTaskScheduleHistory } from "./client";
+import { getTasks, getTask, getTaskObservedActivity, getTaskScheduleHistory, getTaskEvidence } from "./client";
 import type { TaskFilters } from "../types";
 
 export const taskQueries = {
@@ -39,6 +39,20 @@ export const taskQueries = {
       enabled: Boolean(id),
       staleTime: 10_000,
     }),
+  // Slice C: evidence read model with per-request freshness metadata.
+  evidence: (id: string | null, from: Date | null, to: Date | null) =>
+    queryOptions({
+      queryKey: [
+        ...taskQueries.details(),
+        id,
+        "evidence",
+        from?.toISOString() ?? null,
+        to?.toISOString() ?? null,
+      ] as const,
+      queryFn: () => (id && from && to ? getTaskEvidence(id, from, to) : null),
+      enabled: Boolean(id && from && to),
+      staleTime: 10_000,
+    }),
 };
 
 export function useTasksList(filters?: TaskFilters) {
@@ -55,4 +69,8 @@ export function useTaskActivity(taskId: string | null) {
 
 export function useTaskScheduleHistory(taskId: string | null) {
   return useQuery(taskQueries.scheduleHistory(taskId));
+}
+
+export function useTaskEvidence(taskId: string | null, from: Date | null, to: Date | null) {
+  return useQuery(taskQueries.evidence(taskId, from, to));
 }

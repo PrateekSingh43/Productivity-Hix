@@ -17,6 +17,7 @@ export {
   inferSiteLabel,
   normalizeRawActivityEvents,
   normalizeIntervals,
+  TIMELINE_SEGMENTATION_OPTIONS,
 } from "./activity/segments";
 export type {
   RawActivityInput,

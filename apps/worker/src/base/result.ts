@@ -2,7 +2,7 @@
  * Base Worker Typed Result
  * 
  * Invariant:
- * Failures MUST throw exceptions so BullMQ can manage retry attempts and backoff.
+ * Failures MUST throw exceptions so the publisher can manage retry attempts and backoff.
  * Successful completions return SUCCEEDED or SUPERSEDED.
  */
 

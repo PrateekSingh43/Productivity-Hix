@@ -55,6 +55,43 @@ test("TabTracker generates event on tab switch with sanitized url and installati
   assert.ok(event.durationMs >= 1000, `Duration should be >= 1000ms, got ${event.durationMs}`);
 });
 
+test("TabTracker attributes audible/incognito to the segment that produced them", async () => {
+  const tracker = new TabTracker();
+  tracker.setInstallationId("browser-ext-unit-test");
+
+  // Previous tab was playing audio; the switch lands on a silent tab.
+  await tracker.handleTabActivated({
+    id: 20,
+    url: "https://music.example.com/player",
+    title: "Music Player",
+    audible: true,
+    incognito: true,
+  } as chrome.tabs.Tab);
+
+  await new Promise((r) => setTimeout(r, 1100));
+
+  const event = await tracker.handleTabActivated({
+    id: 21,
+    url: "https://docs.example.com/guide",
+    title: "Docs",
+    audible: false,
+    incognito: false,
+  } as chrome.tabs.Tab);
+
+  assert.ok(event, "An event should be emitted for the music tab");
+  assert.equal(event.data.domain, "music.example.com");
+  assert.equal(
+    (event.data as { audible?: boolean }).audible,
+    true,
+    "The emitted segment must carry the PREVIOUS tab's audible flag, not the new tab's",
+  );
+  assert.equal(
+    (event.data as { incognito?: boolean }).incognito,
+    true,
+    "The emitted segment must carry the PREVIOUS tab's incognito flag",
+  );
+});
+
 test("TabTracker handles window focus changes (switching to/from another app)", async () => {
   const tracker = new TabTracker();
   tracker.setInstallationId("browser-ext-unit-test");

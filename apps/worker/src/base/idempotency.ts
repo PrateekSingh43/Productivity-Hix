@@ -1,14 +1,16 @@
 /**
- * Idempotency & Distributed Lock Providers
- * 
+ * Idempotency & Lock Providers (Redis-free)
+ *
  * Invariants:
- * 1. Redis lock serializes active execution; it is NOT the correctness guarantee.
- * 2. Durable correctness comes from the database/persisted output check.
- * 3. Lock acquisition failure throws retryable error so BullMQ can reschedule.
+ * 1. The in-memory lock serializes active execution within this process;
+ *    it is NOT the correctness guarantee.
+ * 2. Durable correctness comes from the database/persisted output check
+ *    (checkIdempotency) plus Postgres row leases (claimedBy/claimExpiresAt).
+ * 3. Lock acquisition failure throws a retryable error so the publisher
+ *    parks the row with backoff and retries it.
  */
 
 import { randomUUID } from 'node:crypto';
-import type Redis from 'ioredis';
 
 export interface LockHandle {
   key: string;
@@ -19,42 +21,6 @@ export interface LockHandle {
 export interface IdempotencyProvider {
   acquire(key: string, ttlMs: number): Promise<LockHandle | null>;
   release(handle: LockHandle): Promise<void>;
-}
-
-/**
- * Production Redis-backed distributed lock provider with safe token release.
- */
-export class RedisLockProvider implements IdempotencyProvider {
-  constructor(private readonly redis: Redis) {}
-
-  async acquire(key: string, ttlMs: number): Promise<LockHandle | null> {
-    const token = randomUUID();
-    const result = await this.redis.set(key, token, 'PX', ttlMs, 'NX');
-    if (result === 'OK') {
-      return {
-        key,
-        token,
-        expiresAt: Date.now() + ttlMs,
-      };
-    }
-    return null;
-  }
-
-  async release(handle: LockHandle): Promise<void> {
-    // Lua script ensures atomicity: release only if the token matches
-    const script = `
-      if redis.call("get", KEYS[1]) == ARGV[1] then
-        return redis.call("del", KEYS[1])
-      else
-        return 0
-      end
-    `;
-    try {
-      await this.redis.eval(script, 1, handle.key, handle.token);
-    } catch {
-      // Best-effort release, TTL will expire lock if redis fails
-    }
-  }
 }
 
 /**

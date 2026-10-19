@@ -1,46 +1,19 @@
 /**
- * Level 5: Pattern vertical slice.
+ * Level 5: Pattern vertical slice (Redis-free).
  *
  * outbox row (as written by POST /api/patterns/analyze)
- *   -> OutboxPublisher.dispatchEvent (real queue validation, mocked BullMQ)
- *   -> DomainEventEnvelope job data
- *   -> PatternWorker.run (real BaseWorker semantics)
+ *   -> OutboxPublisher.dispatchEvent (direct PatternWorker execution)
  *   -> durable PatternAnalysisRun + PatternFinding rows shaped exactly as
  *      GET /api/patterns (getPersistedPatterns) consumes them.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { PRODUCTIVEHIX_QUEUES } from "@repo/types";
+import { describe, it, expect } from "vitest";
 import { OutboxPublisher } from "../outbox/publisher";
-import { QueueManager } from "../runtime/queue";
 import { InMemoryLockProvider } from "../base/idempotency";
 import { MemoryWorkerMetricsCollector } from "../shared/metrics";
 import { MemoryWorkerLogger } from "../shared/logging";
 import { PatternWorker } from "./pattern-worker";
 import type { PatternDataProvider } from "./data-provider";
 import type { PatternPipelineInput } from "@repo/analytics";
-
-const { MockBullQueue, mockQueues } = vi.hoisted(() => {
-  const queues = new Map<string, any>();
-  class MockBullQueue {
-    jobs: any[] = [];
-    constructor(public name: string, public options: any) { queues.set(name, this); }
-    add = vi.fn().mockImplementation(async (jobName: string, data: any, opts: any) => {
-      const job = { id: opts?.jobId ?? "mock-job", name: jobName, data, opts };
-      this.jobs.push(job);
-      return job;
-    });
-    close = vi.fn().mockResolvedValue(undefined);
-  }
-  return { MockBullQueue, mockQueues: queues };
-});
-
-vi.mock("bullmq", () => ({
-  Queue: MockBullQueue,
-  Worker: class MockWorker {
-    close = vi.fn().mockResolvedValue(undefined);
-    on = vi.fn().mockReturnValue(this);
-  },
-}));
 
 const USER = "user-vertical-slice";
 const WINDOW = { start: "2026-09-01T00:00:00.000Z", end: "2026-09-15T00:00:00.000Z" };
@@ -83,6 +56,10 @@ function createFakeDb() {
     $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(db),
     runs,
     findings,
+    user: {
+      findUnique: async ({ where }: { where: { id: string } }) =>
+        where.id === USER ? { id: USER } : null,
+    },
     patternAnalysisRun: {
       findFirst: async ({ where }: any) =>
         runs.filter((r) => Object.entries(where).every(([k, v]) => (r as any)[k] === v)).slice(-1)[0] ?? null,
@@ -118,9 +95,7 @@ function createFakeDb() {
 }
 
 describe("Pattern vertical slice", () => {
-  beforeEach(() => { mockQueues.clear(); });
-
-  it("producer outbox row -> queue -> worker -> durable rows readable by the API contract", async () => {
+  it("producer outbox row -> direct worker -> durable rows readable by the API contract", async () => {
     const db = createFakeDb();
 
     // 1. Producer: exactly what POST /api/patterns/analyze writes.
@@ -148,17 +123,7 @@ describe("Pattern vertical slice", () => {
       maxAttempts: 5,
     };
 
-    // 2. Publisher dispatches through real queue validation (mocked BullMQ transport).
-    const queueManager = new QueueManager({ connection: {} as any });
-    const publisher = new OutboxPublisher({ db: db as any, queueManager });
-    expect(await publisher.dispatchEvent(outboxRow)).toBe(true);
-    const queue = mockQueues.get(PRODUCTIVEHIX_QUEUES.PATTERN_ANALYSIS);
-    expect(queue.jobs).toHaveLength(1);
-    const envelope = queue.jobs[0].data;
-    expect(envelope.eventType).toBe("pattern.analysis.requested");
-    expect(envelope.payload.userId).toBe(USER);
-
-    // 3. Worker runs the envelope through real BaseWorker semantics.
+    // 2. Publisher executes the envelope directly through real BaseWorker semantics.
     const provider: PatternDataProvider = {
       loadInput: async () => emptyInput(),
       readWatermarks: async () => ({
@@ -171,14 +136,16 @@ describe("Pattern vertical slice", () => {
       }),
     };
     const worker = new PatternWorker(db as never, provider);
-    const result = await worker.run(envelope, {
+    const publisher = new OutboxPublisher({
+      db: db as any,
+      patternWorker: worker as never,
+      locks: new InMemoryLockProvider(),
       metrics: new MemoryWorkerMetricsCollector(),
       logger: new MemoryWorkerLogger(),
-      idempotencyProvider: new InMemoryLockProvider(),
     });
-    expect(result.status).toBe("SUCCEEDED");
+    expect(await publisher.dispatchEvent(outboxRow)).toBe(true);
 
-    // 4. Durable rows match the GET /api/patterns read contract.
+    // 3. Durable rows match the GET /api/patterns read contract.
     expect(db.runs).toHaveLength(1);
     expect(db.runs[0].status).toBe("COMPLETED");
     expect(db.runs[0].state).toBe("not-connected");

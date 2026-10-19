@@ -1,13 +1,13 @@
 /**
- * Group 1 Acceptance Gate Test Suite
- * 
+ * Group 1 Acceptance Gate Test Suite (Redis-free)
+ *
  * Verifies all 8 required cases (Case A through Case H) across the unified pipeline:
- * Producer → Queue → WorkerRuntime → BaseWorker → TestWorker
+ * Publisher → direct dispatch → BaseWorker → TestWorker
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { WorkerRuntime } from '../runtime/worker-runtime';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { TestWorker } from './test-worker';
+import { OutboxPublisher } from '../outbox/publisher';
 import { InMemoryLockProvider } from '../base/idempotency';
 import { MemoryWorkerMetricsCollector } from '../shared/metrics';
 import {
@@ -16,69 +16,36 @@ import {
   WorkerTimeoutError,
 } from '../base/errors';
 
-const { MockBullWorker, MockBullQueue, mockBullWorkerInstances } = vi.hoisted(() => {
-  const instances: any[] = [];
-
-  class MockBullWorker {
-    name: string;
-    handler: any;
-    options: any;
-    closed = false;
-    close = vi.fn().mockImplementation(async function (this: MockBullWorker) {
-      this.closed = true;
-    });
-
-    constructor(queueName: string, handler: any, options: any) {
-      this.name = queueName;
-      this.handler = handler;
-      this.options = options;
-      instances.push(this);
-    }
-
-    on = vi.fn().mockReturnValue(this);
-  }
-
-  class MockBullQueue {
-    name: string;
-    constructor(name: string) {
-      this.name = name;
-    }
-    add = vi.fn().mockResolvedValue({ id: 'mock-job-gate' });
-    close = vi.fn().mockResolvedValue(undefined);
-  }
-
-  return { MockBullWorker, MockBullQueue, mockBullWorkerInstances: instances };
-});
-
-vi.mock('bullmq', () => {
-  return {
-    Worker: MockBullWorker,
-    Queue: MockBullQueue,
-  };
-});
-
 describe('Group 1 Acceptance Gate: Cases A through H Proof', () => {
   let worker: TestWorker;
-  let runtime: WorkerRuntime;
   let metrics: MemoryWorkerMetricsCollector;
   let lockProvider: InMemoryLockProvider;
-  let activeBullWorker: any;
 
-  beforeEach(async () => {
-    worker = new TestWorker();
-    metrics = new MemoryWorkerMetricsCollector();
-    lockProvider = new InMemoryLockProvider();
-
-    runtime = new WorkerRuntime({
-      connection: {} as any,
+  /** Direct-dispatch equivalent of the old BullMQ handler shim. */
+  const dispatch = (job: {
+    id: string;
+    data: Record<string, unknown>;
+    attemptsMade: number;
+    opts: { attempts: number };
+  }) => {
+    const correlationId =
+      (job.data && typeof job.data === 'object' && 'jobCorrelationId' in job.data
+        ? String((job.data as Record<string, unknown>).jobCorrelationId)
+        : undefined) ?? job.id;
+    return worker.run(job.data, {
+      jobId: job.id,
+      correlationId,
+      attempt: job.attemptsMade + 1,
+      maxAttempts: job.opts.attempts ?? 3,
       idempotencyProvider: lockProvider,
       metrics,
     });
+  };
 
-    runtime.registerWorker(worker);
-    await runtime.start();
-    activeBullWorker =
-      mockBullWorkerInstances[mockBullWorkerInstances.length - 1];
+  beforeEach(() => {
+    worker = new TestWorker();
+    metrics = new MemoryWorkerMetricsCollector();
+    lockProvider = new InMemoryLockProvider();
   });
 
   // ==========================================================================
@@ -95,12 +62,12 @@ describe('Group 1 Acceptance Gate: Cases A through H Proof', () => {
       },
       attemptsMade: 0,
       opts: { attempts: 3 },
-      updateProgress: vi.fn(),
     };
 
-    const result = await activeBullWorker.handler(job);
+    const result = await dispatch(job);
 
     expect(result.status).toBe('SUCCEEDED');
+    if (result.status !== 'SUCCEEDED') throw new Error('expected SUCCEEDED');
     expect(result.value.value).toBe('alpha-value');
     expect(worker.executionCount).toBe(1);
     expect(worker.durableStore.get('case-a-test')).toBeDefined();
@@ -108,7 +75,7 @@ describe('Group 1 Acceptance Gate: Cases A through H Proof', () => {
   });
 
   // ==========================================================================
-  // Case B: retryable error -> BullMQ retry -> success
+  // Case B: retryable error -> publisher retry -> success
   // ==========================================================================
   it('Case B: transient failure triggers retryable error, subsequent attempt succeeds', async () => {
     // Attempt 1: fails with retryable error
@@ -122,12 +89,11 @@ describe('Group 1 Acceptance Gate: Cases A through H Proof', () => {
       },
       attemptsMade: 0, // attempt 1
       opts: { attempts: 3 },
-      updateProgress: vi.fn(),
     };
 
     let errorAttempt1: any = null;
     try {
-      await activeBullWorker.handler(jobAttempt1);
+      await dispatch(jobAttempt1);
     } catch (err) {
       errorAttempt1 = err;
     }
@@ -136,14 +102,15 @@ describe('Group 1 Acceptance Gate: Cases A through H Proof', () => {
     expect(errorAttempt1.isRetryable).toBe(true);
     expect(metrics.getCount('job.retryable_failure', worker.queueName)).toBe(1);
 
-    // BullMQ Retry: Attempt 2
+    // Publisher retry: Attempt 2
     const jobAttempt2 = {
       ...jobAttempt1,
       attemptsMade: 1, // attempt 2
     };
 
-    const resultAttempt2 = await activeBullWorker.handler(jobAttempt2);
+    const resultAttempt2 = await dispatch(jobAttempt2);
     expect(resultAttempt2.status).toBe('SUCCEEDED');
+    if (resultAttempt2.status !== 'SUCCEEDED') throw new Error('expected SUCCEEDED');
     expect(resultAttempt2.value.value).toBe('retryable-data');
     expect(metrics.getCount('job.succeeded', worker.queueName)).toBe(1);
   });
@@ -161,12 +128,11 @@ describe('Group 1 Acceptance Gate: Cases A through H Proof', () => {
       },
       attemptsMade: 0,
       opts: { attempts: 3 },
-      updateProgress: vi.fn(),
     };
 
     let caughtError: any = null;
     try {
-      await activeBullWorker.handler(job);
+      await dispatch(job);
     } catch (err) {
       caughtError = err;
     }
@@ -193,12 +159,11 @@ describe('Group 1 Acceptance Gate: Cases A through H Proof', () => {
       },
       attemptsMade: 0,
       opts: { attempts: 3 },
-      updateProgress: vi.fn(),
     };
 
     let caughtError: any = null;
     try {
-      await activeBullWorker.handler(job);
+      await dispatch(job);
     } catch (err) {
       caughtError = err;
     }
@@ -222,10 +187,9 @@ describe('Group 1 Acceptance Gate: Cases A through H Proof', () => {
       },
       attemptsMade: 0,
       opts: { attempts: 3 },
-      updateProgress: vi.fn(),
     };
 
-    const result = await activeBullWorker.handler(job);
+    const result = await dispatch(job);
 
     expect(result.status).toBe('SUPERSEDED');
     expect(worker.executionCount).toBe(0);
@@ -246,10 +210,9 @@ describe('Group 1 Acceptance Gate: Cases A through H Proof', () => {
       },
       attemptsMade: 0,
       opts: { attempts: 3 },
-      updateProgress: vi.fn(),
     };
 
-    const result = await activeBullWorker.handler(job);
+    const result = await dispatch(job);
 
     expect(result.status).toBe('SUPERSEDED');
     expect(worker.executionCount).toBe(1);
@@ -271,12 +234,12 @@ describe('Group 1 Acceptance Gate: Cases A through H Proof', () => {
       },
       attemptsMade: 0,
       opts: { attempts: 3 },
-      updateProgress: vi.fn(),
     };
 
     // First execution
-    const result1 = await activeBullWorker.handler(job1);
+    const result1 = await dispatch(job1);
     expect(result1.status).toBe('SUCCEEDED');
+    if (result1.status !== 'SUCCEEDED') throw new Error('expected SUCCEEDED');
     expect(worker.executionCount).toBe(1);
 
     // Duplicate execution with same testId
@@ -290,41 +253,36 @@ describe('Group 1 Acceptance Gate: Cases A through H Proof', () => {
       },
       attemptsMade: 0,
       opts: { attempts: 3 },
-      updateProgress: vi.fn(),
     };
 
-    const result2 = await activeBullWorker.handler(job2);
+    const result2 = await dispatch(job2);
     expect(result2.status).toBe('SUCCEEDED');
+    if (result2.status !== 'SUCCEEDED') throw new Error('expected SUCCEEDED');
     expect(result2.value.value).toBe('idempotent-result'); // returned existing output
     expect(worker.executionCount).toBe(1); // did not re-execute!
   });
 
   // ==========================================================================
-  // Case H: SIGTERM -> stop intake -> drain active work -> close resources -> exit
+  // Case H: SIGTERM -> stop intake -> drain active work -> close resources
   // ==========================================================================
-  it('Case H: shutdown stops intake, closes BullMQ workers, and drains active jobs', async () => {
-    expect(runtime.isRunning()).toBe(true);
-
-    await runtime.stop();
-
-    expect(runtime.isRunning()).toBe(false);
-    expect(activeBullWorker.closed).toBe(true);
-    expect(activeBullWorker.close).toHaveBeenCalled();
-
-    // Trying to process job after shutdown should be rejected
-    const lateJob = {
-      id: 'job-late',
-      data: {
-        testId: 'late-test',
-        expectedOutcome: 'SUCCESS',
+  it('Case H: publisher shutdown stops intake and drains in-flight batches', async () => {
+    const db: any = {
+      outboxEvent: {
+        updateMany: async () => ({ count: 0 }),
+        findMany: async () => [],
       },
-      attemptsMade: 0,
-      opts: { attempts: 1 },
-      updateProgress: vi.fn(),
+      timelineWork: {
+        updateMany: async () => ({ count: 0 }),
+        findMany: async () => [],
+      },
     };
+    const publisher = new OutboxPublisher({ db: db as never, pollIntervalMs: 10 });
+    expect(publisher.isPublisherRunning()).toBe(false);
 
-    await expect(activeBullWorker.handler(lateJob)).rejects.toThrow(
-      'Worker runtime is shutting down'
-    );
+    publisher.start();
+    expect(publisher.isPublisherRunning()).toBe(true);
+
+    await publisher.stop();
+    expect(publisher.isPublisherRunning()).toBe(false);
   });
 });
